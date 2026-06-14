@@ -1,0 +1,114 @@
+/**
+ * @fileoverview Domain and raw types for the eCFR service (titles, structure,
+ * versioner full text, search). Raw types mirror the real API payloads.
+ * @module services/ecfr/types
+ */
+
+/** A title entry from `/versioner/v1/titles.json`. */
+export interface EcfrTitle {
+  latestAmendedOn: string | null;
+  latestIssueDate: string | null;
+  name: string;
+  number: number;
+  reserved: boolean;
+  upToDateAsOf: string | null;
+}
+
+/** Raw title object from the API. */
+export interface RawEcfrTitle {
+  latest_amended_on?: string | null;
+  latest_issue_date?: string | null;
+  name?: string;
+  number?: number;
+  reserved?: boolean;
+  up_to_date_as_of?: string | null;
+}
+
+/** A node in a CFR structure tree (title → chapter → … → section). */
+export interface EcfrStructureNode {
+  cfrCite: string | null;
+  description: string | null;
+  identifier: string;
+  label: string;
+  reserved: boolean;
+  type: string;
+}
+
+/** Raw structure node (recursive `children`). */
+export interface RawEcfrStructureNode {
+  children?: RawEcfrStructureNode[];
+  identifier?: string;
+  label?: string;
+  label_description?: string | null;
+  reserved?: boolean;
+  type?: string;
+}
+
+/** One section parsed from versioner XML. */
+export interface EcfrSection {
+  bodyText: string;
+  heading: string;
+  section: string;
+}
+
+/** Result of a codified-text fetch (a section, or a whole part). */
+export interface EcfrSectionResult {
+  bodyText: string;
+  date: string;
+  heading: string;
+  part: string;
+  section: string | null;
+  sections?: EcfrSection[];
+  title: number;
+}
+
+/** One hit from the live eCFR search API. */
+export interface EcfrSearchHit {
+  cfrCite: string;
+  excerpt: string;
+  heading: string;
+  hierarchyPath: string;
+  part: string;
+  section: string | null;
+  title: number;
+}
+
+/** Live search response. */
+export interface EcfrSearchResponse {
+  results: EcfrSearchHit[];
+  totalCount: number;
+}
+
+/** Raw live-search result item. */
+export interface RawEcfrSearchResult {
+  full_text_excerpt?: string | null;
+  headings?: {
+    section?: string | null;
+    part?: string | null;
+  } | null;
+  hierarchy?: {
+    title?: string | number | null;
+    chapter?: string | null;
+    subchapter?: string | null;
+    part?: string | null;
+    subpart?: string | null;
+    section?: string | null;
+  } | null;
+  hierarchy_headings?: {
+    title?: string | null;
+    chapter?: string | null;
+    subchapter?: string | null;
+    part?: string | null;
+    section?: string | null;
+  } | null;
+  score?: number | null;
+}
+
+/** Raw live-search envelope. */
+export interface RawEcfrSearchResponse {
+  meta?: {
+    total_count?: number;
+    total_pages?: number;
+  } | null;
+  results?: RawEcfrSearchResult[];
+}

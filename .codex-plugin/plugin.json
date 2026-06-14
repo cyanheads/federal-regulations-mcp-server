@@ -1,0 +1,25 @@
+{
+  "name": "federal-regulations-mcp-server",
+  "version": "0.1.0",
+  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
+  },
+  "homepage": "https://github.com/cyanheads/federal-regulations-mcp-server",
+  "repository": "https://github.com/cyanheads/federal-regulations-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "federal-register", "ecfr", "regulations-gov"],
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "federal-regulations-mcp-server",
+    "shortDescription": "US federal regulations over the Federal Register, eCFR, and Regulations.gov.",
+    "longDescription": "An MCP workflow server over three official US federal regulatory sources: the Federal Register (the daily journal of proposed/final rules and notices, keyless), the eCFR (the codified Code of Federal Regulations, point-in-time full text, mirrored locally for fast lookup and FTS5 search), and Regulations.gov v4 (rulemaking dockets and public comments, key-gated). Every Federal Register document carries the docket ID and CFR-part handles that chain across sources, so a rule can be traced proposal → comments → final → codified text.",
+    "developerName": "cyanheads",
+    "category": "data",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/cyanheads/federal-regulations-mcp-server",
+    "defaultPrompt": []
+  }
+}

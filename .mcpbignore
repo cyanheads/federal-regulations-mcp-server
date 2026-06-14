@@ -1,0 +1,19 @@
+.env*
+.mcpregistry_*
+/.claude/
+/.agents/
+/skills/
+/Dockerfile
+/bun.lock
+/bunfig.toml
+/wrangler.toml
+/biome.json
+/tsconfig*.json
+/vitest.config.ts
+
+# eCFR mirror data — large local SQLite store, never ship in the bundle.
+/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*

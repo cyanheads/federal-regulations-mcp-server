@@ -1,0 +1,21 @@
+{
+  "name": "federal-regulations-mcp-server",
+  "version": "0.1.0",
+  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads"
+  },
+  "homepage": "https://github.com/cyanheads/federal-regulations-mcp-server",
+  "repository": "https://github.com/cyanheads/federal-regulations-mcp-server",
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "federal-regulations-mcp-server": {
+      "command": "npx",
+      "args": ["-y", "@cyanheads/federal-regulations-mcp-server"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "REGULATIONS_GOV_API_KEY": "${REGULATIONS_GOV_API_KEY}"
+      }
+    }
+  }
+}
