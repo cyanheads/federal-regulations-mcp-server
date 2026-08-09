@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-06-20 11:33:01
+Generated on: 2026-08-09 23:27:41
 
 ```text
 federal-regulations-mcp-server/
@@ -11,10 +11,12 @@ federal-regulations-mcp-server/
 │   ├── mcp.json
 │   └── plugin.json
 ├── .github/
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.yml
-│       ├── config.yml
-│       └── feature_request.yml
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
+│   ├── FUNDING.yml
+│   └── SECURITY.md
 ├── .vscode/
 │   ├── extensions.json
 │   └── settings.json
@@ -170,6 +172,7 @@ federal-regulations-mcp-server/
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── services/
+│   │   ├── ecfr-mirror.test.ts
 │   │   ├── ecfr-service.test.ts
 │   │   ├── ecfr-xml.test.ts
 │   │   ├── federal-register-service.test.ts
@@ -184,12 +187,15 @@ federal-regulations-mcp-server/
 │       └── search-rules.tool.test.ts
 ├── .dockerignore
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .mcpbignore
 ├── AGENTS.md
 ├── biome.json
 ├── bun.lock
+├── bunfig.toml
 ├── CHANGELOG.md
+├── CITATION.cff
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile
