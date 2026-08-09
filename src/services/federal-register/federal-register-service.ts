@@ -137,7 +137,12 @@ export class FederalRegisterService {
     const url = `${this.baseUrl}/documents/${encodeURIComponent(documentNumber)}.json?${search.toString()}`;
     let raw: RawFrDocument;
     try {
-      raw = await this.fetchJson<RawFrDocument>(url, ctx, 'FederalRegisterService.getDocument');
+      raw = await this.fetchJson<RawFrDocument>(
+        url,
+        ctx,
+        'FederalRegisterService.getDocument',
+        [404],
+      );
     } catch (err) {
       // The FR API 404s for a nonexistent document number. Translate it into an
       // actionable not_found so the tool's contract recovery surfaces, rather
@@ -200,11 +205,19 @@ export class FederalRegisterService {
   }
 
   /** Fetch + parse JSON with retry; HTML error pages become transient errors. */
-  private fetchJson<T>(url: string, ctx: Context, operation: string): Promise<T> {
+  private fetchJson<T>(
+    url: string,
+    ctx: Context,
+    operation: string,
+    expectedStatuses?: number[],
+  ): Promise<T> {
     const reqCtx = toRequestContext(ctx, operation);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
+          signal: ctx.signal,
+          ...(expectedStatuses && { expectedStatuses }),
+        });
         const text = await response.text();
         if (looksLikeHtml(text)) {
           throw serviceUnavailable(

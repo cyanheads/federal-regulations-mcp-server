@@ -29,7 +29,7 @@ class InMemoryProvider implements IStorageProvider {
     return `${tenantId}:${key}`;
   }
 
-  async clear(tenantId: string): Promise<number> {
+  clear(tenantId: string): Promise<number> {
     let n = 0;
     for (const key of this.store.keys()) {
       if (key.startsWith(`${tenantId}:`)) {
@@ -37,46 +37,48 @@ class InMemoryProvider implements IStorageProvider {
         n++;
       }
     }
-    return n;
+    return Promise.resolve(n);
   }
 
-  async delete(tenantId: string, key: string): Promise<boolean> {
-    return this.store.delete(this.k(tenantId, key));
+  delete(tenantId: string, key: string): Promise<boolean> {
+    return Promise.resolve(this.store.delete(this.k(tenantId, key)));
   }
 
-  async deleteMany(tenantId: string, keys: string[]): Promise<number> {
+  deleteMany(tenantId: string, keys: string[]): Promise<number> {
     let n = 0;
     for (const key of keys) if (this.store.delete(this.k(tenantId, key))) n++;
-    return n;
+    return Promise.resolve(n);
   }
 
-  async get<T>(tenantId: string, key: string): Promise<T | null> {
-    return (this.store.get(this.k(tenantId, key)) as T) ?? null;
+  get<T>(tenantId: string, key: string): Promise<T | null> {
+    return Promise.resolve((this.store.get(this.k(tenantId, key)) as T) ?? null);
   }
 
-  async getMany<T>(tenantId: string, keys: string[]): Promise<Map<string, T>> {
+  getMany<T>(tenantId: string, keys: string[]): Promise<Map<string, T>> {
     const out = new Map<string, T>();
     for (const key of keys) {
       const v = this.store.get(this.k(tenantId, key));
       if (v !== undefined) out.set(key, v as T);
     }
-    return out;
+    return Promise.resolve(out);
   }
 
-  async list(tenantId: string, prefix: string): Promise<ListResult> {
+  list(tenantId: string, prefix: string): Promise<ListResult> {
     const full = `${tenantId}:${prefix}`;
     const keys = [...this.store.keys()]
       .filter((k) => k.startsWith(full))
       .map((k) => k.slice(tenantId.length + 1));
-    return { keys };
+    return Promise.resolve({ keys });
   }
 
-  async set(tenantId: string, key: string, value: unknown): Promise<void> {
+  set(tenantId: string, key: string, value: unknown): Promise<void> {
     this.store.set(this.k(tenantId, key), value);
+    return Promise.resolve();
   }
 
-  async setMany(tenantId: string, entries: Map<string, unknown>): Promise<void> {
+  setMany(tenantId: string, entries: Map<string, unknown>): Promise<void> {
     for (const [key, value] of entries) this.store.set(this.k(tenantId, key), value);
+    return Promise.resolve();
   }
 }
 
