@@ -4,7 +4,7 @@
 # This stage installs all dependencies (including dev), builds the TypeScript
 # source code into JavaScript, and prepares the production assets.
 # ==============================================================================
-FROM oven/bun:1.3 AS build
+FROM oven/bun:1.3.14 AS build
 
 WORKDIR /usr/src/app
 
@@ -15,8 +15,10 @@ COPY package.json bun.lock ./
 # lifecycle scripts: better-sqlite3's native gyp compile breaks under the bun
 # base image, and it is never loaded at runtime (Bun's built-in bun:sqlite
 # drives the mirror reads; the build-time ingest path resolves it on a real
-# Node host, not in this image).
-RUN bun install --frozen-lockfile --ignore-scripts
+# Node host, not in this image). The BuildKit cache mount persists Bun's global
+# package cache across builds.
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the source code
 COPY . .
@@ -32,7 +34,7 @@ RUN bun run build
 # application. It uses a slim base image and only includes production
 # dependencies and build artifacts.
 # ==============================================================================
-FROM oven/bun:1.3-slim AS production
+FROM oven/bun:1.3.14-slim AS production
 
 WORKDIR /usr/src/app
 
@@ -53,14 +55,16 @@ COPY package.json bun.lock ./
 
 # Install only production dependencies, ignoring any lifecycle scripts (like 'prepare')
 # that are not needed in the final production image.
-RUN bun install --production --frozen-lockfile --ignore-scripts
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --production --frozen-lockfile --ignore-scripts
 
 # Conditionally install OpenTelemetry optional peer dependencies (Tier 3).
 # These are not bundled by default to keep the base image lean. Enable at build time
 # with: docker build --build-arg OTEL_ENABLED=true
 ARG OTEL_ENABLED=true
-RUN if [ "$OTEL_ENABLED" = "true" ]; then \
-      bun add @hono/otel \
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    if [ "$OTEL_ENABLED" = "true" ]; then \
+      bun add --omit=dev --ignore-scripts @hono/otel \
         @opentelemetry/instrumentation-http \
         @opentelemetry/exporter-metrics-otlp-http \
         @opentelemetry/exporter-trace-otlp-http \
