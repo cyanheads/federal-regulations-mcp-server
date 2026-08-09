@@ -10,6 +10,7 @@
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import {
+  invalidParams,
   JsonRpcErrorCode,
   McpError,
   notFound,
@@ -37,9 +38,19 @@ const XML_TIMEOUT_MS = 60_000;
 /** Bulk whole-title XML can be ~150 MB (Title 40); allow up to 10 minutes. */
 const FULL_TITLE_TIMEOUT_MS = 600_000;
 const BASE_DELAY_MS = 400;
+/** The eCFR index date advances at most once a day; re-read it at most this often. */
+const CURRENT_DATE_TTL_MS = 15 * 60_000;
 
 /** eCFR retains point-in-time versions back to roughly this date. */
 export const ECFR_EARLIEST_DATE = '2017-01-01';
+
+/**
+ * Earliest date the search index accepts — confirmed against the endpoint, which
+ * rejects everything before it with "The first date content is available is
+ * 1/03/2017." Uniform across titles; the versioner's own floor is looser, which
+ * is why {@link ECFR_EARLIEST_DATE} is a separate value.
+ */
+const ECFR_SEARCH_EARLIEST_DATE = '2017-01-03';
 
 function looksLikeHtml(text: string): boolean {
   return /^\s*<(!DOCTYPE\s+html|html[\s>])/i.test(text);
@@ -50,6 +61,7 @@ const CITABLE_TYPES = new Set(['part', 'section']);
 
 export class EcfrService {
   private readonly baseUrl: string;
+  private currentDateCache: { date: string; expiresAt: number } | undefined;
 
   constructor(_config: AppConfig, _storage: StorageService) {
     this.baseUrl = getServerConfig().ecfrBaseUrl.replace(/\/$/, '');
@@ -83,6 +95,29 @@ export class EcfrService {
     const titles = await this.listTitles(ctx);
     const match = titles.find((t) => t.number === title);
     return match?.latestIssueDate ?? match?.upToDateAsOf ?? today();
+  }
+
+  /**
+   * The date eCFR currently serves as "now" (`meta.date` on the titles document).
+   * The search API rejects any date past it, so a "current" search must pin to
+   * this value rather than to the caller's clock. Cached for a few minutes.
+   */
+  async currentDate(ctx: Context): Promise<string> {
+    if (this.currentDateCache && Date.now() < this.currentDateCache.expiresAt) {
+      return this.currentDateCache.date;
+    }
+    const url = `${this.baseUrl}/versioner/v1/titles.json`;
+    const raw = await this.fetchJson<{ meta?: { date?: string } }>(
+      url,
+      ctx,
+      'EcfrService.currentDate',
+    );
+    const date = raw.meta?.date;
+    if (!date) {
+      throw serviceUnavailable('eCFR did not report a current index date.', { url });
+    }
+    this.currentDateCache = { date, expiresAt: Date.now() + CURRENT_DATE_TTL_MS };
+    return date;
   }
 
   /**
@@ -146,7 +181,7 @@ export class EcfrService {
     const cite = `${title} CFR ${part}${section ? ` § ${section}` : ''}`;
     let xml: string;
     try {
-      xml = await this.fetchXml(url, ctx, 'EcfrService.getSectionText');
+      xml = await this.fetchXml(url, ctx, 'EcfrService.getSectionText', XML_TIMEOUT_MS, [404]);
     } catch (err) {
       // The versioner 404s for a nonexistent part/section (or a date past the
       // title's latest issue). Translate that into an actionable not_found so the
@@ -222,6 +257,7 @@ export class EcfrService {
         url,
         ctx,
         'EcfrService.hierarchyPath',
+        [404],
       );
       const ancestors = raw.ancestors ?? [];
       const parts = ancestors
@@ -234,31 +270,73 @@ export class EcfrService {
     }
   }
 
-  /** Full-text search the live eCFR (`/search/v1/results`). */
+  /**
+   * Full-text search the live eCFR (`/search/v1/results`).
+   *
+   * The index holds every *version* of every section, so an undated query mixes
+   * superseded text with current text and returns the same section repeatedly.
+   * `date` selects the versions in effect on that day — callers pass either the
+   * caller's historical date or {@link EcfrService.currentDate} for "now", never
+   * nothing. Title scope goes through `hierarchy[title]`; `conditions[title]` is
+   * rejected outright by the endpoint.
+   */
   async search(
     query: string,
     title: number | undefined,
     perPage: number,
+    date: string,
     ctx: Context,
   ): Promise<EcfrSearchResponse> {
     const search = new URLSearchParams({
       query,
       per_page: String(perPage),
+      date,
     });
-    if (typeof title === 'number') search.set('conditions[title]', String(title));
+    if (typeof title === 'number') search.set('hierarchy[title]', String(title));
     const url = `${this.baseUrl}/search/v1/results?${search.toString()}`;
-    const raw = await this.fetchJson<RawEcfrSearchResponse>(url, ctx, 'EcfrService.search');
+
+    let raw: RawEcfrSearchResponse;
+    try {
+      raw = await this.fetchJson<RawEcfrSearchResponse>(url, ctx, 'EcfrService.search', [400]);
+    } catch (err) {
+      const rejection = err instanceof McpError ? searchRejection(err) : null;
+      if (!rejection) throw err;
+      // eCFR states its earliest indexed date when the date is too early, but says
+      // only "not currently available" when it is too late — so the window is
+      // spelled out here, with both ends, rather than left to the caller to guess.
+      if (rejection.fields.includes('date')) {
+        const latest = await this.currentDate(ctx).catch(() => null);
+        throw invalidParams(
+          `${rejection.detail} The search index covers ${ECFR_SEARCH_EARLIEST_DATE} through ${latest ?? "eCFR's current index date"}.`,
+          {
+            reason: 'date_out_of_range',
+            date,
+            ...ctx.recoveryFor('date_out_of_range'),
+          },
+        );
+      }
+      throw invalidParams(rejection.detail, { date, title: title ?? null });
+    }
+
     return {
       totalCount: raw.meta?.total_count ?? (raw.results ?? []).length,
       results: (raw.results ?? []).map((r) => normalizeSearchHit(r)),
     };
   }
 
-  private fetchJson<T>(url: string, ctx: Context, operation: string): Promise<T> {
+  private fetchJson<T>(
+    url: string,
+    ctx: Context,
+    operation: string,
+    expectedStatuses?: number[],
+  ): Promise<T> {
     const reqCtx = toRequestContext(ctx, operation);
     return withRetry(
       async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
+          signal: ctx.signal,
+          ...(expectedStatuses && { expectedStatuses }),
+        });
         const text = await response.text();
         if (looksLikeHtml(text)) {
           throw serviceUnavailable(
@@ -276,12 +354,14 @@ export class EcfrService {
     ctx: Context,
     operation: string,
     timeoutMs: number = XML_TIMEOUT_MS,
+    expectedStatuses?: number[],
   ): Promise<string> {
     const reqCtx = toRequestContext(ctx, operation);
     return withRetry(
       async () => {
         const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
           signal: ctx.signal,
+          ...(expectedStatuses && { expectedStatuses }),
         });
         const text = await response.text();
         if (looksLikeHtml(text)) {
@@ -294,6 +374,32 @@ export class EcfrService {
       { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
     );
   }
+}
+
+/**
+ * Read an eCFR search rejection into one sentence plus the parameters it faulted.
+ * A 400 from `/search/v1/results` carries `{"errors":{"<param>":["…"]}}`. Returns
+ * null for anything else, so the original error propagates untouched.
+ */
+function searchRejection(err: McpError): { detail: string; fields: string[] } | null {
+  if (err.code !== JsonRpcErrorCode.InvalidParams) return null;
+  const body = err.data?.body;
+  if (typeof body !== 'string') return null;
+  let parsed: { errors?: Record<string, string[] | string> };
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    return null;
+  }
+  const entries = Object.entries(parsed.errors ?? {});
+  if (entries.length === 0) return null;
+  const messages = entries.flatMap(([field, value]) =>
+    (Array.isArray(value) ? value : [value]).map((m) => `${field}: ${m}`),
+  );
+  return {
+    detail: `eCFR rejected the search — ${messages.join('; ')}`,
+    fields: entries.map(([f]) => f),
+  };
 }
 
 /** Build a `${title} CFR ${identifier}` cite for citable node types. */
@@ -342,28 +448,55 @@ function stripSearchHtml(text: string): string {
     .trim();
 }
 
+/** First value that survives tag-stripping, or null when every candidate is empty. */
+function firstHeading(...candidates: (string | null | undefined)[]): string | null {
+  for (const candidate of candidates) {
+    const cleaned = stripSearchHtml(candidate ?? '');
+    if (cleaned) return cleaned;
+  }
+  return null;
+}
+
 function normalizeSearchHit(r: RawEcfrSearchResult): EcfrSearchHit {
   const h = r.hierarchy ?? {};
-  const headings = r.hierarchy_headings ?? {};
+  const labels = r.hierarchy_headings ?? {};
+  const names = r.headings ?? {};
   const title = typeof h.title === 'number' ? h.title : Number.parseInt(String(h.title ?? '0'), 10);
   const part = h.part ?? '';
   const section = h.section ?? null;
+  const appendix = h.appendix ?? null;
 
   const pathSegments: string[] = [];
   if (h.title) pathSegments.push(`Title ${h.title}`);
-  if (headings.chapter) pathSegments.push(stripSearchHtml(headings.chapter));
-  if (headings.subchapter) pathSegments.push(stripSearchHtml(headings.subchapter));
-  if (headings.part) pathSegments.push(stripSearchHtml(headings.part));
+  for (const level of [labels.chapter, labels.subchapter, labels.part]) {
+    const label = stripSearchHtml(level ?? '');
+    if (label) pathSegments.push(label);
+  }
+  // An appendix hit carries no section, so the appendix label is what places it
+  // inside the part.
   if (section) pathSegments.push(`§ ${section}`);
+  else if (appendix) pathSegments.push(stripSearchHtml(appendix));
 
-  const rawHeading = headings.section ?? headings.part ?? r.headings?.section ?? '(untitled)';
+  // `headings` names the node ("Ambient air quality monitoring requirements.");
+  // `hierarchy_headings` only labels it ("§ 51.190"), which `cfrCite` already
+  // says. Take the name at the most specific level present, and fall back to the
+  // structural label only when eCFR omits the name.
+  const heading =
+    firstHeading(
+      names.section,
+      names.appendix,
+      names.part,
+      labels.section,
+      labels.appendix,
+      labels.part,
+    ) ?? '(untitled)';
   const cfrCite = section ? `${title} CFR ${section}` : `${title} CFR ${part}`;
 
   return {
     title: Number.isNaN(title) ? 0 : title,
     part,
     section,
-    heading: stripSearchHtml(rawHeading),
+    heading,
     hierarchyPath: pathSegments.join(' › '),
     excerpt: stripSearchHtml(r.full_text_excerpt ?? ''),
     cfrCite,

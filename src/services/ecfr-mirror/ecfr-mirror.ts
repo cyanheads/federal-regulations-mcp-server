@@ -7,12 +7,16 @@
  * Build-time ingest uses `better-sqlite3` on Node; runtime reads go through Bun's
  * `bun:sqlite` — both behind the framework's runtime-agnostic SQLite handle.
  *
- * CRITICAL build-correctness contract: the auxiliary `cfr_part_index` table is
- * created idempotently (`CREATE TABLE IF NOT EXISTS`) at the top of the `sync`
- * routine via the raw handle — NOT via a framework migration. The MirrorService
- * skips migrations on a brand-new DB, so a migration-created aux table fails the
- * cold `mirror:init` with `no such table`. Idempotent DDL at sync start is the
- * contract.
+ * CRITICAL build-correctness contract: the auxiliary tables (`cfr_part_index`,
+ * `cfr_mirror_meta`) are created idempotently (`CREATE TABLE IF NOT EXISTS`) at
+ * the top of the `sync` routine via the raw handle — NOT via a framework
+ * migration. The MirrorService skips migrations on a brand-new DB, so a
+ * migration-created aux table fails the cold `mirror:init` with `no such table`.
+ * Idempotent DDL at sync start is the contract.
+ *
+ * Those two aux tables also carry the mirror's title coverage — which titles the
+ * index holds, and which titles the whole Code had at ingest time. `mirrorScope`
+ * reads them so a partial mirror is never asked a question it cannot answer.
  *
  * @module services/ecfr-mirror/ecfr-mirror
  */
@@ -35,6 +39,10 @@ import { parseSections } from '@/services/ecfr/xml.js';
 const TABLE = 'cfr_sections';
 /** Auxiliary table for fast title/part browse. */
 const PART_INDEX_TABLE = 'cfr_part_index';
+/** Auxiliary key/value table for facts about the ingest itself. */
+const META_TABLE = 'cfr_mirror_meta';
+/** Meta key holding the non-reserved eCFR title list the last sync saw upstream. */
+const CORPUS_TITLES_KEY = 'corpus_titles';
 
 /** Composite primary-key value for a section row: `title:part:section`. */
 function rowId(title: number, part: string, section: string): string {
@@ -42,7 +50,7 @@ function rowId(title: number, part: string, section: string): string {
 }
 
 /**
- * Create the server-owned auxiliary table idempotently. Called once at the top
+ * Create the server-owned auxiliary tables idempotently. Called once at the top
  * of `sync`, via the raw handle — NEVER through a migration (the runner skips
  * migrations on a fresh DB). `CREATE TABLE IF NOT EXISTS` is safe on every run.
  */
@@ -55,7 +63,27 @@ function ensureAuxTables(handle: SqliteHandle): void {
       issue_date TEXT,
       PRIMARY KEY (title, part)
     );
+    CREATE TABLE IF NOT EXISTS ${META_TABLE} (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
+}
+
+/**
+ * Record the non-reserved CFR titles eCFR published at sync time. This is the
+ * denominator for "does the mirror hold the whole corpus" — the numerator is
+ * whatever ended up in the part index. Read from the DB rather than from
+ * `ECFR_MIRROR_TITLES`, because the scope that shaped an existing index is a
+ * property of that index, not of the environment the server later boots with.
+ */
+function recordCorpusTitles(handle: SqliteHandle, titles: number[]): void {
+  handle
+    .prepare(
+      `INSERT INTO ${META_TABLE} (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value;`,
+    )
+    .run(CORPUS_TITLES_KEY, titles.join(','));
 }
 
 /** Upsert a part's section count into the aux index. */
@@ -112,6 +140,11 @@ export const ecfrMirror: Mirror = defineMirror({
 
     const scope = scopedTitles();
     const titles = await ecfr.listTitles(ctx);
+    recordCorpusTitles(
+      handle,
+      titles.filter((t) => !t.reserved).map((t) => t.number),
+    );
+
     for (const title of titles) {
       if (signal.aborted) return;
       if (title.reserved) continue;
@@ -164,6 +197,64 @@ export async function mirrorReady(): Promise<boolean> {
     return await ecfrMirror.ready();
   } catch {
     return false;
+  }
+}
+
+/** What a ready mirror can actually answer for. */
+export interface MirrorScope {
+  /**
+   * True when the index holds every non-reserved CFR title eCFR published at the
+   * last sync. Only a complete mirror can answer an all-titles query — a scoped
+   * one would report its own three titles as the whole Code.
+   */
+  complete: boolean;
+  /** CFR title numbers the index actually holds, ascending. */
+  titles: number[];
+}
+
+/**
+ * The mirror's title coverage, read from the index itself: `cfr_part_index` holds
+ * one row per ingested title+part, so its distinct titles are what the mirror can
+ * answer for, and the corpus list recorded at sync time is what it would take to
+ * be complete. Both come from the DB — an index built under one
+ * `ECFR_MIRROR_TITLES` value and served under another must still report the
+ * coverage it actually has. An index predating the corpus marker reads as
+ * incomplete, which routes all-titles searches live until the next refresh
+ * writes it.
+ */
+export async function mirrorScope(): Promise<MirrorScope> {
+  const handle = await ecfrMirror.raw();
+  const titles = handle
+    .prepare<{ title: number }>(
+      `SELECT DISTINCT title FROM ${PART_INDEX_TABLE} ORDER BY title ASC;`,
+    )
+    .all()
+    .map((r) => Number(r.title));
+
+  const corpus = readCorpusTitles(handle);
+  const held = new Set(titles);
+  return {
+    complete: corpus !== undefined && corpus.length > 0 && corpus.every((t) => held.has(t)),
+    titles,
+  };
+}
+
+/**
+ * The corpus marker the last sync wrote, or undefined when it cannot be read —
+ * an index built before the meta table existed has no such table, and the query
+ * fails rather than returning nothing. Either way the answer is "no denominator",
+ * which reads as incomplete and routes all-titles searches live.
+ */
+function readCorpusTitles(handle: SqliteHandle): number[] | undefined {
+  try {
+    return handle
+      .prepare<{ value: string }>(`SELECT value FROM ${META_TABLE} WHERE key = ?;`)
+      .get(CORPUS_TITLES_KEY)
+      ?.value.split(',')
+      .map(Number)
+      .filter((n) => Number.isInteger(n));
+  } catch {
+    return;
   }
 }
 

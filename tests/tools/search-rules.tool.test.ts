@@ -45,7 +45,9 @@ describe('searchRulesTool', () => {
     expect(getEnrichment(ctx).totalCount).toBe(1);
   });
 
-  it('emits an empty-result notice when nothing matched', async () => {
+  it('treats zero matches as a successful empty result with a notice', async () => {
+    // Zero matches is an answer, not a failure — the contract must not advertise
+    // a no_results error the handler never throws.
     searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse);
     const ctx = createMockContext();
     const input = searchRulesTool.input.parse({ query: 'zzzznomatch' });
@@ -53,6 +55,7 @@ describe('searchRulesTool', () => {
 
     expect(result.results).toEqual([]);
     expect(getEnrichment(ctx).notice).toMatch(/no federal register documents matched/i);
+    expect(searchRulesTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
   });
 
   it('discloses truncation when matches exceed the FR navigation ceiling', async () => {

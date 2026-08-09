@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -74,7 +74,9 @@ Explore the codified Code of Federal Regulations via eCFR in two modes. Keyless.
 
 - `structure` mode walks the CFR tree (all 50 titles, or one title's chapters → parts → sections) to discover a cite when the exact citation is unknown
 - `search` mode runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet
-- Search is served from a synced local mirror (FTS5) when available and falls back to the live eCFR search API on a cold deploy; the `source` (`mirror` or `live`) is reported on each result
+- Search is served from the synced local mirror (FTS5) only when the mirror's title coverage can answer the request — a title it does not hold, an all-titles query against a scoped mirror, a `date`, or a cold deploy all go to the live eCFR search API instead
+- Every search result reports `source` (`mirror` or `live`) and `sourceScope` — which corpus answered and what it covers, so an empty result is never mistaken for "no such regulation"
+- `date` searches the section text in effect that day; eCFR indexes 2017-01-03 onward, and an undated search is pinned to eCFR's current index date rather than spanning every historical version
 - Both modes assemble a `cfrCite` that feeds `regulations_get_cfr_section`
 
 ---
@@ -145,12 +147,12 @@ Federal-regulations-specific:
 - One workflow over three official sources — the agent sees regulatory verbs, not three API clients; which source is hit is a service-layer detail
 - Cross-source stitching — every Federal Register document surfaces its docket ID and CFR-part handles next to the tools that consume them, priming the proposal → comments → final → codified-text trace
 - Keyless core — Federal Register + eCFR (5 of 7 tools) is a complete deployment with no API key; the Regulations.gov leg layers on top
-- Locally mirrored codified CFR — the eCFR is synced once into embedded SQLite + FTS5 and queried by exact cite or full text, with a live-API fallback before the mirror is ready
+- Locally mirrored codified CFR — the eCFR is synced once into embedded SQLite + FTS5 and queried by exact cite or full text, with a live-API fallback whenever the mirror's title coverage cannot answer the request
 - Three independent service clients, each with its own base URL, retry/backoff, and rate-limit handling (Regulations.gov honors `Retry-After` on 429)
 
 Agent-friendly output:
 
-- Provenance on every CFR read — `source: "mirror" | "live"` so agents know whether text came from the synced index or the live API
+- Provenance on every CFR read — `source: "mirror" | "live"` so agents know whether text came from the synced index or the live API, and on search a `sourceScope` line naming what that corpus covers
 - Honest truncation — Federal Register (50-page / 5,000-record) and Regulations.gov (20-page / 5,000-record) ceilings are surfaced with guidance to narrow, never silently dropped
 - Attachment-aware comments — `attachmentOnly` flags when a comment's substance is a file rather than inline text, with the download URLs, on both the structured and text surfaces
 - Actionable `auth_required` errors — the two keyed tools name the env var and the free signup URL rather than passing through a raw 401/403
@@ -284,7 +286,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `REGULATIONS_GOV_BASE_URL` | Regulations.gov API v4 base URL. | `https://api.regulations.gov/v4` |
 | `ECFR_MIRROR_PATH` | Filesystem path for the eCFR SQLite mirror database. | `./data/ecfr-mirror.sqlite` |
 | `ECFR_MIRROR_REFRESH_CRON` | Cron expression for the weekly mirror refresh (HTTP transport only). | `0 4 * * 0` |
-| `ECFR_MIRROR_TITLES` | Comma-separated CFR title numbers to scope the mirror to (e.g. `21,40`). Omit to mirror all 50 titles. Cites outside the set fall through to the live eCFR API. | — (all titles) |
+| `ECFR_MIRROR_TITLES` | Comma-separated CFR title numbers to scope the mirror to (e.g. `21,40`). Omit to mirror all 50 titles. Cites and searches outside the set fall through to the live eCFR API, as does any all-titles search while this is set. | — (all titles) |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
@@ -297,6 +299,8 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 ## The eCFR mirror
 
 The codified CFR is large (~50 titles, hundreds of MB of XML — Title 40 alone is ~150 MB) but changes far less often than it is queried. This server mirrors it once into an embedded SQLite + FTS5 index and serves `regulations_get_cfr_section` (current single sections) and `regulations_browse_cfr` (full-text search) from it, falling back to the live eCFR API when the mirror has not yet completed an init or a historical/whole-part read is requested.
+
+**The mirror answers only what it holds.** A scoped mirror (`ECFR_MIRROR_TITLES`) is consulted for a search only when the requested title is in the set, and never for an all-titles search — a three-title index reporting zero matches for the whole CFR is worse than no index at all. Those requests go to live eCFR instead, and every search result names the corpus that answered it in `sourceScope`.
 
 **The mirror is populated out-of-band, never on startup** — a full title sweep takes a while and must not block the server. Build it with:
 

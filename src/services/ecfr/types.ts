@@ -79,29 +79,38 @@ export interface EcfrSearchResponse {
   totalCount: number;
 }
 
-/** Raw live-search result item. */
+/**
+ * Raw live-search result item.
+ *
+ * Every hit carries two parallel heading maps, and they hold different things:
+ * `hierarchy_headings` is each level's structural *label* ("Part 51", "§ 51.190",
+ * "Appendix C to Part 58"), while `headings` is its human *name* ("Requirements
+ * for Preparation, Adoption, and Submittal of Implementation Plans", "Ambient air
+ * quality monitoring requirements."). Matched terms come back wrapped in
+ * `<strong>` inside `headings` and `full_text_excerpt`.
+ *
+ * Not every hit is a section: an `Appendix` hit leaves `hierarchy.section` null
+ * and identifies itself through `hierarchy.appendix`.
+ */
 export interface RawEcfrSearchResult {
   full_text_excerpt?: string | null;
-  headings?: {
-    section?: string | null;
-    part?: string | null;
-  } | null;
-  hierarchy?: {
-    title?: string | number | null;
-    chapter?: string | null;
-    subchapter?: string | null;
-    part?: string | null;
-    subpart?: string | null;
-    section?: string | null;
-  } | null;
-  hierarchy_headings?: {
-    title?: string | null;
-    chapter?: string | null;
-    subchapter?: string | null;
-    part?: string | null;
-    section?: string | null;
-  } | null;
+  headings?: RawEcfrSearchLevels | null;
+  hierarchy?: (Omit<RawEcfrSearchLevels, 'title'> & { title?: string | number | null }) | null;
+  hierarchy_headings?: RawEcfrSearchLevels | null;
   score?: number | null;
+  /** Node kind — `Section`, `Appendix`, `Part`, … */
+  type?: string | null;
+}
+
+/** The hierarchy levels each of a search hit's three parallel maps is keyed by. */
+interface RawEcfrSearchLevels {
+  appendix?: string | null;
+  chapter?: string | null;
+  part?: string | null;
+  section?: string | null;
+  subchapter?: string | null;
+  subpart?: string | null;
+  title?: string | null;
 }
 
 /** Raw live-search envelope. */

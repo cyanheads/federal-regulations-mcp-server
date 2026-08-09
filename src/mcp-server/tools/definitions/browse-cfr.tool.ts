@@ -1,15 +1,39 @@
 /**
  * @fileoverview regulations_browse_cfr — navigate the CFR hierarchy (structure
  * mode) or full-text-search the codified CFR (search mode) via eCFR. Search runs
- * against the local mirror's FTS5 index when ready, falling back to the live eCFR
- * search API on a cold deploy. Keyless. Feeds regulations_get_cfr_section.
+ * against the local mirror's FTS5 index only when the mirror's title coverage can
+ * answer the request; a scoped mirror, an unscoped (all-titles) query it cannot
+ * answer completely, a historical date, or a cold deploy all route to the live
+ * eCFR search API. Keyless. Feeds regulations_get_cfr_section.
  * @module mcp-server/tools/definitions/browse-cfr.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getEcfrService, today } from '@/services/ecfr/ecfr-service.js';
-import { mirrorReady, mirrorSearch } from '@/services/ecfr-mirror/ecfr-mirror.js';
+import type { EcfrSearchResponse } from '@/services/ecfr/types.js';
+import {
+  type MirrorScope,
+  mirrorReady,
+  mirrorScope,
+  mirrorSearch,
+} from '@/services/ecfr-mirror/ecfr-mirror.js';
+
+/** Restriction clause naming the caller's own title filter, if any. */
+function titleFilterClause(title: number | undefined): string {
+  return title === undefined ? '' : `, filtered to title ${title}`;
+}
+
+/** Human-readable coverage of the mirror index, for the `sourceScope` field. */
+function describeMirrorScope(scope: MirrorScope, title: number | undefined): string {
+  const held = scope.complete ? 'all CFR titles' : `CFR titles ${scope.titles.join(', ')}`;
+  return `Local mirror index — ${held}${titleFilterClause(title)}, current text only.`;
+}
+
+/** Human-readable coverage of the live eCFR search index, for `sourceScope`. */
+function describeLiveScope(date: string, title: number | undefined): string {
+  return `Live eCFR search — all CFR titles${titleFilterClause(title)}, text in effect on ${date}.`;
+}
 
 const structureNode = z
   .object({
@@ -33,9 +57,20 @@ const searchHit = z
   .object({
     title: z.number().describe('CFR title number.'),
     part: z.string().describe('CFR part.'),
-    section: z.string().nullable().describe('Section identifier, or null.'),
-    heading: z.string().describe('Section/part heading.'),
-    hierarchyPath: z.string().describe('Human-readable hierarchy path.'),
+    section: z
+      .string()
+      .nullable()
+      .describe('Section identifier, or null when the match is an appendix or a whole part.'),
+    heading: z
+      .string()
+      .describe(
+        'What the matched node is called — the section, appendix, or part heading. Distinct from cfrCite, which is where it lives.',
+      ),
+    hierarchyPath: z
+      .string()
+      .describe(
+        'Structural path down to the match, e.g. "Title 40 › Chapter I › Part 51 › § 51.190".',
+      ),
     excerpt: z.string().describe('Matched text snippet.'),
     cfrCite: z.string().describe('Assembled cite → regulations_get_cfr_section.'),
   })
@@ -44,7 +79,7 @@ const searchHit = z
 export const browseCfrTool = tool('regulations_browse_cfr', {
   title: 'regulations_browse_cfr',
   description:
-    'Explore the codified Code of Federal Regulations via eCFR in two modes. "structure" walks the CFR hierarchy (all 50 titles, or one title\'s chapters → parts → sections) to discover a cite when the exact citation is unknown. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet. Both modes feed regulations_get_cfr_section. The source (mirror or live) is reported on each search result.',
+    'Explore the codified Code of Federal Regulations via eCFR in two modes. "structure" walks the CFR hierarchy (all 50 titles, or one title\'s chapters → parts → sections) to discover a cite when the exact citation is unknown. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet. Both modes feed regulations_get_cfr_section. Every search result reports which corpus answered it — the synced local mirror or the live eCFR index — and what that corpus covers, in `source` and `sourceScope`.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     mode: z
@@ -59,7 +94,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .max(50)
       .optional()
       .describe(
-        'CFR title number (1–50). Structure mode: omit to list all 50 titles, or provide to expand one title. Search mode: optional filter to restrict to one title.',
+        'CFR title number (1–50). Structure mode: omit to list all 50 titles, or provide to expand one title. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.',
       ),
     part: z
       .string()
@@ -83,7 +118,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       ])
       .optional()
       .describe(
-        'Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode uses this date for historical hierarchy; in search mode, a past date enables point-in-time search.',
+        'Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode uses it for the historical hierarchy. Search mode matches only the section text in effect on that day, so a past date searches the CFR as it read then; eCFR indexes 2017-01-03 onward and rejects a date past its current index date.',
       ),
     per_page: z
       .number()
@@ -96,7 +131,12 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
   }),
   output: z.object({
     mode: z.enum(['structure', 'search']).describe('Which mode produced this result.'),
-    date: z.string().optional().describe('Resolved point-in-time date (structure mode).'),
+    date: z
+      .string()
+      .optional()
+      .describe(
+        'Resolved point-in-time date — the hierarchy snapshot (structure mode), or the day whose section text was searched (search mode, live source only).',
+      ),
     nodes: z
       .array(structureNode)
       .optional()
@@ -104,8 +144,12 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     source: z
       .enum(['mirror', 'live'])
       .optional()
+      .describe('Provenance: the synced mirror index, or the live eCFR search API (search mode).'),
+    sourceScope: z
+      .string()
+      .optional()
       .describe(
-        'Provenance: the synced mirror index, or the live eCFR search fallback (search mode).',
+        "What the answering corpus covers — the mirror's title coverage, or the live index and the date it was read at (search mode). Read it before concluding a query found nothing.",
       ),
     results: z
       .array(searchHit)
@@ -135,10 +179,11 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       recovery: 'Omit title to list all titles, or pick a number in 1–50 and a part that exists.',
     },
     {
-      reason: 'no_results',
-      code: JsonRpcErrorCode.NotFound,
-      when: 'Search mode returned zero matches.',
-      recovery: 'Broaden the phrase or drop the title filter and retry.',
+      reason: 'date_out_of_range',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: "Search mode with a date outside eCFR's indexed window (before 2017-01-03, or past its current index date).",
+      recovery:
+        'Pick a date inside the window the error names, or omit date to search the current text.',
     },
     {
       reason: 'upstream_unavailable',
@@ -171,23 +216,39 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       throw ctx.fail('query_required', undefined, { ...ctx.recoveryFor('query_required') });
     }
 
-    const ready = await mirrorReady();
-    const useMirror = ready && !input.date;
-    const response = useMirror
-      ? await mirrorSearch(query, input.title, input.per_page)
-      : await service.search(query, input.title, input.per_page, ctx);
+    // The mirror answers only what it actually holds. A title outside its scope,
+    // or an all-titles query against a scoped mirror, would come back empty from
+    // a corpus that never contained the answer — so those go to live eCFR, as
+    // section reads already do on a mirror miss.
+    const scope = !input.date && (await mirrorReady()) ? await mirrorScope() : null;
+    const answering =
+      scope && (input.title === undefined ? scope.complete : scope.titles.includes(input.title))
+        ? scope
+        : null;
+
+    let provenance:
+      | { source: 'mirror'; sourceScope: string }
+      | { source: 'live'; sourceScope: string; date: string };
+    let response: EcfrSearchResponse;
+
+    if (answering) {
+      provenance = { source: 'mirror', sourceScope: describeMirrorScope(answering, input.title) };
+      response = await mirrorSearch(query, input.title, input.per_page);
+    } else {
+      // The live index holds every historical version of every section, so a
+      // "current" search still has to name the day it wants.
+      const date = input.date || (await service.currentDate(ctx));
+      provenance = { source: 'live', sourceScope: describeLiveScope(date, input.title), date };
+      response = await service.search(query, input.title, input.per_page, date, ctx);
+    }
 
     ctx.enrich.total(response.totalCount);
 
     if (response.results.length === 0) {
       ctx.enrich.notice(
-        `No CFR sections matched "${query}". Broaden the phrase or drop the title filter.`,
+        `No CFR sections matched "${query}". Corpus searched: ${provenance.sourceScope} Broaden the phrase, drop the title filter, or try another title before concluding no such rule exists.`,
       );
-      return {
-        mode: 'search' as const,
-        source: useMirror ? ('mirror' as const) : ('live' as const),
-        results: [],
-      };
+      return { mode: 'search' as const, ...provenance, results: [] };
     }
 
     if (response.results.length >= input.per_page && response.totalCount > input.per_page) {
@@ -198,11 +259,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       });
     }
 
-    return {
-      mode: 'search' as const,
-      source: useMirror ? ('mirror' as const) : ('live' as const),
-      results: response.results,
-    };
+    return { mode: 'search' as const, ...provenance, results: response.results };
   },
 
   format: (result) => {
@@ -222,9 +279,12 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     }
 
     if (result.results || result.source) {
+      // The date is not repeated here — the scope line below already names the
+      // day the corpus was read at.
       lines.push(
         `**CFR full-text search** (mode: ${result.mode}, source: ${result.source ?? 'live'})`,
       );
+      lines.push(`_${result.sourceScope ?? 'Corpus scope unreported.'}_`);
       lines.push('');
       for (const h of result.results ?? []) {
         lines.push(

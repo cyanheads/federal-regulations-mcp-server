@@ -141,12 +141,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
   },
   errors: [
     {
-      reason: 'no_results',
-      code: JsonRpcErrorCode.NotFound,
-      when: 'Zero matches for the query and filters.',
-      recovery: 'Broaden the query, widen the date range, or drop an agency filter and retry.',
-    },
-    {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',

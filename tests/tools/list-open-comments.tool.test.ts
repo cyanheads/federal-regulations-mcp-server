@@ -84,7 +84,9 @@ describe('listOpenCommentsTool', () => {
     expect(getEnrichment(ctx).notice).toMatch(/comment counts are unavailable/i);
   });
 
-  it('emits a no-results notice when nothing is open', async () => {
+  it('treats nothing being open as a successful empty result with a notice', async () => {
+    // Nothing open is an answer, not a failure — the contract must not advertise
+    // a no_results error the handler never throws.
     hasKey.mockReturnValue(false);
     listOpenComments.mockResolvedValue({
       totalCount: 0,
@@ -94,6 +96,7 @@ describe('listOpenCommentsTool', () => {
     const result = await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({}), ctx);
     expect(result.results).toEqual([]);
     expect(getEnrichment(ctx).notice).toMatch(/no rules are open for comment/i);
+    expect(listOpenCommentsTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
   });
 
   it('format() renders the keyed flag, days-left, and comment counts', () => {

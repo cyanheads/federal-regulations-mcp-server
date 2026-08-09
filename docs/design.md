@@ -107,6 +107,8 @@ The `sync` ingester walks the eCFR `/versioner/v1/titles.json` list, then per ti
 
 **Readiness + live fallback.** The mirror read path (`get_cfr_section`, `browse_cfr` in `search` mode) gates on `await mirror.ready()` (true once a full init has *ever* completed, even mid-refresh). When not ready (cold, never-completed init), both tools **fall back to the live eCFR API** — the versioner `/full/` endpoint for section text, the `/search/v1/results` endpoint for full-text search — so the server is useful before the mirror finishes and during a failed refresh. This keeps the keyless core functional on a fresh deploy.
 
+**Readiness is necessary, not sufficient — coverage decides.** `ECFR_MIRROR_TITLES` makes a *ready* mirror a partial one, and a partial index queried outside its scope returns an empty result set from a corpus that never held the answer. So `browse_cfr` search reads the ingested title set out of `cfr_part_index` and uses the mirror only when that set covers the request: a `title` filter must be in the set, and an all-titles query is served only by an unscoped mirror. Everything else routes live — the contract section reads already follow on a mirror miss. The answering corpus and its coverage come back on every search as `source` + `sourceScope`, so an empty result is legible.
+
 **Scheduling + bootstrap (server-owned).** Refresh is registered on a cron via `schedulerService` in `setup()` (weekly is ample — the CFR is amended in discrete issues), gated to the HTTP transport so stdio operators don't double-run it. Init runs **out-of-band** via a `mirror:init` CLI script (idempotent, resumable from the persisted cursor) — never on startup; a full title sweep can take a long time and must not block the server. The three lifecycle scripts (`mirror:init`, `mirror:refresh`, `mirror:verify`) plus the shared `_mirror-context.ts` shim travel in `package.json` `files[]` and are copied into the Docker runtime stage (Bun image, with the `@/`→`./dist/` tsconfig shim) so `docker exec bun run mirror:init` resolves.
 
 **Why mirror eCFR but not FR/Regulations.gov:** the CFR is a bounded, slowly-changing corpus queried by exact cite — a perfect mirror fit. Federal Register documents and Regulations.gov dockets/comments are unbounded, volatile, and (Regulations.gov) key-rate-limited; mirroring them buys nothing and goes stale immediately. They stay live.
@@ -185,8 +187,9 @@ page: z.number().int().min(1).max(50).optional().default(1)
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
-| `no_results` | `NotFound` | Zero matches for the query + filters | Broaden the query, widen the date range, or drop an agency filter and retry. |
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
+
+Zero matches is a successful empty result, not an error — the search ran and the answer is "nothing." The recovery guidance (broaden the query, widen the date range, drop an agency filter) rides a `notice` enrichment on that response.
 
 ---
 
@@ -246,20 +249,20 @@ include_full_text: z.boolean().optional().default(false)
 
 Two modes over the eCFR. `structure` walks the CFR hierarchy (titles → chapters → subchapters → parts → sections) to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path. Both feed `regulations_get_cfr_section`.
 
-**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index (primary) or eCFR `/search/v1/results` (fallback before the mirror is ready). Both confirmed live; the search API returns `hierarchy`, `hierarchy_headings`, `full_text_excerpt`, `score`.
+**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when its title coverage can answer, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings`; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its title filter is `hierarchy[title]` (a `conditions[…]` parameter is rejected outright), and it indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
 
 **Input schema:**
 ```ts
 mode: z.enum(['structure', 'search'])
   .describe('"structure": browse the CFR tree (titles, or one title\'s chapters/parts/sections) to find a cite. "search": full-text search the codified CFR for sections matching a phrase.'),
 title: z.number().int().min(1).max(50).optional()
-  .describe('CFR title number (1–50). In structure mode: omit to list all 50 titles, or provide to expand one title\'s hierarchy. In search mode: optional filter to restrict the search to one title.'),
+  .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles, or provide to expand one title. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.'),
 part: z.string().optional()
   .describe('CFR part within the title (structure mode, optional) — narrows the returned tree to one part\'s sections. Parts can be alphanumeric.'),
 query: z.union([z.literal(''), z.string().min(2)]).optional()
   .describe('Full-text search phrase (search mode, required in that mode). Ignored in structure mode.'),
 date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional()
-  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to the current CFR. Structure mode honors it for historical hierarchy; search runs against the mirror (current) unless a date forces the live API.'),
+  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode honors it for historical hierarchy; search matches only the text in effect that day and always runs against the live API, since the mirror holds current text alone.'),
 per_page: z.number().int().min(1).max(50).optional().default(20)
   .describe('Results per page in search mode (1–50, default 20). Ignored in structure mode.'),
 ```
@@ -285,13 +288,15 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 {
   mode: 'search',
   totalCount: number,
-  source: 'mirror' | 'live',          // provenance — mirror (synced index) or live eCFR search fallback
+  source: 'mirror' | 'live',          // provenance — mirror (synced index) or the live eCFR search API
+  sourceScope: string,                // what that corpus covers — the mirror's titles, or the live index at its date
+  date?: string,                      // the day whose text was searched (live source only)
   results: Array<{
     title: number,
     part: string,
     section: string | null,
-    heading: string,                  // hierarchy_headings leaf
-    hierarchyPath: string,            // human-readable path, e.g. "Title 40 › Chapter I › Subchapter C › Part 50 › § 50.1"
+    heading: string,                  // the node's name, off the `headings` map (e.g. "Ambient air quality monitoring requirements.")
+    hierarchyPath: string,            // structural path, e.g. "Title 40 › Chapter I › Subchapter C › Part 51 › § 51.190"
     excerpt: string,                  // full_text_excerpt (matched snippet)
     cfrCite: string,                  // → regulations_get_cfr_section
   }>,
@@ -300,15 +305,19 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 }
 ```
 
-`format()`: structure mode → an indented markdown tree of nodes with their cites; search mode → a list of hits (cite · heading · excerpt) and the `source` provenance line.
+`format()`: structure mode → an indented markdown tree of nodes with their cites; search mode → a list of hits (cite · heading · excerpt) under a `source` + `sourceScope` provenance line.
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `query_required` | `InvalidParams` | `mode='search'` with no `query` | Provide a `query` phrase for search mode, or switch to `mode='structure'` to browse. |
 | `title_not_found` | `NotFound` | Structure mode, `title` outside 1–50 or reserved/empty | Omit `title` to list all titles, or pick a number in 1–50. |
-| `no_results` | `NotFound` | Search mode, zero matches | Broaden the phrase or drop the `title` filter and retry. |
+| `date_out_of_range` | `InvalidParams` | Search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to search the current text. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path) | Retry; eCFR may be momentarily down. |
+
+Zero matches is a successful empty result carrying a `notice`, not an error; the notice names the corpus that was searched so the caller can tell "no such regulation" from "wrong corpus."
+
+`date_out_of_range` is raised from eCFR's own 400, but the message is not a passthrough: eCFR names its earliest indexed date when a date is too early and says only "not currently available" when a date is too late, so the service appends the full window (`2017-01-03` through the current index date) either way. Passing today's date is the common way to hit the late end.
 
 ---
 
@@ -551,10 +560,9 @@ page: z.number().int().min(1).max(50).optional().default(1)
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
-| `no_results` | `NotFound` | No rules open for comment match the filters | Drop the agency or `closing_before` filter — fewer rules are open than you might expect at any moment. |
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout | Retry after a brief wait. |
 
-(No `auth_required` — this tool never requires the key; it degrades.)
+(No `auth_required` — this tool never requires the key; it degrades. No `no_results` either — nothing being open is a successful empty result with a `notice`, since fewer rules are open at any moment than a caller expects.)
 
 ---
 

@@ -123,13 +123,6 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
   },
   errors: [
     {
-      reason: 'no_results',
-      code: JsonRpcErrorCode.NotFound,
-      when: 'No rules open for comment match the filters.',
-      recovery:
-        'Drop the agency or closing_before filter — fewer rules are open than you might expect at any moment.',
-    },
-    {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',
