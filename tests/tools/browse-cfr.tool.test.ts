@@ -43,10 +43,23 @@ const hit = {
   title: 40,
   part: '50',
   section: '50.1',
+  appendix: null,
   heading: '§ 50.1 Definitions.',
   hierarchyPath: 'Title 40 › Part 50 › § 50.1',
   excerpt: 'air quality standards',
   cfrCite: '40 CFR 50.1',
+};
+
+/** A live appendix hit: no section, and a cite that names the appendix itself. */
+const appendixHit = {
+  title: 40,
+  part: '58',
+  section: null,
+  appendix: 'Appendix C to Part 58',
+  heading: 'Ambient Air Quality Monitoring Methodology',
+  hierarchyPath: 'Title 40 › Part 58 — Ambient Air Quality Surveillance › Appendix C to Part 58',
+  excerpt: 'methods for monitoring ambient air quality',
+  cfrCite: 'Appendix C to Part 58, Title 40',
 };
 
 /** The repo's own partial mirror: Titles 1, 11, and 14 only. */
@@ -127,6 +140,7 @@ describe('browseCfrTool', () => {
         description: null,
         reserved: false,
         cfrCite: null,
+        appendix: null,
       },
     ]);
     const ctx = createMockContext();
@@ -152,6 +166,35 @@ describe('browseCfrTool', () => {
     expect(result.sourceScope).toContain('filtered to title 14');
     expect(result.results?.map((r) => r.title)).toEqual([14]);
     expect(liveSearch).not.toHaveBeenCalled();
+  });
+
+  it('says the mirror does not index appendices, so a miss is not evidence', async () => {
+    // The mirror holds section text only. Without saying so, an appendix that
+    // exists and an appendix that does not both come back as zero matches.
+    mirrorReady.mockResolvedValue(true);
+    mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
+    mirrorSearch.mockImplementation(mirrorIndex([14]));
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({ mode: 'search', query: 'air quality', title: 14 });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    expect(result.sourceScope).toContain('appendices are not indexed');
+    expect(result.results?.every((r) => r.appendix === null)).toBe(true);
+  });
+
+  it('carries an appendix hit’s read handle through search mode', async () => {
+    mirrorReady.mockResolvedValue(false);
+    liveSearch.mockResolvedValue({ totalCount: 1, results: [appendixHit] });
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', title: 40 });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    // The identifier and the cite both round-trip into get_cfr_section's
+    // `appendix` input. The cite used to read "40 CFR 58", pointing at a part
+    // whose sections do not contain the matched text.
+    const first = result.results![0]!;
+    expect(first.appendix).toBe('Appendix C to Part 58');
+    expect(first.cfrCite).toBe('Appendix C to Part 58, Title 40');
   });
 
   it('searches live for a title the mirror does not hold, and returns its matches', async () => {
@@ -439,21 +482,35 @@ describe('browseCfrTool', () => {
           description: null,
           reserved: false,
           cfrCite: '40 CFR 50',
+          appendix: null,
+        },
+        {
+          type: 'appendix',
+          identifier: 'Appendix A-1 to Part 50',
+          label: 'Appendix A-1 to Part 50—Reference Measurement Principle',
+          description: null,
+          reserved: false,
+          cfrCite: 'Appendix A-1 to Part 50, Title 40',
+          appendix: 'Appendix A-1 to Part 50',
         },
       ],
     });
-    expect(structureBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('')).toContain(
-      '40 CFR 50',
-    );
+    const structureText = structureBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(structureText).toContain('40 CFR 50');
+    // The appendix handle has to reach content[] too, or a markdown-only client
+    // sees an appendix it cannot follow.
+    expect(structureText).toContain('`Appendix A-1 to Part 50`');
 
     const searchBlocks = browseCfrTool.format!({
       mode: 'search',
       source: 'mirror',
       sourceScope: 'Local mirror index — CFR titles 1, 11, 14, current text only.',
-      results: [hit],
+      results: [hit, appendixHit],
     });
     const text = searchBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(text).toContain('40 CFR 50.1');
+    expect(text).toContain('Appendix C to Part 58, Title 40');
+    expect(text).toContain('appendix Appendix C to Part 58');
     expect(text).toContain('mirror');
     // The scope has to reach content[] too — a client reading only the markdown
     // must still see which corpus answered.

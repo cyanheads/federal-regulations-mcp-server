@@ -3,11 +3,16 @@
  * current CFR section, the same payload as regulations_get_cfr_section at the
  * current date, for clients that support injectable context. Mirror-backed with a
  * live eCFR fallback. Every datum is also reachable through the tool surface.
+ *
+ * Sections only. An appendix is addressed by a free-form phrase ("Appendix A-1
+ * to Part 50"), not by a path segment, so it stays on the tool surface rather
+ * than becoming a URI template whose last component is an encoded sentence.
  * @module mcp-server/resources/definitions/cfr-section.resource
  */
 
 import { resource, z } from '@cyanheads/mcp-ts-core';
 import { notFound } from '@cyanheads/mcp-ts-core/errors';
+import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
 import { mirrorGetSection, mirrorReady } from '@/services/ecfr-mirror/ecfr-mirror.js';
 
@@ -15,7 +20,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
   name: 'cfr-section',
   title: 'CFR section (current)',
   description:
-    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date — mirror-backed with a live eCFR fallback.',
+    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date — mirror-backed with a live eCFR fallback. Sections only; read an appendix through regulations_get_cfr_section with its `appendix` input.',
   mimeType: 'application/json',
   params: z.object({
     title: z
@@ -35,16 +40,16 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       if (hit) {
         const hierarchyPath = await service.hierarchyPath(
           titleNum,
-          params.part,
-          params.section,
+          { part: params.part, section: params.section },
           hit.date,
           ctx,
         );
         return {
-          cfrCite: `${titleNum} CFR ${params.section}`,
+          cfrCite: sectionCite(titleNum, params.part, params.section),
           title: titleNum,
           part: params.part,
           section: params.section,
+          appendix: null,
           heading: hit.heading,
           hierarchyPath,
           date: hit.date,
@@ -65,16 +70,16 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
     }
     const hierarchyPath = await service.hierarchyPath(
       titleNum,
-      params.part,
-      params.section,
+      { part: params.part, section: params.section },
       result.date,
       ctx,
     );
     return {
-      cfrCite: `${titleNum} CFR ${params.section}`,
+      cfrCite: sectionCite(titleNum, params.part, params.section),
       title: titleNum,
       part: params.part,
       section: params.section,
+      appendix: null,
       heading: result.heading,
       hierarchyPath,
       date: result.date,

@@ -39,7 +39,9 @@ function describeMirrorScope(
   part: string | undefined,
 ): string {
   const held = scope.complete ? 'all CFR titles' : `CFR titles ${scope.titles.join(', ')}`;
-  return `Local mirror index — ${held}${filterClause(title, part)}, current text only.`;
+  // The index holds section text alone, so an appendix match cannot come back
+  // from it — which is indistinguishable from no such appendix unless said.
+  return `Local mirror index — ${held}${filterClause(title, part)}, current section text only; appendices are not indexed, so no result here is evidence about them.`;
 }
 
 /** Human-readable coverage of the live eCFR search index, for `sourceScope`. */
@@ -88,7 +90,15 @@ const structureNode = z
     cfrCite: z
       .string()
       .nullable()
-      .describe('Assembled cite for a part/section → regulations_get_cfr_section; null otherwise.'),
+      .describe(
+        'Assembled cite → regulations_get_cfr_section: "40 CFR 50" / "40 CFR 50.1" for a part or section, "Appendix A-1 to Part 50, Title 40" for an appendix. Null on a level with no read path (chapter, subchapter, subpart, subject group).',
+      ),
+    appendix: z
+      .string()
+      .nullable()
+      .describe(
+        'On an appendix node, the identifier to pass straight back as regulations_get_cfr_section\'s `appendix` input; null on every other node type. It is free-form prose, not a letter ("Schedule I to Part 789", "Special Federal Aviation Regulation No. 88"), so pass it verbatim rather than abbreviating it.',
+      ),
   })
   .describe('One hierarchy node.');
 
@@ -100,6 +110,12 @@ const searchHit = z
       .string()
       .nullable()
       .describe('Section identifier, or null when the match is an appendix or a whole part.'),
+    appendix: z
+      .string()
+      .nullable()
+      .describe(
+        "On an appendix hit, the identifier to pass straight back as regulations_get_cfr_section's `appendix` input; null on a section hit. Always null on a mirror hit — the index holds section text only, so mirror-sourced results never match an appendix.",
+      ),
     heading: z
       .string()
       .describe(
@@ -111,9 +127,13 @@ const searchHit = z
         'Path down to the match. A live hit names the part it sits in — "Title 40 › Chapter I › Subchapter C › Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans › § 51.190" — so the subject matter is readable without a second call. A mirror hit is structural only ("Title 14 › Part 25 › § 25.1043"): the index stores no level names. Check `source` before comparing paths across results.',
       ),
     excerpt: z.string().describe('Matched text snippet.'),
-    cfrCite: z.string().describe('Assembled cite → regulations_get_cfr_section.'),
+    cfrCite: z
+      .string()
+      .describe(
+        'Assembled cite → regulations_get_cfr_section. A section hit cites the section ("40 CFR 51.190"); an appendix hit cites the appendix in eCFR\'s own form ("Appendix C to Part 58, Title 40"), not the part around it, since the part\'s sections do not contain the matched text.',
+      ),
   })
-  .describe('One matching CFR section.');
+  .describe('One matching CFR section or appendix.');
 
 export const browseCfrTool = tool('regulations_browse_cfr', {
   title: 'regulations_browse_cfr',
@@ -337,7 +357,10 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
         const reserved = n.reserved ? ' _(reserved)_' : '';
         const cite = n.cfrCite ? ` — \`${n.cfrCite}\` → regulations_get_cfr_section` : '';
         const desc = n.description && n.description !== n.label ? ` — ${n.description}` : '';
-        lines.push(`- **${n.type}** ${n.identifier}: ${n.label}${desc}${reserved}${cite}`);
+        const appendix = n.appendix ? ` (appendix: \`${n.appendix}\`)` : '';
+        lines.push(
+          `- **${n.type}** ${n.identifier}: ${n.label}${desc}${reserved}${cite}${appendix}`,
+        );
       }
     }
 
@@ -350,9 +373,10 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       lines.push(`_${result.sourceScope ?? 'Corpus scope unreported.'}_`);
       lines.push('');
       for (const h of result.results ?? []) {
-        lines.push(
-          `### ${h.cfrCite} — ${h.heading} [Title ${h.title}, Part ${h.part}, § ${h.section ?? 'n/a'}]`,
-        );
+        const where = [`Title ${h.title}`, `Part ${h.part}`];
+        if (h.section) where.push(`§ ${h.section}`);
+        if (h.appendix) where.push(`appendix ${h.appendix}`);
+        lines.push(`### ${h.cfrCite} — ${h.heading} [${where.join(', ')}]`);
         lines.push(`_${h.hierarchyPath}_`);
         lines.push(h.excerpt);
         lines.push('');

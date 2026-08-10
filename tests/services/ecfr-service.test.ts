@@ -192,6 +192,31 @@ const SECTION_XML = `<?xml version="1.0"?>
   </DIV8>
 </DIV5>`;
 
+/** A whole-part payload: two sections and an appendix, as `?part=50` returns. */
+const PART_XML = `<?xml version="1.0"?>
+<DIV5 TYPE="PART" N="50">
+  <DIV8 TYPE="SECTION" N="50.1"><HEAD>§ 50.1 Definitions.</HEAD><P>Terms.</P></DIV8>
+  <DIV8 TYPE="SECTION" N="50.2"><HEAD>§ 50.2 Scope.</HEAD><P>Scope text.</P></DIV8>
+  <DIV9 N="Appendix A-1 to Part 50" TYPE="APPENDIX">
+    <HEAD>Appendix A-1 to Part 50&#x2014;Reference Measurement Principle</HEAD>
+    <P>Appendix body that would dwarf the sections above.</P>
+  </DIV9>
+</DIV5>`;
+
+/**
+ * The appendix-filtered versioner payload, copied in shape from a real
+ * `?appendix=Appendix A-1 to Part 50` response: a bare `<DIV9>` with no `<DIV5>`
+ * around it, so the part survives only inside `hierarchy_metadata`.
+ */
+const APPENDIX_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<DIV9 N="Appendix A-1 to Part 50" TYPE="APPENDIX" hierarchy_metadata="{&quot;path&quot;:&quot;/on/_SUBSTITUTE_DATE_/title-40/part-50/appendix-Appendix A-1 to Part 50&quot;,&quot;citation&quot;:&quot;Appendix A-1 to Part 50, Title 40&quot;}">
+<HEAD>Appendix A-1 to Part 50&#x2014;Reference Measurement Principle and Calibration Procedure for the Measurement of Sulfur Dioxide in the Atmosphere (Ultraviolet Fluorescence Method)
+</HEAD>
+<HD1>1.0 Applicability
+</HD1>
+<P>1.1 This ultraviolet fluorescence (UVF) method provides a measurement of the concentration of sulfur dioxide (SO<E T="52">2</E>) in ambient air.</P>
+</DIV9>`;
+
 let service: InstanceType<typeof EcfrService>;
 
 describe('EcfrService', () => {
@@ -234,6 +259,168 @@ describe('EcfrService', () => {
     expect(result.bodyText).toContain('National primary ambient air quality standards');
     // Tags stripped, no XML left.
     expect(result.bodyText).not.toContain('<P>');
+  });
+
+  it('names a part’s appendices on a whole-part read without inlining their text', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(PART_XML));
+    const ctx = createMockContext();
+    const result = await service.getSectionText(40, '50', undefined, '2026-08-06', ctx);
+
+    expect(result.sections?.map((s) => s.section)).toEqual(['50.1', '50.2']);
+    expect(result.appendices).toEqual([
+      {
+        appendix: 'Appendix A-1 to Part 50',
+        heading: 'Appendix A-1 to Part 50—Reference Measurement Principle',
+      },
+    ]);
+    // The handle is there; the text that would multiply the response is not.
+    expect(result.bodyText).not.toContain('would dwarf the sections');
+  });
+
+  it('omits appendices from a whole-part read of a part that has none', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(SECTION_XML));
+    const ctx = createMockContext();
+    const result = await service.getSectionText(40, '50', undefined, '2026-08-06', ctx);
+
+    expect(result.appendices).toBeUndefined();
+  });
+
+  it('reads an appendix by its verbatim identifier and recovers its part', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(APPENDIX_XML));
+    const ctx = createMockContext();
+    const result = await service.getAppendixText(
+      40,
+      undefined,
+      'Appendix A-1 to Part 50',
+      '2026-08-06',
+      ctx,
+    );
+
+    expect(result.appendix).toBe('Appendix A-1 to Part 50');
+    // No <DIV5> wraps an appendix-filtered response, so the part comes off
+    // hierarchy_metadata rather than from a wrapper that is not there.
+    expect(result.part).toBe('50');
+    expect(result.heading).toContain('Ultraviolet Fluorescence Method');
+    expect(result.bodyText).toContain('1.0 Applicability');
+    expect(result.bodyText).toContain('sulfur dioxide (SO 2) in ambient air');
+
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(requested.get('appendix')).toBe('Appendix A-1 to Part 50');
+    expect(requested.has('part')).toBe(false);
+  });
+
+  it('sends the part alongside an appendix so a repeated identifier resolves', async () => {
+    // 14 CFR carries seven appendices named "Special Federal Aviation
+    // Regulation No. 97", one per part; without the part eCFR picks one.
+    fetchMock.mockResolvedValueOnce(xmlResponse(APPENDIX_XML));
+    const ctx = createMockContext();
+    await service.getAppendixText(40, '50', 'Appendix A-1 to Part 50', '2026-08-06', ctx);
+
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(requested.get('part')).toBe('50');
+    expect(requested.get('appendix')).toBe('Appendix A-1 to Part 50');
+  });
+
+  it('reports a 404 on an appendix as no such appendix, not a fetch failure', async () => {
+    // What a caller who abbreviated the identifier to "A-1" hits.
+    fetchMock.mockRejectedValue(
+      new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404'),
+    );
+    const ctx = createMockContext();
+
+    await expect(service.getAppendixText(40, '50', 'A-1', '2026-08-06', ctx)).resolves.toBeNull();
+  });
+
+  it('reports an appendix-shaped response holding no appendix as no such appendix', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse('<DIV1 TYPE="TITLE" N="40"></DIV1>'));
+    const ctx = createMockContext();
+
+    await expect(
+      service.getAppendixText(40, '50', 'Appendix Z to Part 50', '2026-08-06', ctx),
+    ).resolves.toBeNull();
+  });
+
+  it('runs an appendix hierarchy path down to the appendix, not its part', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ancestors: [
+          { type: 'title', identifier: '40' },
+          { type: 'part', identifier: '50' },
+          { type: 'appendix', identifier: 'Appendix A-1 to Part 50' },
+        ],
+      }),
+    );
+    const ctx = createMockContext();
+    const path = await service.hierarchyPath(
+      40,
+      { part: '50', appendix: 'Appendix A-1 to Part 50' },
+      '2026-08-06',
+      ctx,
+    );
+
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(requested.get('appendix')).toBe('Appendix A-1 to Part 50');
+    // The identifier is already a full phrase naming its own level, so prefixing
+    // the type would read "Appendix Appendix A-1 to Part 50".
+    expect(path).toBe('Title 40 › Part 50 › Appendix A-1 to Part 50');
+  });
+
+  it('names a subject group by its heading, not the identifier eCFR mints', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ancestors: [
+          { type: 'title', identifier: '14' },
+          { type: 'part', identifier: '241' },
+          {
+            type: 'subject_group',
+            identifier: 'ECFR5092393aaea23ae',
+            generated_id: true,
+            label_description: 'Traffic Reporting Requirements',
+          },
+          { type: 'section', identifier: '25' },
+        ],
+      }),
+    );
+    const ctx = createMockContext();
+    const path = await service.hierarchyPath(14, { part: '241', section: '25' }, '2026-08-06', ctx);
+
+    expect(path).toBe('Title 14 › Part 241 › Traffic Reporting Requirements › § 25');
+    expect(path).not.toContain('ECFR5092393aaea23ae');
+  });
+
+  it('gives an appendix structure node a cite and a read handle', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        type: 'title',
+        identifier: '40',
+        children: [
+          {
+            type: 'part',
+            identifier: '50',
+            children: [
+              { type: 'section', identifier: '50.1', label: '§ 50.1 Definitions.' },
+              {
+                type: 'appendix',
+                identifier: 'Appendix A-1 to Part 50',
+                label: 'Appendix A-1 to Part 50—Reference Measurement Principle',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const ctx = createMockContext();
+    const nodes = await service.browseStructure(40, '50', '2026-08-06', ctx);
+
+    const appendix = nodes.find((n) => n.type === 'appendix')!;
+    // Regression: appendix nodes came back with cfrCite null, which reads as
+    // "no read path" — the browse result could be seen but never opened.
+    expect(appendix.appendix).toBe('Appendix A-1 to Part 50');
+    expect(appendix.cfrCite).toBe('Appendix A-1 to Part 50, Title 40');
+
+    const section = nodes.find((n) => n.type === 'section')!;
+    expect(section.appendix).toBeNull();
+    expect(section.cfrCite).toBe('40 CFR 50.1');
   });
 
   it('throws not_found when the versioner returns no sections', async () => {
@@ -362,8 +549,21 @@ describe('EcfrService', () => {
     expect(hit.hierarchyPath).toContain('Appendix C to Part 58');
     // The part name still lands, so the appendix is placed by subject matter too.
     expect(hit.hierarchyPath).toContain('Part 58 — Ambient Air Quality Surveillance');
-    // The part cite still resolves through regulations_get_cfr_section.
-    expect(hit.cfrCite).toBe('40 CFR 58');
+    // The cite names the appendix, not the part around it: following "40 CFR 58"
+    // reads the part's sections, which do not hold the matched text. The
+    // identifier leading the cite is what the read call takes as `appendix`.
+    expect(hit.appendix).toBe('Appendix C to Part 58');
+    expect(hit.cfrCite).toBe('Appendix C to Part 58, Title 40');
+  });
+
+  it('leaves appendix null on a section hit', async () => {
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
+    const ctx = createMockContext();
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
+
+    expect(hit.appendix).toBeNull();
+    expect(hit.cfrCite).toBe('40 CFR 51.190');
   });
 
   it('searches the text in effect on the requested date', async () => {

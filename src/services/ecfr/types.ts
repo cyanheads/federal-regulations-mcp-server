@@ -26,6 +26,11 @@ export interface RawEcfrTitle {
 
 /** A node in a CFR structure tree (title → chapter → … → section). */
 export interface EcfrStructureNode {
+  /**
+   * The appendix identifier to pass back as `regulations_get_cfr_section`'s
+   * `appendix` input; null on every other node type.
+   */
+  appendix: string | null;
   cfrCite: string | null;
   description: string | null;
   identifier: string;
@@ -37,6 +42,8 @@ export interface EcfrStructureNode {
 /** Raw structure node (recursive `children`). */
 export interface RawEcfrStructureNode {
   children?: RawEcfrStructureNode[];
+  /** True when eCFR minted the identifier itself (subject groups); the label names the level. */
+  generated_id?: boolean;
   identifier?: string;
   label?: string;
   label_description?: string | null;
@@ -48,17 +55,72 @@ export interface RawEcfrStructureNode {
 export interface EcfrSection {
   bodyText: string;
   heading: string;
+  /**
+   * The part this section sits in, read from its enclosing `<DIV5 TYPE="PART">`.
+   * Null when the fragment has no part wrapper — a section-filtered versioner
+   * response returns the bare `<DIV8>`, and the caller already knows the part it
+   * asked for. Never derived from the section number: a part whose sections are
+   * numbered without a dot (14 CFR 241 numbers them `Section 25`, `Sec. 1-1`)
+   * has nothing to cut on, and cutting anyway files the row under a part that
+   * regulates something else entirely.
+   */
+  part: string | null;
   section: string;
+}
+
+/**
+ * One appendix parsed from versioner XML — a `<DIV9 TYPE="APPENDIX">` node.
+ *
+ * `appendix` is the identifier eCFR writes verbatim, and it is free-form prose,
+ * not a letter: "Appendix A-1 to Part 50", "Appendix A to Subpart C of Part 4",
+ * "Schedule I to Part 789", "Special Federal Aviation Regulation No. 88". It is
+ * the only string the versioner's `appendix=` filter accepts, so it travels
+ * unmodified from browse output to a read call.
+ */
+export interface EcfrAppendix {
+  appendix: string;
+  bodyText: string;
+  heading: string;
+  /**
+   * The part this appendix hangs off. Most appendices attach to a part or to a
+   * subpart inside one; a handful attach to a chapter, subchapter, or subtitle
+   * and have no part at all, which is null here.
+   */
+  part: string | null;
+}
+
+/** An appendix named but not inlined — the follow-up handle on a whole-part read. */
+export interface EcfrAppendixSummary {
+  appendix: string;
+  heading: string;
+}
+
+/** Sections and appendices parsed out of one versioner XML document. */
+export interface EcfrXmlContent {
+  appendices: EcfrAppendix[];
+  sections: EcfrSection[];
 }
 
 /** Result of a codified-text fetch (a section, or a whole part). */
 export interface EcfrSectionResult {
+  /** Appendices in the part, named only — present on a whole-part fetch. */
+  appendices?: EcfrAppendixSummary[];
   bodyText: string;
   date: string;
   heading: string;
   part: string;
   section: string | null;
   sections?: EcfrSection[];
+  title: number;
+}
+
+/** Result of an appendix text fetch. */
+export interface EcfrAppendixResult {
+  appendix: string;
+  bodyText: string;
+  date: string;
+  heading: string;
+  part: string | null;
   title: number;
 }
 
@@ -71,6 +133,12 @@ export interface EcfrSectionResult {
  * structural only, because the mirror stores no level names.
  */
 export interface EcfrSearchHit {
+  /**
+   * The appendix identifier to pass back as `regulations_get_cfr_section`'s
+   * `appendix` input, when the hit is an appendix rather than a section. Always
+   * null on a mirror hit — the index holds section text only.
+   */
+  appendix: string | null;
   cfrCite: string;
   excerpt: string;
   heading: string;

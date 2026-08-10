@@ -40,7 +40,7 @@ Seven tools across the regulatory workflow. The **Federal Register** and **eCFR*
 | `regulations_search_rules` | Federal Register | — | Search proposed rules, final rules, notices, and presidential documents by query, type, agency, date range, and open-for-comment status. The primary discovery entry point. |
 | `regulations_get_document` | Federal Register | — | Fetch one FR document by number — full metadata plus the cross-source handles (docket ID, CFR parts, comment count) that chain into the comment and codified-text tools. |
 | `regulations_browse_cfr` | eCFR | — | Walk the CFR hierarchy (structure mode) or full-text-search the codified CFR (search mode). Both feed `regulations_get_cfr_section`. |
-| `regulations_get_cfr_section` | eCFR | — | Read the codified text of a CFR section or whole part — current or as of a past date. |
+| `regulations_get_cfr_section` | eCFR | — | Read the codified text at a CFR location — a section, a whole part, or an appendix — current or as of a past date. |
 | `regulations_get_docket` | Regulations.gov | ✔ | Pull a rulemaking docket and the documents filed in it (NPRM, final rule, supporting materials). |
 | `regulations_find_comments` | Regulations.gov | ✔ | Fetch public comments on a document or docket, or one comment's full body and attachments. Flags attachment-only submissions. |
 | `regulations_list_open_comments` | Federal Register (+ Reg.gov enrich) | optional | Rules currently open for public comment, closing soonest first. Fully functional keyless; enriches comment counts when keyed. |
@@ -79,17 +79,20 @@ Explore the codified Code of Federal Regulations via eCFR in two modes. Keyless.
 - Search is served from the synced local mirror (FTS5) only when the mirror's title coverage can answer the request — a title it does not hold, an all-titles query against a scoped mirror, a `date`, or a cold deploy all go to the live eCFR search API instead
 - Every search result reports `source` (`mirror` or `live`) and `sourceScope` — which corpus answered and what it covers, so an empty result is never mistaken for "no such regulation"
 - `date` searches the section text in effect that day; eCFR indexes 2017-01-03 onward, and an undated search is pinned to eCFR's current index date rather than spanning every historical version
-- Both modes assemble a `cfrCite` that feeds `regulations_get_cfr_section`
+- Both modes assemble a `cfrCite` that feeds `regulations_get_cfr_section`, and both hand appendices back the same way: an `appendix` field with eCFR's verbatim identifier, and a cite that names the appendix rather than the part around it
+- The mirror indexes section text only, so it never matches an appendix — its `sourceScope` says so, since otherwise an appendix that exists and one that does not both read as zero matches
 
 ---
 
 ### `regulations_get_cfr_section`
 
-Read the codified text of a specific CFR section, or a whole part, via eCFR. Keyless.
+Read the codified text at a CFR location — one section, a whole part, or one appendix — via eCFR. Keyless.
 
 - Answers "what does 40 CFR 50.1 say today?" and "...as of 2019-01-01?" — pass `date` for point-in-time text
 - Provide `title` + `part` + `section` for one section, or omit `section` to fetch the whole part
-- Current single-section reads are served from the local mirror when ready (the `source` is reported); historical dates, whole-part fetches, and a cold mirror fall back to the live eCFR versioner
+- Provide `appendix` to read an appendix, passing the identifier verbatim as `regulations_browse_cfr` emits it (`Appendix A-1 to Part 50`, `Schedule I to Part 789`, `Special Federal Aviation Regulation No. 88`) — the identifiers are prose, not letters, and a short form matches nothing
+- A whole-part read names the part's appendices and their headings but does not inline their text; appendices routinely run several times the length of the sections around them, so reading one is a deliberate second call
+- Current single-section reads are served from the local mirror when ready (the `source` is reported); historical dates, whole-part fetches, appendix reads, and a cold mirror fall back to the live eCFR versioner
 - eCFR retains historical versions back to roughly 2017; a date before coverage is rejected with guidance
 
 ---
@@ -318,9 +321,11 @@ ECFR_MIRROR_TITLES=21,40 bun run mirror:init
 # Incremental refresh against the latest eCFR issues
 bun run mirror:refresh
 
-# Report row counts and the last-synced issue date
+# Report row counts, the last-synced issue date, and whether the index is stale
 bun run mirror:verify
 ```
+
+**An index written by an older ingester is not served.** The ingester stamps a version into the mirror once a run has re-derived every title the index holds; when a release changes how rows are derived, an index carrying an older stamp is treated exactly like a cold one — every read falls back to live eCFR until `bun run mirror:refresh` re-derives it. `mirror:verify` says so explicitly, and a refresh removes the rows the previous ingester filed under keys the current one no longer produces. A run that skips a title — a failed fetch, or an `ECFR_MIRROR_TITLES` scope narrower than the index — names it in the log and leaves the stamp unwritten, because those untouched titles are exactly the ones a stamp would certify wrongly.
 
 Until the mirror has completed an init, the codified-text tools run against the live eCFR API — so the server is useful immediately on a fresh deploy; the mirror is a latency/throughput optimization, not a hard dependency. On the HTTP transport a weekly refresh is scheduled automatically (`ECFR_MIRROR_REFRESH_CRON`); stdio operators run the lifecycle scripts above.
 

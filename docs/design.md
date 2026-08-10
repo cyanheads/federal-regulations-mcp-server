@@ -13,7 +13,7 @@ US federal regulatory law as one workflow server over three official sources: th
 | `regulations_search_rules` | The 80% entry point. Search the Federal Register for proposed rules, final rules, notices, and presidential documents — filter by agency, document type, date range, topic, and open-for-comment. | `query`, `type`, `agencies`, `published_after`, `published_before`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
 | `regulations_get_document` | Fetch one Federal Register document by FR number: full body, metadata, agencies, RIN, effective/comment dates, and the cross-source handles (docket ID, affected CFR parts) that chain into the comment and codified-text tools. | `document_number`, `include_full_text` | Federal Register · keyless | `readOnlyHint`, `idempotentHint` |
 | `regulations_browse_cfr` | Navigate the CFR hierarchy (titles → chapters → parts → sections) to discover what exists before fetching section text, or full-text-search the codified CFR for sections matching a phrase. | `mode`, `title`, `part`, `query`, `date` | eCFR · keyless | `readOnlyHint`, `openWorldHint` |
-| `regulations_get_cfr_section` | Read the codified text of a CFR section (or part) via eCFR — current or as of a past date. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `date` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
+| `regulations_get_cfr_section` | Read the codified text at a CFR location via eCFR — a section, a whole part, or an appendix — current or as of a past date. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `appendix`, `date` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
 | `regulations_get_docket` | Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-2025-0194`): docket metadata plus the documents filed in it (NPRM, final rule, supporting materials). | `docket_id`, `document_types`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `idempotentHint` |
 | `regulations_find_comments` | Fetch public comments on a Federal Register document or a docket from Regulations.gov, resolving comment bodies and flagging when the substance lives in an attachment. The unique corpus — what citizens and organizations actually submitted. | `docket_id`, `document_object_id`, `fr_document_number`, `comment_id`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `openWorldHint` |
 | `regulations_list_open_comments` | Tracking tool: rules currently open for public comment, filterable by agency and topic. "What can I still weigh in on?" Federal Register's open-comment window is the spine; Regulations.gov comment counts enrich each row when the key is present. | `query`, `agencies`, `closing_before`, `per_page`, `page` | Federal Register (+ Regulations.gov enrich) · key optional | `readOnlyHint`, `openWorldHint` |
@@ -107,9 +107,17 @@ The `sync` ingester walks the eCFR `/versioner/v1/titles.json` list, then per ti
 
 **Readiness + live fallback.** The mirror read path (`get_cfr_section`, `browse_cfr` in `search` mode) gates on `await mirror.ready()` (true once a full init has *ever* completed, even mid-refresh). When not ready (cold, never-completed init), both tools **fall back to the live eCFR API** — the versioner `/full/` endpoint for section text, the `/search/v1/results` endpoint for full-text search — so the server is useful before the mirror finishes and during a failed refresh. This keeps the keyless core functional on a fresh deploy.
 
+**The rows have a version, and a stale index is not served.** The columns are stable but their *contents* depend on the ingester that wrote them, and a database on disk outlives the code that produced it — an upgraded server pointed at an older index would keep serving wrong rows with no outward sign. So the ingester stamps an `ingest_version` into `cfr_mirror_meta`, and `mirrorReady()` reports false when the stored value is below the current one (including when it is absent, which is every index built before the marker). Every read path already has a live-eCFR fallback for a cold mirror and takes the same route here; `mirror:verify` prints a warning naming `mirror:refresh` as the fix. Version 2 is the first bump: a section's part now comes from its enclosing `<DIV5 TYPE="PART">` instead of the section number cut at its first dot, which filed 14 CFR 241's dotless sections under parts named after the section.
+
+The stamp certifies the rows, so it is written only once a run has re-derived **every title the index holds** — not merely when the title loop ends. A run abandoned halfway, one narrowed by `ECFR_MIRROR_TITLES`, and one that skipped a title on a failed fetch each leave rows behind that this ingester never wrote, and stamping over them would certify exactly the wrong data as current. A run that leaves a title untouched logs which one and leaves the index stale.
+
+A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:part:section`, so a corrected part yields a new ID and an upsert alone leaves the old row in place — the fix would land and the wrong answer would survive. Each title's page therefore carries tombstones for every row the index holds for that title that this pass is not rewriting, which covers both the migration and sections genuinely withdrawn upstream, and the title's `cfr_part_index` rows are rebuilt rather than merged. Records and tombstones are applied together in one transaction, so a title is never half-rewritten. A title whose document parses to **no** sections is the one case that is not tombstoned at all: a non-reserved title always has sections, so an empty parse is a document the walk could not read (a truncated body, an error page served as XML), and tombstoning against it would delete every row the title holds and still report the run complete.
+
 **Readiness is necessary, not sufficient — coverage decides.** `ECFR_MIRROR_TITLES` makes a *ready* mirror a partial one, and a partial index queried outside its scope returns an empty result set from a corpus that never held the answer. So `browse_cfr` search reads the ingested title set out of `cfr_part_index` and uses the mirror only when that set covers the request: a `title` filter must be in the set, and an all-titles query is served only by an unscoped mirror. Everything else routes live — the contract section reads already follow on a mirror miss. The answering corpus and its coverage come back on every search as `source` + `sourceScope`, so an empty result is legible.
 
 **Scheduling + bootstrap (server-owned).** Refresh is registered on a cron via `schedulerService` in `setup()` (weekly is ample — the CFR is amended in discrete issues), gated to the HTTP transport so stdio operators don't double-run it. Init runs **out-of-band** via a `mirror:init` CLI script (idempotent, resumable from the persisted cursor) — never on startup; a full title sweep can take a long time and must not block the server. The three lifecycle scripts (`mirror:init`, `mirror:refresh`, `mirror:verify`) plus the shared `_mirror-context.ts` shim travel in `package.json` `files[]` and are copied into the Docker runtime stage (Bun image, with the `@/`→`./dist/` tsconfig shim) so `docker exec bun run mirror:init` resolves.
+
+**Sections only.** The ingester walks `<DIV8 TYPE="SECTION">` and ignores `<DIV9 TYPE="APPENDIX">`. Appendices are addressed by a verbatim identifier and read deliberately rather than searched in bulk, and one read is a single live versioner call — while their bulk is unbounded relative to the sections (40 CFR 50's appendices are ~9× its section XML), so indexing them buys little and costs a lot. The cost is that the mirror cannot match appendix text, which is indistinguishable from "no such appendix" unless said — so `browse_cfr`'s mirror `sourceScope` says it, `get_cfr_section` routes every appendix read live, and mirror search hits report `appendix: null`.
 
 **Why mirror eCFR but not FR/Regulations.gov:** the CFR is a bounded, slowly-changing corpus queried by exact cite — a perfect mirror fit. Federal Register documents and Regulations.gov dockets/comments are unbounded, volatile, and (Regulations.gov) key-rate-limited; mirroring them buys nothing and goes stale immediately. They stay live.
 
@@ -278,7 +286,9 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
     label: string,                    // e.g. "Part 50—National Primary and Secondary Ambient Air Quality Standards"
     description: string | null,       // label_description
     reserved: boolean,
-    cfrCite: string | null,           // assembled cite for a section/part → regulations_get_cfr_section (e.g. "40 CFR 50.1")
+    cfrCite: string | null,           // → regulations_get_cfr_section: "40 CFR 50.1" (section), "40 CFR 50" (part),
+                                      //   "Appendix A-1 to Part 50, Title 40" (appendix); null on a level with no read path
+    appendix: string | null,          // on an appendix node, the identifier to pass back as the read tool's `appendix`
   }>,
 }
 ```
@@ -296,11 +306,14 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
     title: number,
     part: string,
     section: string | null,
+    appendix: string | null,          // on an appendix hit, the identifier to pass back as the read tool's `appendix`;
+                                      //   always null on a mirror hit — the index holds section text only
     heading: string,                  // the node's name, off the `headings` map (e.g. "Ambient air quality monitoring requirements.")
     hierarchyPath: string,            // live: "Title 40 › Chapter I › Subchapter C › Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans › § 51.190"
                                       // mirror: "Title 14 › Part 25 › § 25.1043" (structural only — the index stores no level names)
     excerpt: string,                  // full_text_excerpt (matched snippet)
-    cfrCite: string,                  // → regulations_get_cfr_section
+    cfrCite: string,                  // → regulations_get_cfr_section; an appendix hit cites the appendix
+                                      //   ("Appendix C to Part 58, Title 40"), not the part around it
   }>,
   truncated?: boolean,
   shown?: number,
@@ -322,6 +335,8 @@ Zero matches is a successful empty result carrying a `notice`, not an error; the
 
 `part` scopes both modes and requires `title` in both: part numbers repeat across the Code, the versioner tree is fetched one title at a time, and eCFR refuses `hierarchy[part]` on its own. A part alone used to be dropped silently — structure mode listed all 50 titles, search mode searched the whole Code — so it is now `title_required_for_part`. A leading "Part " and surrounding whitespace are stripped before either backend sees the value, and a value left blank by that is no filter at all; case and leading zeros are left alone, because `26 CFR 16A` and `14 CFR 1203a` are real parts and folding either would rewrite the caller's request into a different one. A survey of the 2,014 distinct part identifiers across titles 7, 12, 21, 26, 40, 45, 48, and 49 found none that begins with a zero, none that begins with a non-digit, and none carrying whitespace — so the strip can never turn a real part into another one.
 
+**Appendices are reachable from both modes.** A structure-mode appendix node used to carry `cfrCite: null` — visible but with no read path — and a search-mode appendix hit cited its parent part, which resolves to sections that do not contain the matched text. Both now emit the same handle: an `appendix` field holding eCFR's verbatim identifier, and a `cfrCite` in eCFR's own appendix form that leads with it. The mirror never produces one (it indexes `<DIV8 TYPE="SECTION">` text alone), so its `sourceScope` says appendices are not indexed — otherwise an appendix that exists and an appendix that does not both read as zero matches.
+
 The two provenances build `hierarchyPath` differently and say so in the field description. A live hit pairs the part's label with the name eCFR returns beside it; a mirror hit stays structural, because the ingested columns carry no level names. Only the part is named: chapter and subchapter numbers are not caller-supplied anywhere, and naming every level ran the path past 300 characters and the rendered page 34–59% larger on a 50-hit page, against 13–22% for the part alone.
 
 `date_out_of_range` is raised from eCFR's own 400, but the message is not a passthrough: eCFR names its earliest indexed date when a date is too early and says only "not currently available" when a date is too late, so the service appends the full window (`2017-01-03` through the current index date) either way. Passing today's date is the common way to hit the late end.
@@ -330,18 +345,24 @@ The two provenances build `hierarchyPath` differently and say so in the field de
 
 ### 4. `regulations_get_cfr_section`
 
-Read the codified text of a specific CFR section (or a whole part) via eCFR — current or as of a past date. Answers "what does 40 CFR 50.1 say today?" and "...as of 2019-01-01?"
+Read the codified text at a CFR location via eCFR — current or as of a past date. Three locations: one section, a whole part, or one appendix. Answers "what does 40 CFR 50.1 say today?", "...as of 2019-01-01?", and "what does Appendix A-1 to Part 50 say?"
 
 **API:** mirror FTS/row lookup by `${title}:${part}:${section}` (primary), or eCFR `/versioner/v1/full/{date}/title-{n}.xml?part={part}&section={section}` (fallback / historical / part-level). Confirmed live: the versioner returns section XML (`<DIV8 TYPE="SECTION">` with `<HEAD>` and `<P>` children) carrying a `hierarchy_metadata` citation.
+
+**Appendices** come from the same endpoint under `?appendix={identifier}` (`&part=` optional), and are always live — the mirror indexes sections only. Confirmed live across titles: every appendix is a `<DIV9 TYPE="APPENDIX">` node whatever it hangs off, and the filter takes the `N` identifier **verbatim** — a short form such as `A-1` 404s. That identifier is free-form prose, not a letter: of the ~4,100 appendix nodes in the Code, ~1,480 do not begin with the word "Appendix" (`Schedule I to Part 789`, `Exhibit A to Subpart A of Part 1806`, `Special Federal Aviation Regulation No. 88`), so no short form round-trips and the browse output is the source of the string. Most hang off a part (~2,370) or a subpart inside one (~1,700); ~24 hang off a chapter, subchapter, or subtitle and have no part, which is why `part` is optional on this tool and nullable in its output. Identifiers are unique within a part, not within a title — 14 CFR carries seven appendices named `Special Federal Aviation Regulation No. 97`, one per part — so `part` disambiguates and eCFR picks one of the matches without it. An appendix-filtered response is a bare `<DIV9>` with no `<DIV5>` around it, so the part is recovered from the node's `hierarchy_metadata` path.
+
+**An appendix is often nothing but its table.** Extracting only `<P>`/`<FP>` paragraphs answers a table or editorial-note appendix with an empty `bodyText` and no signal that anything was dropped — across a twelve-part sample that was 61% of appendix nodes. The extractor therefore also emits `<TABLE>` (caption, then one pipe-delimited line per row), the flush-paragraph variants (`<FP-1>`, `<FP1-2>`), and an editorial note's `<HED>`/`<PSPACE>`, all in document order. What stays out is `<CITA>` source citations (bibliographic, not text) and image-only figures, which have no text to give — those and `[Reserved]` are the only appendices that still read back empty.
 
 **Input schema:**
 ```ts
 title: z.number().int().min(1).max(50)
   .describe('CFR title number (1–50). E.g. 40 for "Protection of Environment".'),
-part: z.string()
-  .describe('CFR part within the title (e.g. "50"). Parts can be alphanumeric. Obtain from regulations_browse_cfr or from a Federal Register document\'s cfrReferences.'),
+part: z.string().optional()
+  .describe('CFR part within the title (e.g. "50"). Parts can be alphanumeric. Required unless appendix is given, where it is optional but recommended. Obtain from regulations_browse_cfr or from a Federal Register document\'s cfrReferences.'),
 section: z.union([z.literal(''), z.string()]).optional()
-  .describe('Section identifier within the part (e.g. "50.1"). Omit to fetch the entire part — large parts can be very long; prefer a specific section when you know it.'),
+  .describe('Section identifier within the part (e.g. "50.1"). Omit to fetch the entire part — large parts can be very long; prefer a specific section when you know it. Cannot be combined with appendix.'),
+appendix: z.union([z.literal(''), z.string()]).optional()
+  .describe('Appendix identifier, verbatim as eCFR writes it (e.g. "Appendix A-1 to Part 50") — from a regulations_browse_cfr appendix node or search hit. Cannot be combined with section.'),
 date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional()
   .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Default current. eCFR retains historical versions back to ~2017; a date before coverage returns the earliest available and notes it.'),
 ```
@@ -349,29 +370,41 @@ date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional
 **Output:**
 ```ts
 {
-  cfrCite: string,                    // "40 CFR 50.1"
+  cfrCite: string,                    // "40 CFR 50.1" · "40 CFR 50" · "Appendix A-1 to Part 50, Title 40"
+                                      //   a section number that does not embed its part names the part:
+                                      //   "14 CFR 241 § 25", never "14 CFR 25"
   title: number,
-  part: string,
-  section: string | null,             // null when a whole part was requested
+  part: string | null,                // null only for an appendix hanging off a chapter/subchapter/subtitle
+  section: string | null,             // null when a whole part or an appendix was requested
+  appendix: string | null,            // null when a section or whole part was requested
   heading: string,                    // "§ 50.1 Definitions."
   hierarchyPath: string,              // "Title 40 › Chapter I › Subchapter C › Part 50"
   date: string,                       // the issue/point-in-time date the text reflects (ISO 8601)
-  source: 'mirror' | 'live',          // provenance
-  bodyText: string,                   // section text, XML stripped to plain text (paragraph structure preserved)
+  source: 'mirror' | 'live',          // provenance; an appendix read is always live
+  bodyText: string,                   // text, XML stripped to plain text; paragraphs, HD subheadings, editorial
+                                      //   notes, and tables (pipe-delimited rows) kept in document order
   sections?: Array<{                  // present only when a whole part was fetched
     section: string;
     heading: string;
     bodyText: string;
   }>,
+  appendices?: Array<{                // present on a whole-part fetch when the part has appendices
+    appendix: string;                 //   → pass back as this tool's `appendix` input
+    heading: string;
+  }>,
 }
 ```
 
-`format()`: header (cite, heading, hierarchy path, effective date, `source`), then the body text (or, for a part, each section as a markdown subsection).
+`format()`: header (cite, heading, hierarchy path, effective date, `source`), then the body text (or, for a part, each section as a markdown subsection followed by the appendix handles).
+
+**Whole-part reads name appendices, they do not inline them.** A part's appendices routinely outweigh its sections — measured against the live versioner, 40 CFR 50's run to ~9× the section XML (580 KB vs 67 KB) and 12 CFR 1026's to ~3.5× (2.9 MB vs 848 KB), and 40 CFR 60 adds 4.4 MB on top of 9.2 MB. Folding them into every whole-part read would multiply the response for callers who wanted the sections; the identifiers cost nothing and are what a caller needs to read one deliberately.
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
-| `not_found` | `NotFound` | No such title/part/section at that date | Verify the cite with regulations_browse_cfr (structure mode); the part or section may not exist or may be reserved. |
+| `not_found` | `NotFound` | No such title/part/section/appendix at that date | Verify the cite with regulations_browse_cfr (structure mode); the part, section, or appendix may not exist, may be reserved, or — for an appendix — may be named differently than the short form passed. |
+| `location_required` | `InvalidParams` | Neither `part` nor `appendix` given | Add the part to read, or the appendix identifier from regulations_browse_cfr. |
+| `conflicting_target` | `InvalidParams` | Both `section` and `appendix` given | Send one or the other; make two calls to read both. |
 | `date_out_of_range` | `InvalidParams` | `date` precedes eCFR historical coverage | Use a date from ~2017 onward, or omit `date` for the current text. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path, mirror not ready) | Retry; the mirror may still be building — the live eCFR API is the fallback. |
 
