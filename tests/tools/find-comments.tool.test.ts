@@ -7,9 +7,9 @@
  * @module tests/tools/find-comments.tool.test
  */
 
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommentDetailResult, CommentListResult } from '@/services/regulations-gov/types.js';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const hasKey = vi.hoisted(() => vi.fn());
 const listComments = vi.hoisted(() => vi.fn());
@@ -70,7 +70,7 @@ describe('findCommentsTool', () => {
 
   it('throws auth_required when no key is configured', async () => {
     hasKey.mockReturnValue(false);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({ docket_id: 'EPA-HQ-OAR-2025-0194' });
     await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'auth_required' },
@@ -78,7 +78,7 @@ describe('findCommentsTool', () => {
   });
 
   it('throws target_required when no targeting parameter is given', async () => {
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({});
     await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'target_required' },
@@ -88,13 +88,15 @@ describe('findCommentsTool', () => {
   it('rejects a docket and a comment together instead of silently reading the comment', async () => {
     // Regression: comment_id was branched on first, so this call returned detail
     // mode for the comment and dropped docket_id without a word.
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({
       docket_id: 'EPA-HQ-OAR-2025-0194',
       comment_id: 'EPA-HQ-OAR-2025-0194-31120',
       per_page: 5,
     });
-    const err = await findCommentsTool.handler(input, ctx).catch((e: unknown) => e);
+    const err = await Promise.resolve(findCommentsTool.handler(input, ctx)).catch(
+      (e: unknown) => e,
+    );
 
     expect(err).toMatchObject({ data: { reason: 'multiple_targets' } });
     expect((err as Error).message).toContain('docket_id, comment_id');
@@ -122,7 +124,7 @@ describe('findCommentsTool', () => {
       },
     ],
   ])('rejects %s', async (_label, args) => {
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse(args);
     await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'multiple_targets' },
@@ -135,7 +137,7 @@ describe('findCommentsTool', () => {
     // one as a supplied target would turn a perfectly good single-target call
     // into multiple_targets, so the count is of non-empty values.
     listComments.mockResolvedValue(listResult);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({
       docket_id: 'EPA-HQ-OAR-2025-0194',
       comment_id: '',
@@ -168,7 +170,7 @@ describe('findCommentsTool', () => {
 
   it('lists comments on a docket (the headline list goal)', async () => {
     listComments.mockResolvedValue(listResult);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({ docket_id: 'EPA-HQ-OAR-2025-0194' });
     const result = await findCommentsTool.handler(input, ctx);
     expect(result.mode).toBe('list');
@@ -181,7 +183,7 @@ describe('findCommentsTool', () => {
 
   it('reads one comment in detail and surfaces attachmentOnly in the output', async () => {
     getComment.mockResolvedValue(attachmentOnlyDetail);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({ comment_id: 'EPA-HQ-OAR-2025-0194-31102' });
     const result = await findCommentsTool.handler(input, ctx);
     expect(result.mode).toBe('detail');
@@ -194,7 +196,7 @@ describe('findCommentsTool', () => {
   it('resolves an FR document number to its Regulations.gov document then lists', async () => {
     resolveFrDocumentObjectId.mockResolvedValue('0900006484111111');
     listComments.mockResolvedValue(listResult);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({ fr_document_number: '2025-14555' });
     await findCommentsTool.handler(input, ctx);
     expect(resolveFrDocumentObjectId).toHaveBeenCalledWith('2025-14555', ctx);
@@ -206,7 +208,7 @@ describe('findCommentsTool', () => {
 
   it('throws not_found when an FR document has no Regulations.gov document', async () => {
     resolveFrDocumentObjectId.mockResolvedValue(null);
-    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const ctx = handlerContext(findCommentsTool);
     const input = findCommentsTool.input.parse({ fr_document_number: '2025-99999' });
     await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'not_found' },

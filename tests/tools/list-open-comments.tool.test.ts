@@ -7,9 +7,10 @@
  * @module tests/tools/list-open-comments.tool.test
  */
 
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCommentsResponse } from '@/services/federal-register/types.js';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const listOpenComments = vi.hoisted(() => vi.fn());
 const hasKey = vi.hoisted(() => vi.fn());
@@ -60,7 +61,7 @@ describe('listOpenCommentsTool', () => {
   it('lists open rules closing soonest first (the headline goal)', async () => {
     hasKey.mockReturnValue(true);
     listOpenComments.mockResolvedValue(response);
-    const ctx = createMockContext();
+    const ctx = handlerContext(listOpenCommentsTool);
     const input = listOpenCommentsTool.input.parse({});
     const result = await listOpenCommentsTool.handler(input, ctx);
 
@@ -73,7 +74,7 @@ describe('listOpenCommentsTool', () => {
   it('degrades without the key: complete list, null counts, and a notice', async () => {
     hasKey.mockReturnValue(false);
     listOpenComments.mockResolvedValue(response);
-    const ctx = createMockContext();
+    const ctx = handlerContext(listOpenCommentsTool);
     const input = listOpenCommentsTool.input.parse({});
     const result = await listOpenCommentsTool.handler(input, ctx);
 
@@ -92,11 +93,11 @@ describe('listOpenCommentsTool', () => {
       totalCount: 0,
       results: [],
     } satisfies OpenCommentsResponse);
-    const ctx = createMockContext();
+    const ctx = handlerContext(listOpenCommentsTool);
     const result = await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({}), ctx);
     expect(result.results).toEqual([]);
     expect(getEnrichment(ctx).notice).toMatch(/no rules are open for comment/i);
-    expect(listOpenCommentsTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
+    expect(listOpenCommentsTool.errors?.map((e) => e.reason as string)).not.toContain('no_results');
   });
 
   it('format() renders the keyed flag, days-left, and comment counts', () => {

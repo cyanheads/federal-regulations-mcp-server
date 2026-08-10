@@ -9,8 +9,9 @@
  * @module tests/tools/browse-cfr.tool.test
  */
 
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const listTitleNodes = vi.hoisted(() => vi.fn());
 const browseStructure = vi.hoisted(() => vi.fn());
@@ -113,7 +114,7 @@ describe('browseCfrTool', () => {
         cfrCite: null,
       },
     ]);
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'structure', title: 1 });
     const result = await browseCfrTool.handler(input, ctx);
     expect(latestIssueDate).toHaveBeenCalledWith(1, expect.anything());
@@ -124,7 +125,7 @@ describe('browseCfrTool', () => {
 
   it('honors an explicit date for structure expansion (no issue-date lookup)', async () => {
     browseStructure.mockResolvedValue([]);
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'structure', title: 40, date: '2019-06-01' });
     await browseCfrTool.handler(input, ctx);
     expect(latestIssueDate).not.toHaveBeenCalled();
@@ -143,7 +144,7 @@ describe('browseCfrTool', () => {
         appendix: null,
       },
     ]);
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'structure' });
     const result = await browseCfrTool.handler(input, ctx);
     expect(result.mode).toBe('structure');
@@ -158,7 +159,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
     mirrorSearch.mockImplementation(mirrorIndex([1, 11, 14]));
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'air quality', title: 14 });
     const result = await browseCfrTool.handler(input, ctx);
     expect(result.mode).toBe('search');
@@ -174,7 +175,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
     mirrorSearch.mockImplementation(mirrorIndex([14]));
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'air quality', title: 14 });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -185,7 +186,7 @@ describe('browseCfrTool', () => {
   it('carries an appendix hit’s read handle through search mode', async () => {
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 1, results: [appendixHit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', title: 40 });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -204,7 +205,7 @@ describe('browseCfrTool', () => {
     mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
     mirrorSearch.mockResolvedValue({ totalCount: 0, results: [] });
     liveSearch.mockResolvedValue({ totalCount: 6651, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', title: 40 });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -226,7 +227,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
     liveSearch.mockResolvedValue({ totalCount: 1, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient' });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -239,7 +240,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(FULL_MIRROR);
     mirrorSearch.mockResolvedValue({ totalCount: 1, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient' });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -251,7 +252,7 @@ describe('browseCfrTool', () => {
   it('falls back to the live eCFR search when the mirror is not ready (source: live)', async () => {
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 1, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'air quality' });
     const result = await browseCfrTool.handler(input, ctx);
     expect(result.source).toBe('live');
@@ -265,7 +266,7 @@ describe('browseCfrTool', () => {
     // every section, so "current" has to be an explicit point in time.
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 1, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient' });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -287,7 +288,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(FULL_MIRROR);
     liveSearch.mockResolvedValue({ totalCount: 1, results: [hit] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({
       mode: 'search',
       query: 'ambient',
@@ -311,14 +312,14 @@ describe('browseCfrTool', () => {
   it('treats zero matches as a successful empty result naming the corpus searched', async () => {
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'zzzznonexistent' });
     const result = await browseCfrTool.handler(input, ctx);
 
     expect(result.results).toEqual([]);
     expect(result.sourceScope).toContain('Live eCFR search');
     expect(getEnrichment(ctx).notice).toMatch(/no cfr sections matched/i);
-    expect(browseCfrTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
+    expect(browseCfrTool.errors?.map((e) => e.reason as string)).not.toContain('no_results');
   });
 
   it('narrows a live search to one part and says so in the scope', async () => {
@@ -327,7 +328,7 @@ describe('browseCfrTool', () => {
       totalCount: 22,
       results: [{ ...hit, part: '58', section: '58.30', cfrCite: '40 CFR 58.30' }],
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({
       mode: 'search',
       query: 'ambient',
@@ -354,7 +355,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockResolvedValue(true);
     mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
     mirrorSearch.mockImplementation(mirrorIndex([14], ['25', '121']));
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({
       mode: 'search',
       query: 'oxygen',
@@ -375,7 +376,7 @@ describe('browseCfrTool', () => {
     // zero rows rather than an error — a silent miss the caller cannot diagnose.
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({
       mode: 'search',
       query: 'ambient',
@@ -400,7 +401,7 @@ describe('browseCfrTool', () => {
     // zero-stripping would rewrite a caller's part into one that does not exist.
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
-    const ctx = createMockContext();
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({
       mode: 'search',
       query: 'tax',
@@ -413,7 +414,7 @@ describe('browseCfrTool', () => {
   });
 
   it('rejects a part with no title in search mode rather than dropping the filter', async () => {
-    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', part: '58' });
     await expect(browseCfrTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'title_required_for_part' },
@@ -424,7 +425,7 @@ describe('browseCfrTool', () => {
 
   it('rejects a part with no title in structure mode too', async () => {
     // Structure mode used to list all 50 titles and silently ignore the part.
-    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'structure', part: '58' });
     await expect(browseCfrTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'title_required_for_part' },
@@ -435,7 +436,7 @@ describe('browseCfrTool', () => {
   it('passes the normalized part through to structure expansion', async () => {
     latestIssueDate.mockResolvedValue('2026-06-08');
     browseStructure.mockResolvedValue([]);
-    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'structure', title: 40, part: 'part 58' });
     await browseCfrTool.handler(input, ctx);
     expect(browseStructure).toHaveBeenCalledWith(40, '58', '2026-06-08', expect.anything());
@@ -447,7 +448,7 @@ describe('browseCfrTool', () => {
     // restriction — and must not require a title the query does not need.
     mirrorReady.mockResolvedValue(false);
     liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
-    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', part: '   ' });
     const result = await browseCfrTool.handler(input, ctx);
 
@@ -463,7 +464,7 @@ describe('browseCfrTool', () => {
   });
 
   it('throws query_required when search mode has no query', async () => {
-    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const ctx = handlerContext(browseCfrTool);
     const input = browseCfrTool.input.parse({ mode: 'search' });
     await expect(browseCfrTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'query_required' },

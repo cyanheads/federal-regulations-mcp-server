@@ -230,6 +230,8 @@ scripts/
 
 No prompts in v1 — `createApp({ prompts: [] })`.
 
+**`scripts/` is typechecked, and one scaffolded script diverges because of it.** `tsconfig.json` includes `scripts/**/*` and `tests/**/*`, so `tsc --noEmit` reads every hand-written file — the mirror lifecycle scripts ship in `package.json` `files[]` and into the Docker runtime stage, so they are production code. `scripts/lint-mcp.ts` therefore drops the scaffold's `catch` branch importing `../src/linter/validate.js`: that path resolves only inside the framework's own repo, where the script also lives, so in this project the branch is unreachable and its type annotation cannot resolve. The `maintenance` skill re-syncs framework scripts by overwrite; re-drop the branch after a sync rather than narrowing the typecheck to hide it.
+
 ---
 
 ## Naming

@@ -5,9 +5,10 @@
  * @module tests/tools/get-docket.tool.test
  */
 
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocketResult } from '@/services/regulations-gov/types.js';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const hasKey = vi.hoisted(() => vi.fn());
 const getDocket = vi.hoisted(() => vi.fn());
@@ -49,7 +50,7 @@ describe('getDocketTool', () => {
 
   it('throws auth_required when no key is configured', async () => {
     hasKey.mockReturnValue(false);
-    const ctx = createMockContext({ errors: getDocketTool.errors });
+    const ctx = handlerContext(getDocketTool);
     const input = getDocketTool.input.parse({ docket_id: 'EPA-HQ-OAR-2025-0194' });
     await expect(getDocketTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'auth_required' },
@@ -60,7 +61,7 @@ describe('getDocketTool', () => {
   it('pulls a docket and its documents when keyed (the headline goal)', async () => {
     hasKey.mockReturnValue(true);
     getDocket.mockResolvedValue(docket);
-    const ctx = createMockContext({ errors: getDocketTool.errors });
+    const ctx = handlerContext(getDocketTool);
     const input = getDocketTool.input.parse({ docket_id: 'EPA-HQ-OAR-2025-0194' });
     const result = await getDocketTool.handler(input, ctx);
 
@@ -71,7 +72,7 @@ describe('getDocketTool', () => {
   it('discloses truncation when the docket has more documents than the page', async () => {
     hasKey.mockReturnValue(true);
     getDocket.mockResolvedValue({ ...docket, documentCount: 500 });
-    const ctx = createMockContext({ errors: getDocketTool.errors });
+    const ctx = handlerContext(getDocketTool);
     const input = getDocketTool.input.parse({ docket_id: 'EPA-HQ-OAR-2025-0194', per_page: 25 });
     await getDocketTool.handler(input, ctx);
     expect(getEnrichment(ctx).truncated).toBe(true);

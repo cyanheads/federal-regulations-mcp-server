@@ -5,9 +5,10 @@
  * @module tests/tools/search-rules.tool.test
  */
 
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FrSearchResponse } from '@/services/federal-register/types.js';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const searchFn = vi.hoisted(() => vi.fn());
 vi.mock('@/services/federal-register/federal-register-service.js', () => ({
@@ -36,7 +37,7 @@ describe('searchRulesTool', () => {
 
   it('returns matching rules for a query (the headline goal)', async () => {
     searchFn.mockResolvedValue({ totalCount: 1, results: [sampleRow] } satisfies FrSearchResponse);
-    const ctx = createMockContext();
+    const ctx = handlerContext(searchRulesTool);
     const input = searchRulesTool.input.parse({ query: 'air quality', type: ['PRORULE'] });
     const result = await searchRulesTool.handler(input, ctx);
 
@@ -49,13 +50,13 @@ describe('searchRulesTool', () => {
     // Zero matches is an answer, not a failure — the contract must not advertise
     // a no_results error the handler never throws.
     searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse);
-    const ctx = createMockContext();
+    const ctx = handlerContext(searchRulesTool);
     const input = searchRulesTool.input.parse({ query: 'zzzznomatch' });
     const result = await searchRulesTool.handler(input, ctx);
 
     expect(result.results).toEqual([]);
     expect(getEnrichment(ctx).notice).toMatch(/no federal register documents matched/i);
-    expect(searchRulesTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
+    expect(searchRulesTool.errors?.map((e) => e.reason as string)).not.toContain('no_results');
   });
 
   it('discloses truncation when matches exceed the FR navigation ceiling', async () => {
@@ -63,7 +64,7 @@ describe('searchRulesTool', () => {
       totalCount: 8000,
       results: [sampleRow],
     } satisfies FrSearchResponse);
-    const ctx = createMockContext();
+    const ctx = handlerContext(searchRulesTool);
     const input = searchRulesTool.input.parse({ query: 'rule', per_page: 100 });
     await searchRulesTool.handler(input, ctx);
 
@@ -74,7 +75,7 @@ describe('searchRulesTool', () => {
 
   it('does not set truncation fields on a non-truncated result (avoids -32007)', async () => {
     searchFn.mockResolvedValue({ totalCount: 1, results: [sampleRow] } satisfies FrSearchResponse);
-    const ctx = createMockContext();
+    const ctx = handlerContext(searchRulesTool);
     const input = searchRulesTool.input.parse({ query: 'air' });
     await searchRulesTool.handler(input, ctx);
 

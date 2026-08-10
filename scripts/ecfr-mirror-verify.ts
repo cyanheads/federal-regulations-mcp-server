@@ -16,18 +16,24 @@ import {
   mirrorScope,
   mirrorSearch,
 } from '@/services/ecfr-mirror/ecfr-mirror.js';
-import { bootstrapMirrorServices } from './_mirror-context.js';
+import { bootstrapMirrorServices, mirrorLogContext } from './_mirror-context.js';
+
+const logContext = (fields: Record<string, unknown>) =>
+  mirrorLogContext('ecfr-mirror:verify', fields);
 
 await bootstrapMirrorServices();
 
 const status = await ecfrMirror.status();
-logger.info('eCFR mirror status', {
-  ready: status.ready,
-  status: status.status,
-  total: status.total,
-  checkpoint: status.checkpoint,
-  completedAt: status.completedAt,
-});
+logger.info(
+  'eCFR mirror status',
+  logContext({
+    ready: status.ready,
+    status: status.status,
+    total: status.total,
+    checkpoint: status.checkpoint,
+    completedAt: status.completedAt,
+  }),
+);
 
 // A sync that completed can still hold rows a superseded ingester derived
 // wrongly, and the server refuses to read such an index. An operator seeing a
@@ -42,19 +48,25 @@ if (await mirrorIngestStale()) {
 
 if (status.ready) {
   const scope = await mirrorScope();
-  logger.info('eCFR mirror title coverage', {
-    titles: scope.titles.join(', ') || '(none)',
-    complete: scope.complete,
-    // A partial index answers only searches scoped to a title it holds;
-    // everything else, including any all-titles search, routes to live eCFR.
-    answersAllTitleSearches: scope.complete,
-  });
+  logger.info(
+    'eCFR mirror title coverage',
+    logContext({
+      titles: scope.titles.join(', ') || '(none)',
+      complete: scope.complete,
+      // A partial index answers only searches scoped to a title it holds;
+      // everything else, including any all-titles search, routes to live eCFR.
+      answersAllTitleSearches: scope.complete,
+    }),
+  );
 
   const sample = await mirrorSearch('definitions', undefined, undefined, 3);
-  logger.info('eCFR mirror sample query "definitions"', {
-    totalCount: sample.totalCount,
-    firstHit: sample.results[0]?.cfrCite ?? '(none)',
-  });
+  logger.info(
+    'eCFR mirror sample query "definitions"',
+    logContext({
+      totalCount: sample.totalCount,
+      firstHit: sample.results[0]?.cfrCite ?? '(none)',
+    }),
+  );
 }
 
 await ecfrMirror.close();

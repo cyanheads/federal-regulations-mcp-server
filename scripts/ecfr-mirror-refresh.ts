@@ -10,7 +10,7 @@
 
 import { logger } from '@cyanheads/mcp-ts-core/utils';
 import { ecfrMirror } from '@/services/ecfr-mirror/ecfr-mirror.js';
-import { bootstrapMirrorServices, signalFromProcess } from './_mirror-context.js';
+import { bootstrapMirrorServices, mirrorLogContext, signalFromProcess } from './_mirror-context.js';
 
 await bootstrapMirrorServices();
 
@@ -20,10 +20,13 @@ const result = await ecfrMirror.runSync({
   signal: signalFromProcess(),
 });
 
-logger.info('eCFR mirror refresh: complete', {
-  pagesFetched: result.pagesFetched,
-  recordsApplied: result.recordsApplied,
-  total: result.total,
-});
+logger.info(
+  'eCFR mirror refresh: complete',
+  mirrorLogContext('ecfr-mirror:refresh', {
+    pagesFetched: result.pagesFetched,
+    recordsApplied: result.recordsApplied,
+    total: result.total,
+  }),
+);
 
 await ecfrMirror.close();

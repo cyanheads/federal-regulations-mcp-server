@@ -10,7 +10,10 @@
 
 import { logger } from '@cyanheads/mcp-ts-core/utils';
 import { ecfrMirror } from '@/services/ecfr-mirror/ecfr-mirror.js';
-import { bootstrapMirrorServices, signalFromProcess } from './_mirror-context.js';
+import { bootstrapMirrorServices, mirrorLogContext, signalFromProcess } from './_mirror-context.js';
+
+const logContext = (fields: Record<string, unknown>) =>
+  mirrorLogContext('ecfr-mirror:init', fields);
 
 await bootstrapMirrorServices();
 
@@ -19,18 +22,24 @@ const result = await ecfrMirror.runSync({
   mode: 'init',
   signal: signalFromProcess(),
   onProgress: (info) => {
-    logger.info('eCFR mirror init progress', {
-      pages: info.pages,
-      records: info.records,
-      checkpoint: info.checkpoint,
-    });
+    logger.info(
+      'eCFR mirror init progress',
+      logContext({
+        pages: info.pages,
+        records: info.records,
+        checkpoint: info.checkpoint,
+      }),
+    );
   },
 });
 
-logger.info('eCFR mirror init: complete', {
-  pagesFetched: result.pagesFetched,
-  recordsApplied: result.recordsApplied,
-  total: result.total,
-});
+logger.info(
+  'eCFR mirror init: complete',
+  logContext({
+    pagesFetched: result.pagesFetched,
+    recordsApplied: result.recordsApplied,
+    total: result.total,
+  }),
+);
 
 await ecfrMirror.close();

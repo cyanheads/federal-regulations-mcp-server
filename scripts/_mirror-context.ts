@@ -2,8 +2,9 @@
  * @fileoverview Shared bootstrap for the eCFR mirror lifecycle scripts
  * (mirror:init / mirror:refresh / mirror:verify). These run out-of-band (CLI /
  * cron), not inside the MCP request pipeline, so they wire up the minimum the
- * mirror's `sync` ingester needs: the eCFR service (which the ingester calls)
- * and an abort signal. The framework logger is already a global singleton.
+ * mirror's `sync` ingester needs: the eCFR service (which the ingester calls),
+ * an abort signal, and the request context their log lines carry. The framework
+ * logger is already a global singleton.
  *
  * Imported by the three named lifecycle scripts; travels with them into the npm
  * tarball and the Docker runtime stage (see Dockerfile + package.json files[]).
@@ -14,8 +15,20 @@
 import { config } from '@cyanheads/mcp-ts-core/config';
 import { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import type { IStorageProvider, ListResult } from '@cyanheads/mcp-ts-core/storage/types';
-import { logger } from '@cyanheads/mcp-ts-core/utils';
+import { logger, type RequestContext, requestContextService } from '@cyanheads/mcp-ts-core/utils';
 import { initEcfrService } from '@/services/ecfr/ecfr-service.js';
+
+/**
+ * A `RequestContext` carrying `fields`, for the second argument of a `logger`
+ * call. That argument is a RequestContext rather than a bare data bag, so fields
+ * handed over outside one are never correlated to the run that produced them.
+ */
+export function mirrorLogContext(
+  operation: string,
+  fields: Record<string, unknown>,
+): RequestContext {
+  return requestContextService.createRequestContext({ operation, ...fields });
+}
 
 /**
  * A minimal Map-backed in-memory storage provider. The mirror owns its own

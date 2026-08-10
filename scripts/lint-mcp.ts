@@ -20,20 +20,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 // ---------------------------------------------------------------------------
-// Import validateDefinitions — resolve from package or local source
+// Import validateDefinitions from the framework package
 // ---------------------------------------------------------------------------
 
-let validateDefinitions: typeof import('../src/linter/validate.js').validateDefinitions;
-
-try {
-  // Consumer path: installed as a dependency
-  const pkg = await import('@cyanheads/mcp-ts-core/linter');
-  validateDefinitions = pkg.validateDefinitions;
-} catch {
-  // Framework path: running from the framework repo itself
-  const local = await import('../src/linter/validate.js');
-  validateDefinitions = local.validateDefinitions;
-}
+// The scaffold ships a second branch importing `../src/linter/validate.js` — the
+// path that resolves only in the framework's own repo, where this script also
+// lives. That module does not exist in a consumer server, so the branch is dead
+// here and its type annotation is unresolvable; the package import is the only
+// one this repo can satisfy.
+const { validateDefinitions } = await import('@cyanheads/mcp-ts-core/linter');
 
 // ---------------------------------------------------------------------------
 // Definition detection (duck-typing)

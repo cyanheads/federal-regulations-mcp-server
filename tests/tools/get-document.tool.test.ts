@@ -5,9 +5,9 @@
  * @module tests/tools/get-document.tool.test
  */
 
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FrDocumentDetail } from '@/services/federal-register/types.js';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const getDocumentFn = vi.hoisted(() => vi.fn());
 vi.mock('@/services/federal-register/federal-register-service.js', () => ({
@@ -43,7 +43,7 @@ describe('getDocumentTool', () => {
 
   it('returns the document with its cross-source handles (the headline goal)', async () => {
     getDocumentFn.mockResolvedValue(detail);
-    const ctx = createMockContext();
+    const ctx = handlerContext(getDocumentTool);
     const input = getDocumentTool.input.parse({ document_number: '2025-14555' });
     const result = await getDocumentTool.handler(input, ctx);
 
@@ -54,7 +54,7 @@ describe('getDocumentTool', () => {
 
   it('passes include_full_text through to the service', async () => {
     getDocumentFn.mockResolvedValue({ ...detail, fullText: 'Body text.' });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getDocumentTool);
     const input = getDocumentTool.input.parse({
       document_number: '2025-14555',
       include_full_text: true,
