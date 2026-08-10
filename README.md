@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -74,6 +74,8 @@ Explore the codified Code of Federal Regulations via eCFR in two modes. Keyless.
 
 - `structure` mode walks the CFR tree (all 50 titles, or one title's chapters → parts → sections) to discover a cite when the exact citation is unknown
 - `search` mode runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet
+- `title` and `part` scope both modes, so a part surfaced by `structure` can be searched directly instead of filtering a whole title's hits by eye. A part needs its title in either mode — part numbers repeat across the Code — and is matched exactly, so pass it as eCFR writes it (`58`, not `Part 58` or `058`)
+- A live search hit's `hierarchyPath` names the part it sits in (`Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans`), so the subject matter is readable without a second call; a mirror hit's path stays structural, because the index stores no level names
 - Search is served from the synced local mirror (FTS5) only when the mirror's title coverage can answer the request — a title it does not hold, an all-titles query against a scoped mirror, a `date`, or a cold deploy all go to the live eCFR search API instead
 - Every search result reports `source` (`mirror` or `live`) and `sourceScope` — which corpus answered and what it covers, so an empty result is never mistaken for "no such regulation"
 - `date` searches the section text in effect that day; eCFR indexes 2017-01-03 onward, and an undated search is pinned to eCFR's current index date rather than spanning every historical version
@@ -99,6 +101,7 @@ Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-202
 - Docket metadata (title, agency, RIN, abstract) plus the documents filed in it (NPRM, final rule, supporting materials)
 - Each returned document's `objectId` feeds `regulations_find_comments(document_object_id)`; `frDocNum` chains back to `regulations_get_document`
 - A docket often holds hundreds of supporting materials — filter `document_types` to `Proposed Rule` / `Rule` to find the rule documents themselves
+- An unknown docket ID returns the tool's not-found error with a recovery hint, not a raw upstream status
 - Regulations.gov requires a page size of 5–250 and caps a query at 20 pages (5,000 records)
 
 ---
@@ -107,7 +110,8 @@ Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-202
 
 Fetch public comments — the unique corpus of what citizens and organizations actually submitted. Requires `REGULATIONS_GOV_API_KEY`.
 
-- Target with exactly one of: `docket_id` (all comments in a docket), `document_object_id` (comments on one document), `fr_document_number` (convenience — resolves the FR number to its Regulations.gov document internally), or `comment_id` (one comment's full detail)
+- Target with exactly one of: `docket_id` (all comments in a docket), `document_object_id` (comments on one document), `fr_document_number` (convenience — resolves the FR number to its Regulations.gov document internally), or `comment_id` (one comment's full detail). Supplying two is rejected with an actionable error rather than resolved by precedence
+- An ID Regulations.gov cannot resolve comes back as the tool's not-found error with a recovery hint, whether the API reports it as a 404 or as the 400 it uses for an ID it cannot parse
 - The list endpoint returns no body text or attachment info — call with `comment_id` to read a comment's body
 - When a comment's real content is a PDF/DOCX attachment, the body is a stub and `attachmentOnly` is `true`; the attachment download URLs are returned so the agent knows where the substance lives. The flag reaches both the structured output and the rendered text
 - Regulations.gov caps a query at 20 pages (5,000 records); a high-volume docket surfaces a sample, flagged as truncated

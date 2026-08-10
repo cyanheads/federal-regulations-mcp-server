@@ -249,7 +249,7 @@ include_full_text: z.boolean().optional().default(false)
 
 Two modes over the eCFR. `structure` walks the CFR hierarchy (titles → chapters → subchapters → parts → sections) to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path. Both feed `regulations_get_cfr_section`.
 
-**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when its title coverage can answer, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings`; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its title filter is `hierarchy[title]` (a `conditions[…]` parameter is rejected outright), and it indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
+**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when its title coverage can answer, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings` and its `hierarchyPath` takes the part's name from the same map; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its scope filters are `hierarchy[title]` and `hierarchy[part]` (a `conditions[…]` parameter is rejected outright; `hierarchy[part]` with no `hierarchy[title]` is refused with `{"title":["must be specified if specifying hierarchy"]}`, and part matching is exact and case-sensitive — `1203a` hits where `1203A` and `058` silently return zero). It indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
 
 **Input schema:**
 ```ts
@@ -258,7 +258,7 @@ mode: z.enum(['structure', 'search'])
 title: z.number().int().min(1).max(50).optional()
   .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles, or provide to expand one title. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.'),
 part: z.string().optional()
-  .describe('CFR part within the title (structure mode, optional) — narrows the returned tree to one part\'s sections. Parts can be alphanumeric.'),
+  .describe('CFR part within the title, in both modes — structure mode narrows the returned tree to that part\'s sections, search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly, so pass the identifier as eCFR writes it — "58", not "Part 58" or "058".'),
 query: z.union([z.literal(''), z.string().min(2)]).optional()
   .describe('Full-text search phrase (search mode, required in that mode). Ignored in structure mode.'),
 date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional()
@@ -289,14 +289,16 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
   mode: 'search',
   totalCount: number,
   source: 'mirror' | 'live',          // provenance — mirror (synced index) or the live eCFR search API
-  sourceScope: string,                // what that corpus covers — the mirror's titles, or the live index at its date
+  sourceScope: string,                // what that corpus covers — the mirror's titles, or the live index at its date,
+                                      // narrowed by whichever of title and part the call supplied
   date?: string,                      // the day whose text was searched (live source only)
   results: Array<{
     title: number,
     part: string,
     section: string | null,
     heading: string,                  // the node's name, off the `headings` map (e.g. "Ambient air quality monitoring requirements.")
-    hierarchyPath: string,            // structural path, e.g. "Title 40 › Chapter I › Subchapter C › Part 51 › § 51.190"
+    hierarchyPath: string,            // live: "Title 40 › Chapter I › Subchapter C › Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans › § 51.190"
+                                      // mirror: "Title 14 › Part 25 › § 25.1043" (structural only — the index stores no level names)
     excerpt: string,                  // full_text_excerpt (matched snippet)
     cfrCite: string,                  // → regulations_get_cfr_section
   }>,
@@ -312,10 +314,15 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 |:-------|:-----|:-----|:---------|
 | `query_required` | `InvalidParams` | `mode='search'` with no `query` | Provide a `query` phrase for search mode, or switch to `mode='structure'` to browse. |
 | `title_not_found` | `NotFound` | Structure mode, `title` outside 1–50 or reserved/empty | Omit `title` to list all titles, or pick a number in 1–50. |
+| `title_required_for_part` | `InvalidParams` | `part` given with no `title`, either mode | Add the title the part belongs to (e.g. title 40 with part 58), or drop `part`. |
 | `date_out_of_range` | `InvalidParams` | Search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to search the current text. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path) | Retry; eCFR may be momentarily down. |
 
 Zero matches is a successful empty result carrying a `notice`, not an error; the notice names the corpus that was searched so the caller can tell "no such regulation" from "wrong corpus."
+
+`part` scopes both modes and requires `title` in both: part numbers repeat across the Code, the versioner tree is fetched one title at a time, and eCFR refuses `hierarchy[part]` on its own. A part alone used to be dropped silently — structure mode listed all 50 titles, search mode searched the whole Code — so it is now `title_required_for_part`. A leading "Part " and surrounding whitespace are stripped before either backend sees the value, and a value left blank by that is no filter at all; case and leading zeros are left alone, because `26 CFR 16A` and `14 CFR 1203a` are real parts and folding either would rewrite the caller's request into a different one. A survey of the 2,014 distinct part identifiers across titles 7, 12, 21, 26, 40, 45, 48, and 49 found none that begins with a zero, none that begins with a non-digit, and none carrying whitespace — so the strip can never turn a real part into another one.
+
+The two provenances build `hierarchyPath` differently and say so in the field description. A live hit pairs the part's label with the name eCFR returns beside it; a mirror hit stays structural, because the ingested columns carry no level names. Only the part is named: chapter and subchapter numbers are not caller-supplied anywhere, and naming every level ran the path past 300 characters and the rendered page 34–59% larger on a 50-hit page, against 13–22% for the part alone.
 
 `date_out_of_range` is raised from eCFR's own 400, but the message is not a passthrough: eCFR names its earliest indexed date when a date is too early and says only "not currently available" when a date is too late, so the service appends the full window (`2017-01-03` through the current index date) either way. Passing today's date is the common way to hit the late end.
 
@@ -507,9 +514,14 @@ page: z.number().int().min(1).max(20).optional().default(1)
 |:-------|:-----|:-----|:---------|
 | `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured | Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
 | `target_required` | `InvalidParams` | None of docket_id / document_object_id / fr_document_number / comment_id given | Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID. |
+| `multiple_targets` | `InvalidParams` | More than one of the four targeting parameters given | Keep the single target you meant and drop the rest; to read a comment found in a docket listing, call again with `comment_id` alone. |
 | `not_found` | `NotFound` | The target docket/document/comment has no comments or does not exist | Verify the ID; comments often attach to the docket\'s primary document — try docket_id to widen, or check the docket has reached its comment period. |
 | `rate_limited` | `ServiceUnavailable` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
+
+The four targeting parameters are mutually exclusive. The handler counts the non-empty ones before doing any work, so neither zero nor two can resolve by branch order; two used to return detail mode for the `comment_id` and drop the rest without a word. An empty string counts as absent — form-based clients send `""` for a field the caller left untouched, the same reason `query`, `date`, and `section` accept a `''` literal elsewhere in this surface.
+
+The rule stays out of the advertised `inputSchema`. Expressing it as a JSON Schema `oneOf` of four `required` branches validates cleanly for a single target but rejects two shapes the handler accepts — `{docket_id, comment_id: ""}` matches two branches and fails — and replaces both typed errors with `must match exactly one schema in oneOf`, accompanied by `must have required property …` errors naming the parameters a caller should *remove*. JSON Schema cannot express "exactly one non-empty," so the constraint lives in the tool description, all four field descriptions, and the handler.
 
 ---
 
@@ -676,6 +688,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 - **Dockets:** `GET /dockets/{docketId}`. Attributes: `docketType`, `title`, `agencyId`, `rin`, `objectId`, `program`, `dkAbstract`, `modifyDate`.
 - **Comments:** list `GET /comments?filter[commentOnId]={documentObjectId}` or `filter[docketId]={id}`, `sort=-postedDate`. Detail `GET /comments/{commentId}?include=attachments`. **Critical shape (confirmed live):** `attributes.comment` is always `''` (empty string) at list level — the body is never populated in list responses. In detail responses, `comment` contains HTML body text (substantive for citizen comments) or a stub string like "See Attached" / "See attached" for attachment-primary submissions. `attributes.fileFormats` is always `null` at both list and detail level — attachments live in `relationships.attachments.data[]` (ID list) and `included[]` (full records with `attributes.fileFormats[].fileUrl`), only present when `?include=attachments` is specified on the detail call.
 - **Constraints:** `page[size]` **minimum 5**, maximum 250; **max 20 pages (5,000 records) per query** — beyond that, iterate with a `lastModifiedDate` filter window. Rate limit **1,000 req/hr per key**; 429 carries `Retry-After`. Invalid key → **HTTP 403**, `{ error: { code: "API_KEY_INVALID", message } }`.
+- **Two statuses mean "no such record", and 400 is overloaded (confirmed live).** A single-resource lookup whose ID is well formed but matches nothing answers **404** (`"The docket with the specified ID could not be found."`); one whose ID the API cannot parse answers **400** with `{"errors":[{"status":"400","title":"Invalid ID: NO-SUCH-DOCKET-XYZ"}]}`. The same 400 also carries genuine caller mistakes — `"Invalid filter field name: bogusFilter"`, `"Page size parameter must be a positive number of 5 or greater."` — so the service discriminates on the `Invalid ID:` title, not on the status: that one maps to `not_found` with the tool's recovery hint, and every other 400 keeps its `InvalidParams` classification and upstream body. List endpoints never take this path — a bogus `filter[docketId]` returns **200** with `data: []`.
 
 ### Cross-source key map
 | Handle | Lives on | Chains to |
