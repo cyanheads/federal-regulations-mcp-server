@@ -93,6 +93,8 @@ Read the codified text at a CFR location — one section, a whole part, or one a
 - Provide `appendix` to read an appendix, passing the identifier verbatim as `regulations_browse_cfr` emits it (`Appendix A-1 to Part 50`, `Schedule I to Part 789`, `Special Federal Aviation Regulation No. 88`) — the identifiers are prose, not letters, and a short form matches nothing
 - A whole-part read names the part's appendices and their headings but does not inline their text; appendices routinely run several times the length of the sections around them, so reading one is a deliberate second call
 - Current single-section reads are served from the local mirror when ready (the `source` is reported); historical dates, whole-part fetches, appendix reads, and a cold mirror fall back to the live eCFR versioner
+- The text carries what the XML carries: paragraphs, subheadings, editorial notes, tables (one pipe-delimited line per row), figure references, and the trailing source citation — the bracketed Federal Register history (`[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]`) that leads back to the rulemakings behind the text
+- A cite that names nothing returns the tool's not-found error with a recovery hint pointing at `regulations_browse_cfr` structure mode, not a bare upstream status
 - eCFR retains historical versions back to roughly 2017; a date before coverage is rejected with guidance
 
 ---
@@ -324,6 +326,8 @@ bun run mirror:refresh
 # Report row counts, the last-synced issue date, and whether the index is stale
 bun run mirror:verify
 ```
+
+**A sync pass deletes only what it read in full.** Each title's pass removes the rows the pass did not rewrite — how a withdrawn section leaves the index. A response that arrives cut short parses to a prefix of the title, which is indistinguishable from a title that shrank, so the pass first checks that the document it read is whole (its root element is closed) and leaves the title untouched when it is not, rather than deleting everything past the cut and reporting the run complete.
 
 **An index written by an older ingester is not served.** The ingester stamps a version into the mirror once a run has re-derived every title the index holds; when a release changes how rows are derived, an index carrying an older stamp is treated exactly like a cold one — every read falls back to live eCFR until `bun run mirror:refresh` re-derives it. `mirror:verify` says so explicitly, and a refresh removes the rows the previous ingester filed under keys the current one no longer produces. A run that skips a title — a failed fetch, or an `ECFR_MIRROR_TITLES` scope narrower than the index — names it in the log and leaves the stamp unwritten, because those untouched titles are exactly the ones a stamp would certify wrongly.
 

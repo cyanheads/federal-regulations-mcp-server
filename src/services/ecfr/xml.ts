@@ -2,8 +2,13 @@
  * @fileoverview Minimal, dependency-free extraction of CFR text from eCFR
  * versioner XML. The versioner returns `<DIV8 TYPE="SECTION">` and
  * `<DIV9 TYPE="APPENDIX">` elements with a `<HEAD>` heading over body content —
- * paragraphs, `<HD1>`–`<HD7>` subheadings, editorial notes, and tables; this
- * module pulls those into flat records with tags stripped and entities decoded.
+ * paragraphs, `<HD1>`–`<HD7>` subheadings, editorial notes, tables, `<CITA>`
+ * source notes, and `<img>` figure references; this module pulls those into flat
+ * records with tags stripped and entities decoded.
+ *
+ * It also answers whether a fetched document is whole
+ * ({@link isCompleteXmlDocument}), which the mirror ingest asks before letting a
+ * pass over a title delete rows the pass did not rewrite.
  *
  * The walk is structural rather than per-element, because one fact is only
  * available from the enclosing element: a node's **part** comes from the
@@ -101,26 +106,93 @@ function renderTable(inner: string): string {
  * runs on to the next `</FP>` in the document and swallows every block in
  * between. The lookahead ends the tag name at the tag itself, keeping `<P>` from
  * opening on `<PSPACE>`.
+ *
+ * The same family is also written self-closing where it stands for spacing or a
+ * rule rather than for text (`<PSPACE/>`, `<FP-DASH/>`, `<P/>`), and those must
+ * not open a capture: the backreference would run on to the next `</PSPACE>` in
+ * the node and swallow every block between, flattening their paragraph breaks
+ * and dropping the figures among them. A tag closed by `/>` carries nothing to
+ * emit, so the lookbehind ends the alternative there and the scan moves on.
+ *
+ * `<img>` is the one block with no closing tag, so it cannot ride the
+ * backreference and takes an alternative of its own; it is told apart from the
+ * paired blocks by which group matched.
  */
-const BODY_BLOCK = /<(P|FP[\dA-Z-]*|PSPACE|HD[1-7]|HED|TABLE)(?=[\s>/])[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+const BODY_BLOCK =
+  /<(P|FP[\dA-Z-]*|PSPACE|HD[1-7]|HED|TABLE|CITA)(?=[\s>/])[^>]*(?<!\/)>([\s\S]*?)<\/\1\s*>|<img\b([^>]*)>/gi;
+
+/**
+ * A figure reference built from an `<img>` opening-tag attribute run, or an
+ * empty string when the tag names no source — there is no graphic to point at.
+ */
+function figureReference(attrs: string): string {
+  const src = attrs.match(/\bsrc="([^"]*)"/i)?.[1];
+  return src ? `[Figure: ${src}]` : '';
+}
 
 /**
  * Extract body text from a section or appendix fragment: every paragraph,
- * subheading (`<HD1>`–`<HD7>`, an editorial note's `<HED>`) and `<TABLE>` in
- * document order, joined by blank lines, with the `<HEAD>` left out so it isn't
- * duplicated. Subheadings carry the structure of an appendix — the numbered
- * stages of a reference method, the lettered divisions of a model form — so
- * dropping them leaves the body a wall of paragraphs whose numbering refers to
- * headings that are not there.
+ * subheading (`<HD1>`–`<HD7>`, an editorial note's `<HED>`), `<TABLE>`,
+ * `<CITA>` source note, and figure reference in document order, joined by blank
+ * lines, with the `<HEAD>` left out so it isn't duplicated. Subheadings carry the
+ * structure of an appendix — the numbered stages of a reference method, the
+ * lettered divisions of a model form — so dropping them leaves the body a wall of
+ * paragraphs whose numbering refers to headings that are not there.
+ *
+ * A `<CITA>` is the bracketed Federal Register history a section or appendix ends
+ * in ("[45 FR 44502, July 1, 1980, as amended at 62 FR 38652, July 18, 1997]").
+ * It is the one line of codified text that names the rulemakings that produced
+ * it, so it carries verbatim rather than being parsed into document numbers.
+ *
+ * A figure is a graphic the versioner references but does not inline. Its `src`
+ * is the only thing the document holds, and a node whose whole content is one
+ * reads back as an empty body without it — indistinguishable from `[Reserved]`.
  */
 function extractBody(fragment: string): string {
   const withoutHead = fragment.replace(/<HEAD[^>]*>[\s\S]*?<\/HEAD>/i, '');
   const blocks: string[] = [];
   for (const m of withoutHead.matchAll(BODY_BLOCK)) {
-    const text = m[1]?.toUpperCase() === 'TABLE' ? renderTable(m[2] ?? '') : stripTags(m[2] ?? '');
+    const tag = m[1]?.toUpperCase();
+    // No tag name means the `<img>` alternative matched — it has no closing tag
+    // to backreference, so it captures its attribute run instead.
+    const text =
+      tag === undefined
+        ? figureReference(m[3] ?? '')
+        : tag === 'TABLE'
+          ? renderTable(m[2] ?? '')
+          : stripTags(m[2] ?? '');
     if (text) blocks.push(text);
   }
   return blocks.join('\n\n');
+}
+
+/** An XML prologue construct (declaration, comment, doctype) or an element open tag. */
+const PROLOGUE_OR_ELEMENT =
+  /<(?:\?[\s\S]*?\?>|!--[\s\S]*?-->|![^>]*>)|<([A-Za-z][\w.-]*)(?=[\s>/])[^>]*>/g;
+
+/**
+ * Whether an XML document is whole rather than cut short. A versioner response is
+ * a single document under one root element, and that root's closing tag is the
+ * last thing in it — so a body truncated anywhere, by a proxy returning the first
+ * N bytes or a connection dropped mid-stream, is missing it. Content served in
+ * place of a document (an error page, a JSON fault) opens no element at all and
+ * fails the same way.
+ *
+ * The root is read from the document rather than named here: what the versioner
+ * calls its root is upstream's to change, while "the root that opened is closed"
+ * holds for every whole document either way.
+ */
+export function isCompleteXmlDocument(xml: string): boolean {
+  for (const m of xml.matchAll(PROLOGUE_OR_ELEMENT)) {
+    const name = m[1];
+    if (!name) continue; // A declaration, comment, or doctype — the root is further on.
+    // Scanned from an offset rather than over a slice: a whole title document is
+    // up to ~150 MB, and slicing it to search the tail copies all of it.
+    const closing = new RegExp(`</${name.replace(/\./g, '\\.')}\\s*>`, 'gi');
+    closing.lastIndex = m.index + m[0].length;
+    return closing.test(xml);
+  }
+  return false;
 }
 
 /** The `N` attribute — the identifier — on an element's opening-tag attribute run. */

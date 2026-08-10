@@ -37,7 +37,7 @@ import { getServerConfig } from '@/config/server-config.js';
 import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
 import type { EcfrSearchHit, EcfrSectionResult } from '@/services/ecfr/types.js';
-import { parseCfrXml } from '@/services/ecfr/xml.js';
+import { isCompleteXmlDocument, parseCfrXml } from '@/services/ecfr/xml.js';
 
 /** Primary table name for the mirror. */
 const TABLE = 'cfr_sections';
@@ -69,8 +69,16 @@ const INGEST_VERSION_KEY = 'ingest_version';
  *    sections without a dot (14 CFR 241) had every row filed under a part named
  *    after the section, so `14 CFR 241` Section 25 answered searches scoped to
  *    Part 25 — Airworthiness Standards — with traffic-reporting text.
+ * 3. `body_text` carries the `<CITA>` source citation and `[Figure: …]`
+ *    references the extractor now emits. A row written without them answers a
+ *    cite with materially different text than the live path returns for the same
+ *    cite — 41% of sections across a four-title sample — while `source` names
+ *    which corpus answered but not that its text is short. The read tool states
+ *    that the citation and figure references are present and that the body is
+ *    empty only for a reserved location, so a row lacking them contradicts the
+ *    contract the tool advertises rather than merely trailing it.
  */
-const INGEST_VERSION = 2;
+const INGEST_VERSION = 3;
 
 /** Composite primary-key value for a section row: `title:part:section`. */
 function rowId(title: number, part: string, section: string): string {
@@ -201,6 +209,20 @@ export const ecfrMirror: Mirror = defineMirror({
 
       const xml = await fetchTitleXml(ecfr, title.number, issueDate, ctx);
       if (!xml) continue;
+
+      // A pass may tombstone only what it read in full. A document that arrives
+      // cut short — a dropped stream, a proxy answering 200 with the first N
+      // bytes — parses to a prefix of the title's sections, and every section
+      // past the cut would be deleted as though it had been withdrawn upstream.
+      // A prefix is indistinguishable from a title that genuinely shrank, so the
+      // question is asked of the document rather than of the row count.
+      if (!isCompleteXmlDocument(xml)) {
+        logger.warning(
+          `eCFR mirror: title ${title.number} (${issueDate}) arrived incomplete — its root element is unclosed; leaving its existing rows untouched`,
+          requestContextService.createRequestContext({ operation: 'ecfr-mirror:sync' }),
+        );
+        continue;
+      }
 
       const { sections } = parseCfrXml(xml);
       const records: MirrorRow[] = [];

@@ -1,14 +1,31 @@
 /**
  * @fileoverview Tests for the eCFR versioner XML parser — section and appendix
- * extraction, the part each node sits in, tag stripping, entity decoding, and
- * multi-section parts. The part cases carry the weight: it is read from the
- * enclosing `<DIV5 TYPE="PART">`, and the fixtures below are the shapes that
- * string surgery on a section number gets wrong.
+ * extraction, the part each node sits in, tag stripping, entity decoding,
+ * multi-section parts, the source citations and figure references the body
+ * carries, and whether a fetched document arrived whole. The part cases carry
+ * the weight: the part is read from the enclosing `<DIV5 TYPE="PART">`, and the
+ * fixtures below are the shapes that string surgery on a section number gets
+ * wrong.
+ *
+ * The completeness cases run against a whole title document captured verbatim
+ * from the versioner (`tests/fixtures/`), truncated here, because the property
+ * under test is one only a real document has.
  * @module tests/services/ecfr-xml.test
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { parseCfrXml } from '@/services/ecfr/xml.js';
+import { isCompleteXmlDocument, parseCfrXml } from '@/services/ecfr/xml.js';
+
+/**
+ * `GET /versioner/v1/full/2024-05-17/title-3.xml`, byte for byte — the smallest
+ * whole title the Code has (31 KB, 4 parts, 27 sections) and therefore the one
+ * that can be checked in.
+ */
+const TITLE_3_DOCUMENT = readFileSync(
+  new URL('../fixtures/ecfr-title-3-2024-05-17.xml', import.meta.url),
+  'utf-8',
+);
 
 describe('parseCfrXml sections', () => {
   it('extracts a single section with heading and paragraph body', () => {
@@ -85,6 +102,33 @@ describe('parseCfrXml sections', () => {
     expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(
       'A1 = Integrated ion current.\n\nStep two\n\nMiddle paragraph.\n\nFlush paragraph.',
     );
+  });
+
+  it('carries the source citation verbatim as the last line of the body', () => {
+    // 3 CFR 101.5, verbatim. The bracketed FR history is the bridge from
+    // codified text back to the rulemakings that produced it, which is the
+    // handoff regulations_search_rules / regulations_get_document take.
+    const xml = `<DIV8 N="101.5" TYPE="SECTION" VOLUME="1">
+<HEAD>§ 101.5   Council on Environmental Quality.</HEAD>
+<P>Freedom of Information regulations for the Council on Environmental Quality appear at 40 CFR Ch. V.
+</P>
+<CITA TYPE="N">[42 FR 65131, Dec. 30, 1977]
+
+
+</CITA>
+</DIV8>`;
+    expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(
+      'Freedom of Information regulations for the Council on Environmental Quality appear at 40 CFR Ch. V.\n\n[42 FR 65131, Dec. 30, 1977]',
+    );
+  });
+
+  it('carries an amended section’s full citation history', () => {
+    const xml = `<DIV8 TYPE="SECTION" N="50.1"><HEAD>§ 50.1 Definitions.</HEAD>
+      <P>(a) As used in this part.</P>
+      <CITA TYPE="N">[36 FR 22384, Nov. 25, 1971, as amended at 41 FR 11253, Mar. 17, 1976; 81 FR 68276, Oct. 3, 2016]</CITA></DIV8>`;
+    const body = parseCfrXml(xml).sections[0]!.bodyText;
+    expect(body).toContain('as amended at 41 FR 11253, Mar. 17, 1976; 81 FR 68276, Oct. 3, 2016');
+    expect(body.split('\n\n').at(-1)).toMatch(/^\[36 FR 22384/);
   });
 
   it('returns nothing when there are no sections', () => {
@@ -194,6 +238,49 @@ describe('parseCfrXml appendices', () => {
     expect(parseCfrXml(xml).appendices).toEqual([]);
   });
 
+  it('renders a figure-only appendix as its graphic reference, not an empty body', () => {
+    // 16 CFR part 1610's Figure 1, verbatim: the node's whole content is an
+    // <img>, so a dropped reference reads back identical to [Reserved].
+    const xml = `<DIV9 N="Figure 1 to Part 1610" TYPE="APPENDIX" hierarchy_metadata="{&quot;path&quot;:&quot;/on/_SUBSTITUTE_DATE_/title-16/part-1610/appendix-Figure 1 to Part 1610&quot;}">
+<HEAD>Figure 1 to Part 1610&#x2014;Sketch of Flammability Apparatus
+</HEAD>
+<img src="/graphics/er25mr08.000.gif"/>
+</DIV9>`;
+    expect(parseCfrXml(xml).appendices[0]!.bodyText).toBe('[Figure: /graphics/er25mr08.000.gif]');
+  });
+
+  it('keeps a figure reference in document order among the paragraphs', () => {
+    const xml = `<DIV8 TYPE="SECTION" N="1610.6"><HEAD>§ 1610.6 X.</HEAD>
+      <P>Before the figure.</P>
+      <img src="/graphics/er25mr08.001.gif"/>
+      <P>After the figure.</P></DIV8>`;
+    expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(
+      'Before the figure.\n\n[Figure: /graphics/er25mr08.001.gif]\n\nAfter the figure.',
+    );
+  });
+
+  it('emits nothing for a figure the document names no source for', () => {
+    const xml = `<DIV8 TYPE="SECTION" N="1610.6"><HEAD>§ 1610.6 X.</HEAD>
+      <P>Before.</P><img/><P>After.</P></DIV8>`;
+    expect(parseCfrXml(xml).sections[0]!.bodyText).toBe('Before.\n\nAfter.');
+  });
+
+  it('does not let a self-closing block tag swallow the blocks after it', () => {
+    // 40 CFR 53.23's shape: <PSPACE/> and <FP-DASH/> stand for spacing and a
+    // signature rule. Read as an opening tag, either runs on to the next closing
+    // tag of its own name and takes the blocks between with it — their paragraph
+    // breaks flattened into one run and any figure among them gone.
+    const xml = `<DIV8 TYPE="SECTION" N="53.23"><HEAD>§ 53.23 X.</HEAD>
+      <PSPACE/>
+      <FP-2>v = 64.9 mi/hr</FP-2>
+      <img src="/graphics/er25oc16.095.gif"/>
+      <FP-2>w = 7.1 mi/hr</FP-2>
+      <PSPACE>Closing tag of the same name, further down the node.</PSPACE></DIV8>`;
+    expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(
+      'v = 64.9 mi/hr\n\n[Figure: /graphics/er25oc16.095.gif]\n\nw = 7.1 mi/hr\n\nClosing tag of the same name, further down the node.',
+    );
+  });
+
   it('keeps sections and appendices apart in one document', () => {
     const xml = `<DIV5 TYPE="PART" N="50">
       <DIV8 TYPE="SECTION" N="50.1"><HEAD>§ 50.1 Definitions.</HEAD><P>Terms.</P></DIV8>
@@ -202,5 +289,48 @@ describe('parseCfrXml appendices', () => {
     const { sections, appendices } = parseCfrXml(xml);
     expect(sections.map((s) => s.section)).toEqual(['50.1']);
     expect(appendices.map((a) => a.appendix)).toEqual(['Appendix B to Part 50']);
+  });
+});
+
+describe('isCompleteXmlDocument', () => {
+  it('accepts a whole title document as the versioner serves it', () => {
+    expect(isCompleteXmlDocument(TITLE_3_DOCUMENT)).toBe(true);
+  });
+
+  it('rejects the same document cut short at every point along its length', () => {
+    // A proxy answering 200 with the first N bytes, or a stream that drops: the
+    // parse still yields sections, so only the document itself says it is short.
+    const cuts = Array.from({ length: 200 }, (_, i) =>
+      Math.floor((TITLE_3_DOCUMENT.length * (i + 1)) / 201),
+    );
+    const complete = cuts.filter((cut) => isCompleteXmlDocument(TITLE_3_DOCUMENT.slice(0, cut)));
+    expect(complete).toEqual([]);
+  });
+
+  it('rejects a cut that lands after the last full section', () => {
+    // The nastiest truncation: everything that parsed is valid and the tail is
+    // gone with it, so a row-count heuristic sees a title that merely shrank.
+    const lastSectionEnd = TITLE_3_DOCUMENT.lastIndexOf('</DIV8>') + '</DIV8>'.length;
+    const truncated = TITLE_3_DOCUMENT.slice(0, lastSectionEnd);
+    expect(parseCfrXml(truncated).sections.length).toBeGreaterThan(0);
+    expect(isCompleteXmlDocument(truncated)).toBe(false);
+  });
+
+  it('rejects a body that is not a document at all', () => {
+    // What the versioner answers for a title it has no content for.
+    expect(isCompleteXmlDocument('{"error":"No matching content found."}')).toBe(false);
+    expect(isCompleteXmlDocument('')).toBe(false);
+  });
+
+  it('reads the root off the document rather than assuming the versioner names it', () => {
+    expect(isCompleteXmlDocument('<?xml version="1.0"?>\n<DIV1 N="3"><P>x</P></DIV1>\n')).toBe(
+      true,
+    );
+    expect(isCompleteXmlDocument('<?xml version="1.0"?>\n<DIV1 N="3"><P>x</P>')).toBe(false);
+  });
+
+  it('looks past a comment before the root element', () => {
+    expect(isCompleteXmlDocument('<!-- </ECFR> -->\n<ECFR><P>x</P></ECFR>')).toBe(true);
+    expect(isCompleteXmlDocument('<!-- </ECFR> -->\n<ECFR><P>x</P>')).toBe(false);
   });
 });

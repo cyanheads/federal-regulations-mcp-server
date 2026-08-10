@@ -27,7 +27,7 @@ US federal regulatory law as one workflow server over three official sources: th
 | `regulations://document/{documentNumber}` | A single Federal Register document (same payload as `regulations_get_document`, metadata + cross-source handles, full text omitted). Stable-URI context injection. | No |
 | `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section (same payload as `regulations_get_cfr_section` at the current date). | No |
 
-Both resources mirror a tool's `get` output for clients that support injectable context; every datum is reachable through the tool surface, so tool-only clients lose nothing.
+Both resources mirror a tool's `get` output for clients that support injectable context; every datum is reachable through the tool surface, so tool-only clients lose nothing. Each declares the reasons its own path can raise — `not_found` and `upstream_unavailable` — with hints scoped to what a URI template can address (the CFR-section hint names sections and drops the tool's appendix clause, since an appendix identifier is prose and has no path segment). Both share their tool's service call, so declaring nothing would emit the service's reason with no hint behind it. Resource failures arrive at the JSON-RPC level (`error.data.reason`) rather than inside a result envelope.
 
 ### Prompts
 
@@ -74,6 +74,33 @@ Each source is its own service with independent base URL, auth, retry, and rate-
 
 **Resilience (all three):** service method wraps the full fetch+parse pipeline in `withRetry` from `@cyanheads/mcp-ts-core/utils`. Backoff calibration: 200–500ms base for FR/eCFR (ephemeral failures), 1–2s for Regulations.gov (rate-limited — honor `Retry-After` on 429). `fetchWithTimeout` maps non-OK → `ServiceUnavailable`; the response handler detects HTML error pages (FR and eCFR both serve HTML error pages on some failures) and throws transient errors rather than `SerializationError`. eCFR section text is XML — the service parses `<DIV*>`/`<HEAD>`/`<P>` into structured text + headings.
 
+### Error contracts — what carries a reason, and what does not
+
+Each definition's `errors[]` is its advertised failure surface: a caller switches on `data.reason` to decide what to do next, and reads `data.recovery.hint` (mirrored into `content[]` as a `Recovery:` line) to know what that is. A declared reason nothing raises is worse than no entry at all — the tool advertises a signal the caller waits for and never gets, leaving it to parse message text.
+
+**Every reason declared on this surface is raised, and it is attached wherever the failure is first known.** Two places qualify, covering different failures:
+
+- **The handler**, via `ctx.fail(reason, …)` — for anything decided from the inputs, or from a value a service returned: `conflicting_target`, `location_required`, `target_required`, `multiple_targets`, `query_required`, `title_required_for_part`, `auth_required`, `date_out_of_range` on the read tool, and the `not_found` a service reports by returning `null` (`getSectionText`, `getAppendixText`, `resolveFrDocumentObjectId`).
+- **The service**, by putting `reason` in the thrown error's `data` and spreading `ctx.recoveryFor(reason)` — for anything decided from an upstream response, which no handler sees. `ctx.recoveryFor` resolves against whichever definition is calling, so one service throw carries each tool's own hint, and returns `{}` where the caller declares nothing. This is how `rate_limited`, the Regulations.gov `not_found` (404, and the 400 that reports an unparseable ID), the search `date_out_of_range`, `title_not_found`, the Federal Register `not_found`, and `upstream_unavailable` reach the wire.
+
+**`upstream_unavailable` is stamped on the way out of a service, not raised by a handler.** The failure it names is produced below every handler — `fetchWithTimeout` classifies a 5xx, a network error, or a missed deadline, and `withRetry` exhausts its attempts and re-wraps before the error surfaces — so nothing on that path knows the calling tool's contract, and the answer used to reach the caller with the right code and a null `reason`, for exactly the failure most worth retrying. Every service fetch helper therefore passes its retry pipeline through `withUpstreamReason` (`src/services/upstream-failure.ts`), which stamps the reason and the caller's own hint onto a transport failure and passes everything else through untouched.
+
+Two decisions inside that helper:
+
+- **Only `ServiceUnavailable` and `Timeout` count as transport failures.** A 404, a 400, a 401, or a 429 is an answer, and each already carries a reason of its own that must not be overwritten. This is also what keeps a genuine 5xx from reading as "no such location": `getSectionText` reports a missing cite by returning `null`, and only ever does so for a versioner 404 or a zero-section parse, so a 503 stays a 503 and never surfaces as `not_found`.
+- **A `Timeout` is re-coded to `ServiceUnavailable` when the reason is stamped.** The reason is declared against one code on every definition that carries it, and a contract naming a code the wire contradicts is worse than one that loses the split between "did not answer in time" and "answered 503". That split survives in the message — built from the deadline that was missed — and in the `cause` chain.
+
+**What deliberately carries no reason**, because no declared entry describes it and inventing one would advertise a signal with no meaning:
+
+| Failure | Code on the wire | Why it stays undeclared |
+|:--------|:-----------------|:------------------------|
+| Input rejected by the Zod schema — a title outside 1–50, a malformed FR document number, a date that is not ISO 8601 | `InvalidParams` | Rejected at the schema boundary before any handler runs, and the validation error already names the field. |
+| A response body that is neither valid JSON nor a recognizable HTML error page | `ValidationError` | A parse failure, not an unreachable upstream — a baseline code, free to bubble. |
+| Caller cancellation via `ctx.signal` | `InternalError` | The caller ended the request; there is nothing to recover. |
+| A 404 from an eCFR endpoint that always exists (`titles.json`, `ancestry`) | `NotFound`, or absorbed | A 404 is translated only where it can mean "no such record" — the versioner `full` and `structure` routes, and the Regulations.gov single-resource routes. `ancestry` is a nicety whose failure is swallowed into a bare `Title N` path. |
+
+`tests/tools/error-contracts.test.ts` holds the invariant: it drives the real services against a fetch harness and asserts on `structuredContent.error.data.reason` and the `Recovery:` line, so a reason that stops reaching the wire fails a test instead of going quiet.
+
 ### eCFR mirror (MirrorService — T2)
 
 The codified CFR is large (~50 titles, hundreds of MB of XML; Title 40 alone is ~154 MB) but changes far less often than it is queried. It is mirrored once into an embedded SQLite + FTS5 index and queried as the primary path for section lookup and CFR full-text search, rather than paginating the live eCFR versioner per request.
@@ -107,11 +134,13 @@ The `sync` ingester walks the eCFR `/versioner/v1/titles.json` list, then per ti
 
 **Readiness + live fallback.** The mirror read path (`get_cfr_section`, `browse_cfr` in `search` mode) gates on `await mirror.ready()` (true once a full init has *ever* completed, even mid-refresh). When not ready (cold, never-completed init), both tools **fall back to the live eCFR API** — the versioner `/full/` endpoint for section text, the `/search/v1/results` endpoint for full-text search — so the server is useful before the mirror finishes and during a failed refresh. This keeps the keyless core functional on a fresh deploy.
 
-**The rows have a version, and a stale index is not served.** The columns are stable but their *contents* depend on the ingester that wrote them, and a database on disk outlives the code that produced it — an upgraded server pointed at an older index would keep serving wrong rows with no outward sign. So the ingester stamps an `ingest_version` into `cfr_mirror_meta`, and `mirrorReady()` reports false when the stored value is below the current one (including when it is absent, which is every index built before the marker). Every read path already has a live-eCFR fallback for a cold mirror and takes the same route here; `mirror:verify` prints a warning naming `mirror:refresh` as the fix. Version 2 is the first bump: a section's part now comes from its enclosing `<DIV5 TYPE="PART">` instead of the section number cut at its first dot, which filed 14 CFR 241's dotless sections under parts named after the section.
+**The rows have a version, and a stale index is not served.** The columns are stable but their *contents* depend on the ingester that wrote them, and a database on disk outlives the code that produced it — an upgraded server pointed at an older index would keep serving wrong rows with no outward sign. So the ingester stamps an `ingest_version` into `cfr_mirror_meta`, and `mirrorReady()` reports false when the stored value is below the current one (including when it is absent, which is every index built before the marker). Every read path already has a live-eCFR fallback for a cold mirror and takes the same route here; `mirror:verify` prints a warning naming `mirror:refresh` as the fix. Version 2: a section's part comes from its enclosing `<DIV5 TYPE="PART">` instead of the section number cut at its first dot, which filed 14 CFR 241's dotless sections under parts named after the section. Version 3: `body_text` carries the `<CITA>` source citation and the figure references the extractor now emits. What separates a bump from mere staleness is whether the stored row contradicts what the read tool says it holds — a row without its citation answers a cite with different text than the live path returns for that same cite (41% of sections across four whole titles), and the tool's `bodyText` contract states the citation is there, so the row is wrong rather than behind.
 
 The stamp certifies the rows, so it is written only once a run has re-derived **every title the index holds** — not merely when the title loop ends. A run abandoned halfway, one narrowed by `ECFR_MIRROR_TITLES`, and one that skipped a title on a failed fetch each leave rows behind that this ingester never wrote, and stamping over them would certify exactly the wrong data as current. A run that leaves a title untouched logs which one and leaves the index stale.
 
-A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:part:section`, so a corrected part yields a new ID and an upsert alone leaves the old row in place — the fix would land and the wrong answer would survive. Each title's page therefore carries tombstones for every row the index holds for that title that this pass is not rewriting, which covers both the migration and sections genuinely withdrawn upstream, and the title's `cfr_part_index` rows are rebuilt rather than merged. Records and tombstones are applied together in one transaction, so a title is never half-rewritten. A title whose document parses to **no** sections is the one case that is not tombstoned at all: a non-reserved title always has sections, so an empty parse is a document the walk could not read (a truncated body, an error page served as XML), and tombstoning against it would delete every row the title holds and still report the run complete.
+A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:part:section`, so a corrected part yields a new ID and an upsert alone leaves the old row in place — the fix would land and the wrong answer would survive. Each title's page therefore carries tombstones for every row the index holds for that title that this pass is not rewriting, which covers both the migration and sections genuinely withdrawn upstream, and the title's `cfr_part_index` rows are rebuilt rather than merged. Records and tombstones are applied together in one transaction, so a title is never half-rewritten.
+
+**A pass may tombstone only what it read in full.** Deleting every row a pass did not rewrite is correct when the pass read the whole title and destructive when it did not: a response that arrives partial — a dropped stream, a proxy answering 200 with the first N bytes — parses to a prefix of the title's sections, and everything past the cut is deleted as though it had been withdrawn upstream. The loss is silent, because the run reports complete and `mirrorScope()` still lists the title, so searches scoped to it are answered locally from a corpus that no longer holds the answer. A prefix is indistinguishable from a title that genuinely shrank, so the question is asked of the document rather than of the row count: a versioner response is a single XML document under one root element whose closing tag is the last thing in it, so a body truncated anywhere is missing it, and content served in place of a document (an error page, a JSON fault) opens no element at all. The root is read from the document rather than named in code — what the versioner calls its root is upstream's to change, while "the root that opened is closed" holds either way. A title that fails the check is logged and left exactly as it was. A document that parses to **no** sections is left alone for the same reason by a second guard: a non-reserved title always has sections, so an empty parse is a document the walk could not read.
 
 **Readiness is necessary, not sufficient — coverage decides.** `ECFR_MIRROR_TITLES` makes a *ready* mirror a partial one, and a partial index queried outside its scope returns an empty result set from a corpus that never held the answer. So `browse_cfr` search reads the ingested title set out of `cfr_part_index` and uses the mirror only when that set covers the request: a `title` filter must be in the set, and an all-titles query is served only by an unscoped mirror. Everything else routes live — the contract section reads already follow on a mirror miss. The answering corpus and its coverage come back on every search as `source` + `sourceScope`, so an empty result is legible.
 
@@ -248,8 +277,9 @@ include_full_text: z.boolean().optional().default(false)
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `not_found` | `NotFound` | No FR document with that number | Verify the number via regulations_search_rules; FR numbers look like "2025-14555". |
-| `invalid_number` | `InvalidParams` | Number fails the format check | Use the documentNumber from a search result, formatted like "YYYY-NNNNN". |
-| `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait. |
+| `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
+
+A number that fails the `^[0-9]{4}-[0-9]+$` check is rejected by the input schema, so it is an `InvalidParams` naming the field rather than a contract reason.
 
 ---
 
@@ -326,7 +356,7 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `query_required` | `InvalidParams` | `mode='search'` with no `query` | Provide a `query` phrase for search mode, or switch to `mode='structure'` to browse. |
-| `title_not_found` | `NotFound` | Structure mode, `title` outside 1–50 or reserved/empty | Omit `title` to list all titles, or pick a number in 1–50. |
+| `title_not_found` | `NotFound` | Structure mode where eCFR publishes no tree for the title at that date (reserved title, or a date outside coverage — both confirmed live as a versioner 404), or where the part is absent from the tree it does publish | Omit `part` to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all. |
 | `title_required_for_part` | `InvalidParams` | `part` given with no `title`, either mode | Add the title the part belongs to (e.g. title 40 with part 58), or drop `part`. |
 | `date_out_of_range` | `InvalidParams` | Search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to search the current text. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path) | Retry; eCFR may be momentarily down. |
@@ -351,7 +381,15 @@ Read the codified text at a CFR location via eCFR — current or as of a past da
 
 **Appendices** come from the same endpoint under `?appendix={identifier}` (`&part=` optional), and are always live — the mirror indexes sections only. Confirmed live across titles: every appendix is a `<DIV9 TYPE="APPENDIX">` node whatever it hangs off, and the filter takes the `N` identifier **verbatim** — a short form such as `A-1` 404s. That identifier is free-form prose, not a letter: of the ~4,100 appendix nodes in the Code, ~1,480 do not begin with the word "Appendix" (`Schedule I to Part 789`, `Exhibit A to Subpart A of Part 1806`, `Special Federal Aviation Regulation No. 88`), so no short form round-trips and the browse output is the source of the string. Most hang off a part (~2,370) or a subpart inside one (~1,700); ~24 hang off a chapter, subchapter, or subtitle and have no part, which is why `part` is optional on this tool and nullable in its output. Identifiers are unique within a part, not within a title — 14 CFR carries seven appendices named `Special Federal Aviation Regulation No. 97`, one per part — so `part` disambiguates and eCFR picks one of the matches without it. An appendix-filtered response is a bare `<DIV9>` with no `<DIV5>` around it, so the part is recovered from the node's `hierarchy_metadata` path.
 
-**An appendix is often nothing but its table.** Extracting only `<P>`/`<FP>` paragraphs answers a table or editorial-note appendix with an empty `bodyText` and no signal that anything was dropped — across a twelve-part sample that was 61% of appendix nodes. The extractor therefore also emits `<TABLE>` (caption, then one pipe-delimited line per row), the flush-paragraph variants (`<FP-1>`, `<FP1-2>`), and an editorial note's `<HED>`/`<PSPACE>`, all in document order. What stays out is `<CITA>` source citations (bibliographic, not text) and image-only figures, which have no text to give — those and `[Reserved]` are the only appendices that still read back empty.
+**An appendix is often nothing but its table.** Extracting only `<P>`/`<FP>` paragraphs answers a table or editorial-note appendix with an empty `bodyText` and no signal that anything was dropped — across a twelve-part sample that was 61% of appendix nodes. The extractor therefore also emits `<TABLE>` (caption, then one pipe-delimited line per row), the flush-paragraph variants (`<FP-1>`, `<FP1-2>`), and an editorial note's `<HED>`/`<PSPACE>`, all in document order.
+
+Two ways a block tag is not what it looks like, both of which the capture has to name. A variant tag name has to be matched in full, because the closing tag is found by backreference and a group that captured only `FP` from `<FP-2>` runs on to the next `</FP>`. And the same family is written self-closing where it stands for spacing or a rule rather than for text — `<PSPACE/>`, `<FP-DASH/>`, `<P/>` — which must not open a capture at all, for the same reason in the other direction: it would run on to the next closing tag of that name and take the blocks between with it, flattening their paragraph breaks and dropping any figure among them. Across five whole titles the self-closing shape reaches 6 nodes, all in Title 40 — rare enough that a sample drawn from smaller titles reads as though it does not occur.
+
+**Source citations and figure references carry too.** Every section and appendix ends in a `<CITA>` giving the Federal Register cites that established and amended it (`[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]`). That string is the bridge from codified text back to `regulations_search_rules` / `regulations_get_document`, so it carries verbatim as a trailing line rather than being parsed into structured FR numbers — the verbatim string is what a caller feeds back. A figure is an `<img src="/graphics/…">` the versioner references but does not inline; it renders as `[Figure: /graphics/…]` in document order, because a node whose whole content is one otherwise reads back identical to `[Reserved]`. What comes back empty now is only a node whose XML holds nothing but its heading: `[Reserved]` in all but a handful of agency variants on the same shape (16 CFR 460.7 is `[Research]`).
+
+Measured over four whole titles (3, 4, 11, 16 — 2,994 sections, 143 appendices): section `bodyText` grew 1.48% in total, +37 characters on the mean section, with 41% of sections carrying a citation at all; appendix `bodyText` grew 6.4%, and the 77 appendices reading back blank in that sample dropped to zero. Citations are the bulk of the increase; figures are what it buys.
+
+That 41% is also why the ingest marker moves to 3. A mirror row written by the previous ingester holds the shorter body, and a current single-section read is served from the mirror when one is ready — so the same cite would answer with the citation or without it depending only on which corpus replied, with `source` naming the corpus but nothing saying its text was short. A marker bump routes every read live until `mirror:refresh` re-derives the rows, which is the one state in which the `bodyText` contract holds for both answers.
 
 **Input schema:**
 ```ts
@@ -382,7 +420,8 @@ date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional
   date: string,                       // the issue/point-in-time date the text reflects (ISO 8601)
   source: 'mirror' | 'live',          // provenance; an appendix read is always live
   bodyText: string,                   // text, XML stripped to plain text; paragraphs, HD subheadings, editorial
-                                      //   notes, and tables (pipe-delimited rows) kept in document order
+                                      //   notes, tables (pipe-delimited rows), the trailing <CITA> source
+                                      //   citation, and figure references kept in document order
   sections?: Array<{                  // present only when a whole part was fetched
     section: string;
     heading: string;
@@ -406,7 +445,7 @@ date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional
 | `location_required` | `InvalidParams` | Neither `part` nor `appendix` given | Add the part to read, or the appendix identifier from regulations_browse_cfr. |
 | `conflicting_target` | `InvalidParams` | Both `section` and `appendix` given | Send one or the other; make two calls to read both. |
 | `date_out_of_range` | `InvalidParams` | `date` precedes eCFR historical coverage | Use a date from ~2017 onward, or omit `date` for the current text. |
-| `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path, mirror not ready) | Retry; the mirror may still be building — the live eCFR API is the fallback. |
+| `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout / HTML error page (live path) | Retry after a brief wait; the eCFR API may be momentarily unavailable. |
 
 ---
 
@@ -462,7 +501,7 @@ page: z.number().int().min(1).max(20).optional().default(1)
 |:-------|:-----|:-----|:---------|
 | `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured | Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
 | `not_found` | `NotFound` | No docket with that ID | Verify the docket ID from a Federal Register document\'s docketId; format is like "EPA-HQ-OAR-2025-0194". |
-| `rate_limited` | `ServiceUnavailable` | Regulations.gov 429 (1,000 req/hr per key) | Wait and retry — the per-key hourly limit was hit. |
+| `rate_limited` | `RateLimited` | Regulations.gov 429 (1,000 req/hr per key) | Wait and retry — the per-key hourly limit was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
 ---
@@ -549,7 +588,7 @@ page: z.number().int().min(1).max(20).optional().default(1)
 | `target_required` | `InvalidParams` | None of docket_id / document_object_id / fr_document_number / comment_id given | Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID. |
 | `multiple_targets` | `InvalidParams` | More than one of the four targeting parameters given | Keep the single target you meant and drop the rest; to read a comment found in a docket listing, call again with `comment_id` alone. |
 | `not_found` | `NotFound` | The target docket/document/comment has no comments or does not exist | Verify the ID; comments often attach to the docket\'s primary document — try docket_id to widen, or check the docket has reached its comment period. |
-| `rate_limited` | `ServiceUnavailable` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
+| `rate_limited` | `RateLimited` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
 The four targeting parameters are mutually exclusive. The handler counts the non-empty ones before doing any work, so neither zero nor two can resolve by branch order; two used to return detail mode for the `comment_id` and drop the rest without a word. An empty string counts as absent — form-based clients send `""` for a field the caller left untouched, the same reason `query`, `date`, and `section` accept a `''` literal elsewhere in this surface.

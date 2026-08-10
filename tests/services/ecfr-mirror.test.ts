@@ -312,6 +312,15 @@ describe('eCFR mirror ingest', () => {
     expect(await mod.mirrorReady()).toBe(false);
   });
 
+  it('refuses an index whose rows predate the source citations in body_text', async () => {
+    // Marker 2 is what a 0.2.0 mirror carries. Its rows hold a body without the
+    // <CITA> the extractor now emits, so a current single-section read served
+    // from it answers the same cite with different text than the live path — and
+    // `source` names the corpus, not that its text is short.
+    const mod = await seedMirror({ held: [14], corpus: [14], ingestVersion: 2 });
+    expect(await mod.mirrorIngestStale()).toBe(true);
+  });
+
   it('treats an index with no ingest marker as superseded', async () => {
     const mod = await seedMirror({ held: [14], corpus: [14] });
     expect(await mod.mirrorIngestStale()).toBe(true);
@@ -353,6 +362,28 @@ describe('eCFR mirror ingest', () => {
 
     expect((await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows).toHaveLength(before);
     expect(await mod.mirrorSearch('airworthiness', 14, '25', 20)).toMatchObject({ totalCount: 1 });
+  });
+
+  it('leaves a title alone when its document arrives cut short mid-parse', async () => {
+    // The destructive case the zero-section guard does not cover: the document
+    // is cut after Part 25 closes, so it still parses to a section and looks
+    // exactly like a title that shrank to one. Tombstoning against it deletes
+    // everything past the cut and reports the run complete.
+    const mod = await seedMirror({ held: [14], corpus: [14], ingestVersion: 1 });
+    await ingestTitle14(mod, 'refresh');
+    const before = (await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows.length;
+    const truncated = TITLE_14_XML.slice(0, TITLE_14_XML.indexOf('</DIV5>') + '</DIV5>'.length);
+
+    const { parseCfrXml } = await import('@/services/ecfr/xml.js');
+    expect(parseCfrXml(truncated).sections).toHaveLength(1);
+
+    fetchFullTitleXml.mockResolvedValue(truncated);
+    await mod.ecfrMirror.runSync({ mode: 'refresh', signal: new AbortController().signal });
+
+    // Every section past the cut is still readable.
+    expect((await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows).toHaveLength(before);
+    expect(await mod.ecfrMirror.getByIds(['14:241:25', '14:241:1-1'])).toHaveLength(2);
+    expect(await mod.mirrorSearch('traffic', 14, '241', 20)).toMatchObject({ totalCount: 1 });
   });
 
   it('tombstones only inside the title being synced', async () => {
