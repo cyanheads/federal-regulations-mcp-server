@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-08-10
+
+Declared not_found/upstream_unavailable/title_not_found reasons now reach callers on every tool and resource, the eCFR mirror guards against ingesting truncated title documents, CFR body text carries source citations and figure references (mirror re-ingest required), and scripts/ plus tests/ are now typechecked.
+
 ## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-08-10 · ⚠️ Breaking
 
 regulations_get_cfr_section reads CFR appendices by verbatim identifier, with appendix handles surfaced from regulations_browse_cfr; the eCFR mirror now files dotless-numbered sections under their correct part and versions its ingest so stale rows fall back to live eCFR.

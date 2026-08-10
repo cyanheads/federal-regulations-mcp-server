@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-08-10 02:27:33
+Generated on: 2026-08-10 03:56:04
 
 ```text
 federal-regulations-mcp-server/
@@ -168,9 +168,14 @@ federal-regulations-mcp-server/
 │   │   ├── regulations-gov/
 │   │   │   ├── regulations-gov-service.ts
 │   │   │   └── types.ts
-│   │   └── request-context.ts
+│   │   ├── request-context.ts
+│   │   └── upstream-failure.ts
 │   └── index.ts
 ├── tests/
+│   ├── fixtures/
+│   │   └── ecfr-title-3-2024-05-17.xml
+│   ├── helpers/
+│   │   └── handler-context.ts
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── services/
@@ -179,14 +184,16 @@ federal-regulations-mcp-server/
 │   │   ├── ecfr-xml.test.ts
 │   │   ├── federal-register-service.test.ts
 │   │   └── regulations-gov-service.test.ts
-│   └── tools/
-│       ├── browse-cfr.tool.test.ts
-│       ├── find-comments.tool.test.ts
-│       ├── get-cfr-section.tool.test.ts
-│       ├── get-docket.tool.test.ts
-│       ├── get-document.tool.test.ts
-│       ├── list-open-comments.tool.test.ts
-│       └── search-rules.tool.test.ts
+│   ├── tools/
+│   │   ├── browse-cfr.tool.test.ts
+│   │   ├── error-contracts.test.ts
+│   │   ├── find-comments.tool.test.ts
+│   │   ├── get-cfr-section.tool.test.ts
+│   │   ├── get-docket.tool.test.ts
+│   │   ├── get-document.tool.test.ts
+│   │   ├── list-open-comments.tool.test.ts
+│   │   └── search-rules.tool.test.ts
+│   └── tsconfig-coverage.test.ts
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes
