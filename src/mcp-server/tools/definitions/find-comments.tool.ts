@@ -2,8 +2,10 @@
  * @fileoverview regulations_find_comments — fetch public comments on a Federal
  * Register document or a Regulations.gov docket, or one comment's full detail and
  * attachments. The unique corpus of what citizens and organizations submitted.
- * Key-gated. Flags when a comment's substance lives in an attachment rather than
- * inline text, surfacing the attachment download URLs.
+ * Key-gated. Exactly one of the four targeting parameters selects the mode; the
+ * handler counts the supplied targets before doing any work, so neither zero nor
+ * two can resolve by branch order. Flags when a comment's substance lives in an
+ * attachment rather than inline text, surfacing the attachment download URLs.
  * @module mcp-server/tools/definitions/find-comments.tool
  */
 
@@ -11,6 +13,21 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
 import { escapePipes } from './format-utils.js';
+
+/**
+ * The four mutually exclusive targeting parameters, in the order the error
+ * message lists them. `comment_id` selects detail mode; the other three each
+ * select a list scope. A parameter present but empty counts as absent — form-
+ * based clients send `""` for a field the caller left untouched.
+ */
+const TARGET_PARAMS = [
+  'docket_id',
+  'document_object_id',
+  'fr_document_number',
+  'comment_id',
+] as const;
+
+type TargetParam = (typeof TARGET_PARAMS)[number];
 
 export const findCommentsTool = tool('regulations_find_comments', {
   title: 'regulations_find_comments',
@@ -22,25 +39,25 @@ export const findCommentsTool = tool('regulations_find_comments', {
       .string()
       .optional()
       .describe(
-        'Fetch all comments in a docket by docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Broadest scope. One of docket_id / document_object_id / fr_document_number / comment_id is required.',
+        'Fetch all comments in a docket by docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Broadest scope. Exactly one of docket_id / document_object_id / fr_document_number / comment_id is required — supplying two is rejected, not resolved by precedence.',
       ),
     document_object_id: z
       .string()
       .optional()
       .describe(
-        "Fetch comments on one specific document by its Regulations.gov object ID (the objectId from regulations_get_docket's documents). Comments usually attach to the docket's primary (proposed-rule) document.",
+        "Fetch comments on one specific document by its Regulations.gov object ID (the objectId from regulations_get_docket's documents). Comments usually attach to the docket's primary (proposed-rule) document. Mutually exclusive with the other three targeting parameters.",
       ),
     fr_document_number: z
       .string()
       .optional()
       .describe(
-        'Convenience: fetch comments for a Federal Register document by its FR number (e.g. "2025-14555"). Resolves to the Regulations.gov document internally. Saves a get_document → get_docket hop.',
+        'Convenience: fetch comments for a Federal Register document by its FR number (e.g. "2025-14555"). Resolves to the Regulations.gov document internally. Saves a get_document → get_docket hop. Mutually exclusive with the other three targeting parameters.',
       ),
     comment_id: z
       .string()
       .optional()
       .describe(
-        'Fetch one comment\'s full detail and attachments by its Regulations.gov comment ID (e.g. "EPA-HQ-OAR-2025-0194-31102"). Use to read a single comment\'s body after finding it in a list.',
+        'Fetch one comment\'s full detail and attachments by its Regulations.gov comment ID (e.g. "EPA-HQ-OAR-2025-0194-31102"). Use to read a single comment\'s body after finding it in a list. Mutually exclusive with the other three targeting parameters — pass it alone, not alongside the docket it came from.',
       ),
     per_page: z
       .number()
@@ -187,6 +204,13 @@ export const findCommentsTool = tool('regulations_find_comments', {
         'Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID.',
     },
     {
+      reason: 'multiple_targets',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'More than one of docket_id / document_object_id / fr_document_number / comment_id was given.',
+      recovery:
+        'Keep the single target you meant and drop the rest: comment_id reads one comment in detail, the other three list a set. To read a comment found in a docket listing, call again with comment_id alone.',
+    },
+    {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
       when: 'The target docket/document/comment has no comments or does not exist.',
@@ -214,9 +238,29 @@ export const findCommentsTool = tool('regulations_find_comments', {
       throw ctx.fail('auth_required', undefined, { ...ctx.recoveryFor('auth_required') });
     }
 
+    // Resolve which single parameter targets the query before doing any work.
+    // Two targets is a caller-state bug — picking one by branch order would
+    // answer a question nobody asked, and hide the mistake behind a success.
+    const given = TARGET_PARAMS.map((name) => [name, input[name]] as const).filter(
+      (entry): entry is readonly [TargetParam, string] => Boolean(entry[1]),
+    );
+
+    const targeted = given[0];
+    if (!targeted) {
+      throw ctx.fail('target_required', undefined, { ...ctx.recoveryFor('target_required') });
+    }
+    if (given.length > 1) {
+      throw ctx.fail(
+        'multiple_targets',
+        `regulations_find_comments takes exactly one targeting parameter; ${given.length} were given (${given.map(([name]) => name).join(', ')}).`,
+        { ...ctx.recoveryFor('multiple_targets') },
+      );
+    }
+    const [targetParam, targetValue] = targeted;
+
     // Detail mode: one comment by ID.
-    if (input.comment_id) {
-      const detail = await service.getComment(input.comment_id, ctx);
+    if (targetParam === 'comment_id') {
+      const detail = await service.getComment(targetValue, ctx);
       if (detail.attachmentOnly) {
         ctx.enrich.notice(
           `The substance of this comment is in ${detail.attachments.length} attachment(s) — see the attachment download URLs.`,
@@ -225,28 +269,26 @@ export const findCommentsTool = tool('regulations_find_comments', {
       return { mode: 'detail' as const, ...detail };
     }
 
-    // List mode: resolve the target.
+    // List mode: turn the one target into an upstream filter.
     let filter: { commentOnId: string } | { docketId: string };
     let target: string;
-    if (input.document_object_id) {
-      filter = { commentOnId: input.document_object_id };
-      target = `document ${input.document_object_id}`;
-    } else if (input.fr_document_number) {
-      const objectId = await service.resolveFrDocumentObjectId(input.fr_document_number, ctx);
+    if (targetParam === 'document_object_id') {
+      filter = { commentOnId: targetValue };
+      target = `document ${targetValue}`;
+    } else if (targetParam === 'fr_document_number') {
+      const objectId = await service.resolveFrDocumentObjectId(targetValue, ctx);
       if (!objectId) {
         throw ctx.fail(
           'not_found',
-          `Federal Register document ${input.fr_document_number} has no Regulations.gov document to pull comments from.`,
+          `Federal Register document ${targetValue} has no Regulations.gov document to pull comments from.`,
           { recovery: { hint: 'Verify the FR number, or try docket_id to widen the search.' } },
         );
       }
       filter = { commentOnId: objectId };
-      target = `FR document ${input.fr_document_number}`;
-    } else if (input.docket_id) {
-      filter = { docketId: input.docket_id };
-      target = `docket ${input.docket_id}`;
+      target = `FR document ${targetValue}`;
     } else {
-      throw ctx.fail('target_required', undefined, { ...ctx.recoveryFor('target_required') });
+      filter = { docketId: targetValue };
+      target = `docket ${targetValue}`;
     }
 
     const result = await service.listComments(

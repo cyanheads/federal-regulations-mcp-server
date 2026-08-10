@@ -1,9 +1,12 @@
 /**
  * @fileoverview Tests for RegulationsGovService — verifies JSON:API unwrapping of
  * dockets/documents/comments, the comment detail attachment-only detection
- * (stub body + attachment → attachmentOnly), the 429 → rate_limited mapping, and
- * the no-key internal invariant guard. Raw `fetch` is mocked globally; the server config is
- * mocked so the key state is deterministic per suite.
+ * (stub body + attachment → attachmentOnly), the 429 → rate_limited mapping, how
+ * the two "no such record" statuses (404, and the 400 the API uses for an ID it
+ * cannot parse) both reach not_found while every other 400 keeps its caller-error
+ * classification, and the no-key internal invariant guard. Raw `fetch` is mocked
+ * globally; the server config is mocked so the key state is deterministic per
+ * suite.
  * @module tests/services/regulations-gov-service.test
  */
 
@@ -40,6 +43,19 @@ function jsonApiResponse(body: unknown): Response {
 
 function newService(): InstanceType<typeof RegulationsGovService> {
   return new RegulationsGovService({} as AppConfig, {} as StorageService);
+}
+
+/**
+ * The 400 Regulations.gov returns for a single-resource lookup whose ID it
+ * cannot parse — copied from the live API, which answers `/v4/dockets/NO-SUCH-
+ * DOCKET-XYZ` with exactly this body rather than the 404 it uses for a
+ * well-formed ID that matches no record.
+ */
+function invalidId(id: string): Response {
+  return new Response(JSON.stringify({ errors: [{ status: '400', title: `Invalid ID: ${id}` }] }), {
+    status: 400,
+    headers: { 'content-type': 'application/vnd.api+json' },
+  });
 }
 
 describe('RegulationsGovService', () => {
@@ -233,6 +249,55 @@ describe('RegulationsGovService', () => {
     expect(err).toBeInstanceOf(McpError);
     expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
     expect((err as McpError).message).toMatch(/Regulations\.gov/i);
+    expect((err as McpError).data?.reason).toBe('not_found');
+  });
+
+  it('translates the 400 Regulations.gov uses for an unusable docket ID into not_found', async () => {
+    // Regression: a syntactically valid but unparseable ID comes back 400, not
+    // 404, so the caller saw "Regulations.gov returned HTTP 400" with the raw
+    // upstream body instead of the tool's not-found contract.
+    fetchSpy.mockResolvedValueOnce(invalidId('NO-SUCH-DOCKET-XYZ'));
+    const err = await newService()
+      .getDocket({ docketId: 'NO-SUCH-DOCKET-XYZ', perPage: 25, page: 1 }, createMockContext())
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+    expect((err as McpError).data?.reason).toBe('not_found');
+    expect((err as McpError).message).toContain('NO-SUCH-DOCKET-XYZ');
+    expect((err as McpError).message).not.toMatch(/HTTP 400/);
+  });
+
+  it('translates an unusable comment ID the same way', async () => {
+    fetchSpy.mockResolvedValueOnce(invalidId('NO-SUCH-COMMENT-XYZ'));
+    const err = await newService()
+      .getComment('NO-SUCH-COMMENT-XYZ', createMockContext())
+      .catch((e: unknown) => e);
+
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+    expect((err as McpError).data?.reason).toBe('not_found');
+  });
+
+  it.each([
+    ['a bad filter field name', 'Invalid filter field name: bogusFilter'],
+    ['an out-of-range page size', 'Page size parameter must be a positive number of 5 or greater.'],
+  ])('keeps %s as a caller error rather than a missing record', async (_label, title) => {
+    // 400 is overloaded upstream. Blanket-mapping it would tell the caller the
+    // docket does not exist when the request itself was malformed.
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ errors: [{ status: '400', title }] }), { status: 400 }),
+      ),
+    );
+    const err = await newService()
+      .getDocket({ docketId: 'EPA-HQ-OAR-2025-0194', perPage: 25, page: 1 }, createMockContext())
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).code).not.toBe(JsonRpcErrorCode.NotFound);
+    expect((err as McpError).data?.reason).toBeUndefined();
+    // The upstream text still reaches the caller so the real mistake is visible.
+    expect(String((err as McpError).data?.body)).toContain(title);
   });
 
   it('keeps inline body text and does not flag attachmentOnly for a substantive comment', async () => {

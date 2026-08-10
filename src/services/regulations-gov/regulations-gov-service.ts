@@ -4,7 +4,8 @@
  * `find_comments`, and enriches `list_open_comments`. JSON:API responses are
  * unwrapped to flat domain objects. The key is optional at the service level
  * (`hasKey()` lets keyless tools degrade or throw `auth_required`); 429s carry a
- * distinct `rate_limited` signal via `Retry-After`. Comment bodies are
+ * distinct `rate_limited` signal via `Retry-After`, and a 400 that names an
+ * unusable resource ID joins the 404s on the `not_found` path. Comment bodies are
  * HTML-stripped and attachment-primary submissions flagged.
  * @module services/regulations-gov/regulations-gov-service
  */
@@ -172,7 +173,11 @@ export class RegulationsGovService {
     return first?.attributes?.objectId ?? null;
   }
 
-  /** Fetch + parse JSON with key header and retry; maps 429 → rate_limited. */
+  /**
+   * Fetch + parse JSON with key header and retry; maps 429 → rate_limited and
+   * both flavours of "no such record" (404, and the 400 Regulations.gov issues
+   * for an ID it cannot parse) → not_found.
+   */
   private fetchJson<T>(url: string, ctx: Context, operation: string): Promise<T> {
     const key = this.apiKey;
     if (!key) {
@@ -205,8 +210,23 @@ export class RegulationsGovService {
             // contract recovery surfaces, rather than "returned HTTP 404".
             throw notFound(
               'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
-              { operation },
+              { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
             );
+          }
+          if (response.status === 400) {
+            // 400 is overloaded upstream: a resource ID the API cannot parse
+            // ("Invalid ID: …") sits alongside genuine caller mistakes ("Invalid
+            // filter field name: …", "Page size parameter must be …"). Only the
+            // first is a missing record, so discriminate on the body's own text
+            // rather than on the status. Clone first — httpErrorFromResponse
+            // consumes the body for the fall-through case.
+            const invalidId = await readInvalidIdTitle(response.clone());
+            if (invalidId) {
+              throw notFound(
+                `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
+                { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+              );
+            }
           }
           throw await httpErrorFromResponse(response, {
             service: 'Regulations.gov',
@@ -218,6 +238,27 @@ export class RegulationsGovService {
       { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
     );
   }
+}
+
+/**
+ * The offending ID from a Regulations.gov 400 whose body reports an unusable
+ * resource ID, or null for every other 400. The API answers a single-resource
+ * lookup it cannot parse with `{"errors":[{"status":"400","title":"Invalid ID:
+ * <id>"}]}`; a malformed request (bad filter name, out-of-range page size)
+ * carries a different title and must keep its InvalidParams classification.
+ */
+async function readInvalidIdTitle(response: Response): Promise<string | null> {
+  let parsed: { errors?: Array<{ title?: string }> };
+  try {
+    parsed = (await response.json()) as typeof parsed;
+  } catch {
+    return null;
+  }
+  for (const error of parsed.errors ?? []) {
+    const match = /^Invalid ID:\s*(.*)$/.exec(error.title ?? '');
+    if (match) return match[1]?.trim() || null;
+  }
+  return null;
 }
 
 function normalizeDocument(d: JsonApiResource<RawDocumentAttributes>): RegDocument | null {

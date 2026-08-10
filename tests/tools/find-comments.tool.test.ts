@@ -1,8 +1,9 @@
 /**
- * @fileoverview Tests for regulations_find_comments — the auth_required and
- * target_required guards, list mode, detail mode (the attachment-only flag must
- * reach the structured output), and FR-number → document resolution. The
- * RegulationsGovService accessor is mocked.
+ * @fileoverview Tests for regulations_find_comments — the auth_required,
+ * target_required, and multiple_targets guards, the empty-target tolerance the
+ * exactly-one rule is counted against, list mode, detail mode (the
+ * attachment-only flag must reach the structured output), and FR-number →
+ * document resolution. The RegulationsGovService accessor is mocked.
  * @module tests/tools/find-comments.tool.test
  */
 
@@ -82,6 +83,87 @@ describe('findCommentsTool', () => {
     await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'target_required' },
     });
+  });
+
+  it('rejects a docket and a comment together instead of silently reading the comment', async () => {
+    // Regression: comment_id was branched on first, so this call returned detail
+    // mode for the comment and dropped docket_id without a word.
+    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const input = findCommentsTool.input.parse({
+      docket_id: 'EPA-HQ-OAR-2025-0194',
+      comment_id: 'EPA-HQ-OAR-2025-0194-31120',
+      per_page: 5,
+    });
+    const err = await findCommentsTool.handler(input, ctx).catch((e: unknown) => e);
+
+    expect(err).toMatchObject({ data: { reason: 'multiple_targets' } });
+    expect((err as Error).message).toContain('docket_id, comment_id');
+    // Neither mode may have run — the call answered no question at all.
+    expect(getComment).not.toHaveBeenCalled();
+    expect(listComments).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'two list targets',
+      { docket_id: 'EPA-HQ-OAR-2025-0194', document_object_id: '0900006484111111' },
+    ],
+    [
+      'a list target and an FR number',
+      { document_object_id: '0900006484111111', fr_document_number: '2025-14555' },
+    ],
+    [
+      'all four',
+      {
+        docket_id: 'EPA-HQ-OAR-2025-0194',
+        document_object_id: '0900006484111111',
+        fr_document_number: '2025-14555',
+        comment_id: 'EPA-HQ-OAR-2025-0194-31102',
+      },
+    ],
+  ])('rejects %s', async (_label, args) => {
+    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const input = findCommentsTool.input.parse(args);
+    await expect(findCommentsTool.handler(input, ctx)).rejects.toMatchObject({
+      data: { reason: 'multiple_targets' },
+    });
+    expect(resolveFrDocumentObjectId).not.toHaveBeenCalled();
+  });
+
+  it('counts an empty target as absent rather than as a second target', async () => {
+    // Form-based clients send "" for a field the caller never filled in. Reading
+    // one as a supplied target would turn a perfectly good single-target call
+    // into multiple_targets, so the count is of non-empty values.
+    listComments.mockResolvedValue(listResult);
+    const ctx = createMockContext({ errors: findCommentsTool.errors });
+    const input = findCommentsTool.input.parse({
+      docket_id: 'EPA-HQ-OAR-2025-0194',
+      comment_id: '',
+      document_object_id: '',
+    });
+    const result = await findCommentsTool.handler(input, ctx);
+
+    expect(result.mode).toBe('list');
+    expect(listComments).toHaveBeenCalledWith(
+      expect.objectContaining({ filter: { docketId: 'EPA-HQ-OAR-2025-0194' } }),
+      ctx,
+    );
+    expect(getComment).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exactly-one rule out of the advertised input schema', async () => {
+    // A JSON Schema `oneOf` of the four branches rejects this tool's own accepted
+    // shapes client-side — an empty sibling matches no branch — and replaces the
+    // typed target_required / multiple_targets recovery with "must match exactly
+    // one schema in oneOf" plus errors naming the parameters to *add*. The rule
+    // is stated in the tool and field descriptions and enforced in the handler.
+    const { toJSONSchema } = await import('zod/v4/core');
+    const schema = toJSONSchema(findCommentsTool.input, { io: 'input' }) as {
+      oneOf?: unknown;
+      required?: string[];
+    };
+    expect(schema.oneOf).toBeUndefined();
+    expect(schema.required ?? []).toEqual([]);
   });
 
   it('lists comments on a docket (the headline list goal)', async () => {
