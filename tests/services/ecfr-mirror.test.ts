@@ -1,9 +1,10 @@
 /**
  * @fileoverview Tests for the eCFR mirror's title coverage — the fact that
- * decides whether a search may be answered locally at all. Runs against a real
- * SQLite index in a temp dir, because the rule that matters (what the index
- * holds versus what the whole Code is) lives in SQL, and reading it off the
- * environment instead of the file was the original defect.
+ * decides whether a search may be answered locally at all — and for the
+ * title/part scoping of its FTS5 search. Runs against a real SQLite index in a
+ * temp dir, because the rules that matter (what the index holds versus what the
+ * whole Code is; which rows a filter admits) live in SQL, and reading coverage
+ * off the environment instead of the file was the original defect.
  * @module tests/services/ecfr-mirror.test
  */
 
@@ -54,7 +55,20 @@ async function seedMirror(options: { held: number[]; corpus?: number[]; withMeta
     await mod.ecfrMirror.close();
     rmSync(dir, { force: true, recursive: true });
   };
-  return mod.mirrorScope;
+  return mod;
+}
+
+/** One codified section row, as the ingester writes it. */
+function section(title: number, part: string, sectionId: string, bodyText: string) {
+  return {
+    id: `${title}:${part}:${sectionId}`,
+    title,
+    part,
+    section: sectionId,
+    heading: `§ ${sectionId} Heading.`,
+    body_text: bodyText,
+    issue_date: '2026-06-08',
+  };
 }
 
 describe('mirrorScope', () => {
@@ -65,7 +79,7 @@ describe('mirrorScope', () => {
   });
 
   it('reports the titles the index actually holds', async () => {
-    const mirrorScope = await seedMirror({ held: [14, 1, 11] });
+    const { mirrorScope } = await seedMirror({ held: [14, 1, 11] });
     const scope = await mirrorScope();
     expect(scope.titles).toEqual([1, 11, 14]);
   });
@@ -74,21 +88,79 @@ describe('mirrorScope', () => {
     // Regression: a scoped index used to be treated as whole-CFR whenever the
     // serving process happened to boot without ECFR_MIRROR_TITLES set — which is
     // exactly what happens when the scope is applied at build time only.
-    const mirrorScope = await seedMirror({ held: [1, 11, 14] });
+    const { mirrorScope } = await seedMirror({ held: [1, 11, 14] });
     expect((await mirrorScope()).complete).toBe(false);
   });
 
   it('calls an index holding every published title complete', async () => {
-    const mirrorScope = await seedMirror({ held: WHOLE_CFR });
+    const { mirrorScope } = await seedMirror({ held: WHOLE_CFR });
     expect((await mirrorScope()).complete).toBe(true);
   });
 
   it('calls an index built before coverage was recorded incomplete', async () => {
     // No corpus marker means no denominator — assume partial so all-titles
     // searches go live until a refresh writes one.
-    const mirrorScope = await seedMirror({ held: WHOLE_CFR, withMeta: false });
+    const { mirrorScope } = await seedMirror({ held: WHOLE_CFR, withMeta: false });
     const scope = await mirrorScope();
     expect(scope.complete).toBe(false);
     expect(scope.titles).toEqual(WHOLE_CFR);
+  });
+});
+
+describe('mirrorSearch', () => {
+  afterEach(async () => {
+    await cleanup?.();
+    cleanup = undefined;
+    vi.unstubAllEnvs();
+  });
+
+  /** Two parts in one title plus a decoy in another, all matching the phrase. */
+  async function seedSections() {
+    const mod = await seedMirror({ held: [14, 40] });
+    await mod.ecfrMirror.store.applyBatch(
+      [
+        section(14, '25', '25.1043', 'Each engine must supply oxygen to the flight crew.'),
+        section(14, '25', '25.1441', 'Oxygen equipment and supply requirements.'),
+        section(14, '121', '121.333', 'Supplemental oxygen for emergency descent.'),
+        section(40, '58', '58.30', 'Oxygen monitoring of ambient air quality.'),
+      ],
+      [],
+    );
+    return mod.mirrorSearch;
+  }
+
+  it('returns only the requested part when one is given', async () => {
+    const mirrorSearch = await seedSections();
+    const scoped = await mirrorSearch('oxygen', 14, '25', 20);
+
+    expect(scoped.results.map((r) => r.cfrCite).sort()).toEqual([
+      '14 CFR 25.1043',
+      '14 CFR 25.1441',
+    ]);
+    expect(scoped.totalCount).toBe(2);
+  });
+
+  it('returns the whole title when no part is given', async () => {
+    const mirrorSearch = await seedSections();
+    const unscoped = await mirrorSearch('oxygen', 14, undefined, 20);
+
+    expect(unscoped.totalCount).toBe(3);
+    expect(unscoped.results.map((r) => r.part).sort()).toEqual(['121', '25', '25']);
+  });
+
+  it('scopes the part inside the title, not across titles', async () => {
+    // Part numbers repeat across the Code, so a part filter alone would be
+    // ambiguous — the title has to bound it.
+    const mirrorSearch = await seedSections();
+    const other = await mirrorSearch('oxygen', 40, '58', 20);
+
+    expect(other.results.map((r) => r.cfrCite)).toEqual(['40 CFR 58.30']);
+  });
+
+  it('leaves a mirror hit path structural — the index stores no level names', async () => {
+    const mirrorSearch = await seedSections();
+    const { results } = await mirrorSearch('oxygen', 14, '121', 20);
+
+    expect(results[0]!.hierarchyPath).toBe('Title 14 › Part 121 › § 121.333');
   });
 });

@@ -3,7 +3,9 @@
  * the versioner (titles, structure, ancestry, full-text XML) and the search API.
  * Backs `browse_cfr` and `get_cfr_section`, and supplies the title list + XML the
  * eCFR mirror ingester walks. Section XML is parsed by `./xml.ts`. Retry wraps the
- * full fetch + parse pipeline; HTML error pages become transient errors.
+ * full fetch + parse pipeline; HTML error pages become transient errors. Search
+ * scopes through `hierarchy[title]` / `hierarchy[part]`, and a hit's path names
+ * the part it sits in.
  * @module services/ecfr/ecfr-service
  */
 
@@ -279,10 +281,18 @@ export class EcfrService {
    * caller's historical date or {@link EcfrService.currentDate} for "now", never
    * nothing. Title scope goes through `hierarchy[title]`; `conditions[title]` is
    * rejected outright by the endpoint.
+   *
+   * `part` narrows further via `hierarchy[part]`, which eCFR accepts only
+   * alongside `hierarchy[title]` — without it the endpoint answers 400
+   * `{"title":["must be specified if specifying hierarchy"]}`. Callers are
+   * expected to have required a title already; the rejection is passed through
+   * verbatim if one slips past. Part matching is exact and case-sensitive
+   * ("1203a" hits, "1203A" and "058" silently match nothing).
    */
   async search(
     query: string,
     title: number | undefined,
+    part: string | undefined,
     perPage: number,
     date: string,
     ctx: Context,
@@ -293,6 +303,7 @@ export class EcfrService {
       date,
     });
     if (typeof title === 'number') search.set('hierarchy[title]', String(title));
+    if (part) search.set('hierarchy[part]', part);
     const url = `${this.baseUrl}/search/v1/results?${search.toString()}`;
 
     let raw: RawEcfrSearchResponse;
@@ -315,7 +326,7 @@ export class EcfrService {
           },
         );
       }
-      throw invalidParams(rejection.detail, { date, title: title ?? null });
+      throw invalidParams(rejection.detail, { date, title: title ?? null, part: part ?? null });
     }
 
     return {
@@ -468,9 +479,18 @@ function normalizeSearchHit(r: RawEcfrSearchResult): EcfrSearchHit {
 
   const pathSegments: string[] = [];
   if (h.title) pathSegments.push(`Title ${h.title}`);
-  for (const level of [labels.chapter, labels.subchapter, labels.part]) {
+  for (const level of [labels.chapter, labels.subchapter]) {
     const label = stripSearchHtml(level ?? '');
     if (label) pathSegments.push(label);
+  }
+  // The part is the one level whose number tells a reader nothing and whose name
+  // decides whether a hit is worth opening, so it carries both. The other levels
+  // stay bare: chapter and subchapter numbers are not caller-supplied anywhere,
+  // and naming every level runs the path past 300 characters on a 50-hit page.
+  const partLabel = stripSearchHtml(labels.part ?? '');
+  if (partLabel) {
+    const partName = stripSearchHtml(names.part ?? '');
+    pathSegments.push(partName ? `${partLabel} — ${partName}` : partLabel);
   }
   // An appendix hit carries no section, so the appendix label is what places it
   // inside the part.

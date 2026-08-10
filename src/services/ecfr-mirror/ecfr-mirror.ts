@@ -283,17 +283,28 @@ export async function mirrorGetSection(
 /**
  * Full-text search the mirror's FTS5 index. Returns hits with a cite assembled
  * from the stored columns.
+ *
+ * `title` and `part` are exact-equality column filters, matching how the live
+ * eCFR search scopes `hierarchy[title]` / `hierarchy[part]`. A part rides inside
+ * a title the index already holds, so it never changes which corpus answers.
+ *
+ * The stored columns carry no level names, so a mirror hit's `hierarchyPath` is
+ * structural where a live hit's names the part. `sourceScope` says which corpus
+ * answered, and the `hierarchyPath` field description spells out the difference.
  */
 export async function mirrorSearch(
   query: string,
   title: number | undefined,
+  part: string | undefined,
   limit: number,
 ): Promise<{ totalCount: number; results: EcfrSearchHit[] }> {
+  const filters = [
+    ...(typeof title === 'number' ? [{ column: 'title', op: 'eq' as const, value: title }] : []),
+    ...(part ? [{ column: 'part', op: 'eq' as const, value: part }] : []),
+  ];
   const result = await ecfrMirror.query({
     match: toFtsQuery(query),
-    ...(typeof title === 'number'
-      ? { filters: [{ column: 'title', op: 'eq' as const, value: title }] }
-      : {}),
+    ...(filters.length > 0 ? { filters } : {}),
     sort: 'relevance',
     limit,
     offset: 0,
@@ -301,17 +312,17 @@ export async function mirrorSearch(
 
   const results: EcfrSearchHit[] = result.rows.map((row) => {
     const rowTitle = Number(row.title ?? 0);
-    const part = String(row.part ?? '');
+    const rowPart = String(row.part ?? '');
     const section = row.section ? String(row.section) : null;
     const heading = String(row.heading ?? '(untitled)');
     return {
       title: rowTitle,
-      part,
+      part: rowPart,
       section,
       heading,
-      hierarchyPath: `Title ${rowTitle} › Part ${part}${section ? ` › § ${section}` : ''}`,
+      hierarchyPath: `Title ${rowTitle} › Part ${rowPart}${section ? ` › § ${section}` : ''}`,
       excerpt: excerpt(String(row.body_text ?? ''), query),
-      cfrCite: section ? `${rowTitle} CFR ${section}` : `${rowTitle} CFR ${part}`,
+      cfrCite: section ? `${rowTitle} CFR ${section}` : `${rowTitle} CFR ${rowPart}`,
     };
   });
 

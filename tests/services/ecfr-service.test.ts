@@ -1,13 +1,15 @@
 /**
  * @fileoverview Tests for EcfrService — verifies titles/structure normalization,
  * versioner section-XML parsing into plain text, the live search request shape
- * (hierarchy title filter + point-in-time date), how a hit is normalized into a
- * cite plus a name, and the HTML-error-page → transient mapping.
+ * (hierarchy title + part filters, point-in-time date), how a hit is normalized
+ * into a cite, a name, and a path that names the part it sits in, and the
+ * HTML-error-page → transient mapping.
  * fetchWithTimeout is mocked to mirror the real contract (returns on success,
  * throws on non-OK), and the search fake reproduces eCFR's own rejections —
- * unpermitted parameter, too-early date, too-late date — so a request the live
- * API would refuse cannot quietly pass here. Hit fixtures are copied from real
- * responses, including an appendix hit that carries no section.
+ * unpermitted parameter, too-early date, too-late date, a part filter naming no
+ * title — so a request the live API would refuse cannot quietly pass here. Hit
+ * fixtures are copied from real responses, including an appendix hit that
+ * carries no section.
  * @module tests/services/ecfr-service.test
  */
 
@@ -54,7 +56,12 @@ function searchRejected(errors: Record<string, string[]>): Promise<Response> {
  *   `hierarchy[title]`);
  * - a date before the first indexed day is refused, and the body names that day;
  * - a date past the current index date is refused with **no** window in the body,
- *   which is why the service has to supply the upper bound itself.
+ *   which is why the service has to supply the upper bound itself;
+ * - `hierarchy[part]` sent without `hierarchy[title]` is refused, faulting
+ *   `title` — the constraint that forces a part filter to name a title.
+ *
+ * Part matching is exact upstream, so the fake only returns hits when the
+ * requested part matches the fixture's own `hierarchy.part`.
  *
  * `/versioner/v1/titles.json` is served too, so `currentDate()` resolves the same
  * way it does against the real API.
@@ -73,6 +80,10 @@ function ecfrEndpoints(...hits: unknown[]) {
         return searchRejected({ parameters: ['Found unpermitted parameter: :conditions.'] });
       }
     }
+    const part = params.get('hierarchy[part]');
+    if (part !== null && params.get('hierarchy[title]') === null) {
+      return searchRejected({ title: ['must be specified if specifying hierarchy'] });
+    }
     const date = params.get('date');
     if (date && date < FAKE_EARLIEST_DATE) {
       return searchRejected({
@@ -86,7 +97,13 @@ function ecfrEndpoints(...hits: unknown[]) {
         date: ['The content you requested is not currently available in this version of the eCFR.'],
       });
     }
-    return Promise.resolve(jsonResponse({ meta: { total_count: hits.length }, results: hits }));
+    const matched =
+      part === null
+        ? hits
+        : hits.filter((h) => (h as { hierarchy?: { part?: string } }).hierarchy?.part === part);
+    return Promise.resolve(
+      jsonResponse({ meta: { total_count: matched.length }, results: matched }),
+    );
   };
 }
 
@@ -236,7 +253,7 @@ describe('EcfrService', () => {
     // the filter goes out as `hierarchy[title]`.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', 40, 20, FAKE_INDEX_DATE, ctx);
+    const result = await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx);
 
     expect(result.totalCount).toBe(1);
     expect(result.results[0]!.title).toBe(40);
@@ -254,11 +271,82 @@ describe('EcfrService', () => {
     // already says, so every hit rendered as its own citation twice.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, 20, FAKE_INDEX_DATE, ctx)).results[0]!;
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
 
     expect(hit.heading).toBe('Ambient air quality monitoring requirements.');
     expect(hit.heading).not.toBe(hit.cfrCite);
     expect(hit.heading).not.toContain('§');
+  });
+
+  it('narrows a search to one part and returns only that part', async () => {
+    // The part goes out as hierarchy[part]; the fake honors it exactly, so a hit
+    // from Part 58 arriving under a Part 51 filter would mean the filter never
+    // reached the wire.
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT, APPENDIX_HIT));
+    const ctx = createMockContext();
+    const result = await service.search('ambient', 40, '51', 20, FAKE_INDEX_DATE, ctx);
+
+    expect(result.totalCount).toBe(1);
+    expect(result.results.map((r) => r.cfrCite)).toEqual(['40 CFR 51.190']);
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(requested.get('hierarchy[part]')).toBe('51');
+    expect(requested.get('hierarchy[title]')).toBe('40');
+  });
+
+  it('sends no part filter when none was asked for', async () => {
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT, APPENDIX_HIT));
+    const ctx = createMockContext();
+    const result = await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx);
+
+    expect(result.results).toHaveLength(2);
+    expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.has('hierarchy[part]')).toBe(
+      false,
+    );
+  });
+
+  it("surfaces eCFR's own refusal of a part filter that names no title", async () => {
+    // eCFR answers hierarchy[part] without hierarchy[title] with
+    // {"title":["must be specified if specifying hierarchy"]}. The tool guards
+    // against this shape, so if one reaches the service the message must say why.
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
+    const ctx = createMockContext();
+    const err = await service
+      .search('ambient', undefined, '58', 20, FAKE_INDEX_DATE, ctx)
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect((err as McpError).message).toContain('must be specified if specifying hierarchy');
+    expect((err as McpError).data?.part).toBe('58');
+  });
+
+  it('names the part in the hierarchy path instead of repeating its number', async () => {
+    // Regression: every path segment past the title was a number the caller
+    // already had, so a hit gave no hint of what Part 51 is about.
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
+    const ctx = createMockContext();
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
+
+    expect(hit.hierarchyPath).toBe(
+      'Title 40 › Chapter I › Subchapter C › Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans › § 51.190',
+    );
+  });
+
+  it('leaves the other levels bare so the path stays readable', async () => {
+    // Naming every level runs a path past 300 characters, multiplied by up to 50
+    // hits a page. Chapter and subchapter keep their labels only.
+    fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
+    const ctx = createMockContext();
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
+
+    expect(hit.hierarchyPath).toContain('Chapter I ›');
+    expect(hit.hierarchyPath).not.toContain('Environmental Protection Agency');
+    expect(hit.hierarchyPath).not.toContain('Air Programs');
+    // Subpart is skipped entirely — the section heading already says this much.
+    expect(hit.hierarchyPath).not.toContain('Subpart');
   });
 
   it('names the appendix on a hit that has no section', async () => {
@@ -266,11 +354,14 @@ describe('EcfrService', () => {
     // — which named it "Part 58" and lost which appendix it was.
     fetchMock.mockImplementation(ecfrEndpoints(APPENDIX_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, 20, FAKE_INDEX_DATE, ctx)).results[0]!;
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
 
     expect(hit.section).toBeNull();
     expect(hit.heading).toBe('Ambient Air Quality Monitoring Methodology');
     expect(hit.hierarchyPath).toContain('Appendix C to Part 58');
+    // The part name still lands, so the appendix is placed by subject matter too.
+    expect(hit.hierarchyPath).toContain('Part 58 — Ambient Air Quality Surveillance');
     // The part cite still resolves through regulations_get_cfr_section.
     expect(hit.cfrCite).toBe('40 CFR 58');
   });
@@ -280,7 +371,7 @@ describe('EcfrService', () => {
     // not — ran against the whole version history.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', undefined, 5, '2018-01-01', ctx);
+    const result = await service.search('ambient', undefined, undefined, 5, '2018-01-01', ctx);
 
     expect(result.results).toHaveLength(1);
     expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get('date')).toBe(
@@ -291,7 +382,9 @@ describe('EcfrService', () => {
   it('states both ends of the indexed window when a date is too early', async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const err = await service.search('ambient', 40, 5, '2015-06-01', ctx).catch((e: unknown) => e);
+    const err = await service
+      .search('ambient', 40, undefined, 5, '2015-06-01', ctx)
+      .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
     expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
@@ -307,7 +400,9 @@ describe('EcfrService', () => {
     // to pick a date that works unless the service supplies the window.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const err = await service.search('ambient', 40, 5, '2026-12-31', ctx).catch((e: unknown) => e);
+    const err = await service
+      .search('ambient', 40, undefined, 5, '2026-12-31', ctx)
+      .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
     expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
@@ -325,7 +420,7 @@ describe('EcfrService', () => {
     );
     const ctx = createMockContext();
     const err = await service
-      .search('ambient', 40, 5, FAKE_INDEX_DATE, ctx)
+      .search('ambient', 40, undefined, 5, FAKE_INDEX_DATE, ctx)
       .catch((e: unknown) => e);
 
     expect((err as McpError).message).toContain('Found unpermitted parameter');
@@ -345,7 +440,8 @@ describe('EcfrService', () => {
   it('strips <strong> tags the search API wraps around matched terms', async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, 20, FAKE_INDEX_DATE, ctx)).results[0]!;
+    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
 
     expect(hit.excerpt).toBe(
       'The requirements for monitoring ambient air quality for purposes of the plan are located',
@@ -364,7 +460,8 @@ describe('EcfrService', () => {
       }),
     );
     const ctx = createMockContext();
-    const hit = (await service.search('air quality', 40, 20, FAKE_INDEX_DATE, ctx)).results[0]!;
+    const hit = (await service.search('air quality', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+      .results[0]!;
 
     expect(hit.heading).toBe('§ 50.1');
     expect(hit.cfrCite).toBe('40 CFR 50.1');

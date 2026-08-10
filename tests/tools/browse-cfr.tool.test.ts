@@ -2,9 +2,10 @@
  * @fileoverview Tests for regulations_browse_cfr — structure mode (title listing
  * and one-title expansion), search-mode routing between the mirror and live eCFR
  * (title coverage, all-titles queries against a partial mirror, historical
- * dates), the query_required guard, and the source/scope provenance a caller
- * needs to read an empty result correctly. The eCFR service and mirror are
- * mocked.
+ * dates), the part filter on both backends and its normalization, the
+ * query_required and title_required_for_part guards, and the source/scope
+ * provenance a caller needs to read an empty result correctly. The eCFR service
+ * and mirror are mocked.
  * @module tests/tools/browse-cfr.tool.test
  */
 
@@ -53,15 +54,19 @@ const PARTIAL_MIRROR = { complete: false, titles: [1, 11, 14] };
 const FULL_MIRROR = { complete: true, titles: [1, 2, 3] };
 
 /**
- * A mirror index holding one section per title, which honors the title filter it
- * is handed. Passing no filter therefore returns every title's row — the shape a
- * caller sees when a title-scoped search reaches the mirror unscoped.
+ * A mirror index holding one section per title/part pair, which honors the title
+ * and part filters it is handed. Passing no filter therefore returns every row —
+ * the shape a caller sees when a scoped search reaches the mirror unscoped.
  */
-function mirrorIndex(titles: number[]) {
-  return (_query: string, title: number | undefined, limit: number) => {
+function mirrorIndex(titles: number[], parts: string[] = ['50']) {
+  return (_query: string, title: number | undefined, part: string | undefined, limit: number) => {
     const rows = titles
       .filter((t) => title === undefined || t === title)
-      .map((t) => ({ ...hit, title: t, cfrCite: `${t} CFR 50.1` }))
+      .flatMap((t) =>
+        parts
+          .filter((p) => part === undefined || p === part)
+          .map((p) => ({ ...hit, title: t, part: p, cfrCite: `${t} CFR ${p}.1` })),
+      )
       .slice(0, limit);
     return Promise.resolve({ totalCount: rows.length, results: rows });
   };
@@ -164,7 +169,14 @@ describe('browseCfrTool', () => {
     expect(result.results![0]!.cfrCite).toBe('40 CFR 50.1');
     expect(getEnrichment(ctx).totalCount).toBe(6651);
     expect(mirrorSearch).not.toHaveBeenCalled();
-    expect(liveSearch).toHaveBeenCalledWith('ambient', 40, 20, '2026-08-06', expect.anything());
+    expect(liveSearch).toHaveBeenCalledWith(
+      'ambient',
+      40,
+      undefined,
+      20,
+      '2026-08-06',
+      expect.anything(),
+    );
   });
 
   it('searches live for an all-titles query a partial mirror cannot answer', async () => {
@@ -217,6 +229,7 @@ describe('browseCfrTool', () => {
     expect(liveSearch).toHaveBeenCalledWith(
       'ambient',
       undefined,
+      undefined,
       20,
       '2026-08-06',
       expect.anything(),
@@ -242,6 +255,7 @@ describe('browseCfrTool', () => {
     expect(liveSearch).toHaveBeenCalledWith(
       'ambient',
       undefined,
+      undefined,
       20,
       '2018-01-01',
       expect.anything(),
@@ -262,6 +276,147 @@ describe('browseCfrTool', () => {
     expect(result.sourceScope).toContain('Live eCFR search');
     expect(getEnrichment(ctx).notice).toMatch(/no cfr sections matched/i);
     expect(browseCfrTool.errors?.some((e) => e.reason === 'no_results')).toBe(false);
+  });
+
+  it('narrows a live search to one part and says so in the scope', async () => {
+    mirrorReady.mockResolvedValue(false);
+    liveSearch.mockResolvedValue({
+      totalCount: 22,
+      results: [{ ...hit, part: '58', section: '58.30', cfrCite: '40 CFR 58.30' }],
+    });
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({
+      mode: 'search',
+      query: 'ambient',
+      title: 40,
+      part: '58',
+    });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    expect(liveSearch).toHaveBeenCalledWith(
+      'ambient',
+      40,
+      '58',
+      20,
+      '2026-08-06',
+      expect.anything(),
+    );
+    expect(result.results?.map((r) => r.part)).toEqual(['58']);
+    expect(result.sourceScope).toContain('filtered to title 40 part 58');
+  });
+
+  it('narrows a mirror search to one part without changing which corpus answers', async () => {
+    // A part rides inside a title the mirror already holds, so routing keys on
+    // title coverage exactly as before — the part only filters the rows.
+    mirrorReady.mockResolvedValue(true);
+    mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
+    mirrorSearch.mockImplementation(mirrorIndex([14], ['25', '121']));
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({
+      mode: 'search',
+      query: 'oxygen',
+      title: 14,
+      part: '25',
+    });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    expect(result.source).toBe('mirror');
+    expect(mirrorSearch).toHaveBeenCalledWith('oxygen', 14, '25', 20);
+    expect(result.results?.map((r) => r.cfrCite)).toEqual(['14 CFR 25.1']);
+    expect(result.sourceScope).toContain('filtered to title 14 part 25');
+    expect(liveSearch).not.toHaveBeenCalled();
+  });
+
+  it('strips a spelled-out "Part" prefix before either backend sees it', async () => {
+    // Both backends match the part identifier exactly, so "Part 58" would return
+    // zero rows rather than an error — a silent miss the caller cannot diagnose.
+    mirrorReady.mockResolvedValue(false);
+    liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({
+      mode: 'search',
+      query: 'ambient',
+      title: 40,
+      part: ' Part 58 ',
+    });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    expect(liveSearch).toHaveBeenCalledWith(
+      'ambient',
+      40,
+      '58',
+      20,
+      '2026-08-06',
+      expect.anything(),
+    );
+    expect(result.sourceScope).toContain('part 58');
+  });
+
+  it('leaves a part identifier that only looks normalizable alone', async () => {
+    // 26 CFR 16A is a real part and 14 CFR 1203a is another — case-folding or
+    // zero-stripping would rewrite a caller's part into one that does not exist.
+    mirrorReady.mockResolvedValue(false);
+    liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
+    const ctx = createMockContext();
+    const input = browseCfrTool.input.parse({
+      mode: 'search',
+      query: 'tax',
+      title: 26,
+      part: '16A',
+    });
+    await browseCfrTool.handler(input, ctx);
+
+    expect(liveSearch).toHaveBeenCalledWith('tax', 26, '16A', 20, '2026-08-06', expect.anything());
+  });
+
+  it('rejects a part with no title in search mode rather than dropping the filter', async () => {
+    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', part: '58' });
+    await expect(browseCfrTool.handler(input, ctx)).rejects.toMatchObject({
+      data: { reason: 'title_required_for_part' },
+    });
+    expect(liveSearch).not.toHaveBeenCalled();
+    expect(mirrorSearch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a part with no title in structure mode too', async () => {
+    // Structure mode used to list all 50 titles and silently ignore the part.
+    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const input = browseCfrTool.input.parse({ mode: 'structure', part: '58' });
+    await expect(browseCfrTool.handler(input, ctx)).rejects.toMatchObject({
+      data: { reason: 'title_required_for_part' },
+    });
+    expect(listTitleNodes).not.toHaveBeenCalled();
+  });
+
+  it('passes the normalized part through to structure expansion', async () => {
+    latestIssueDate.mockResolvedValue('2026-06-08');
+    browseStructure.mockResolvedValue([]);
+    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const input = browseCfrTool.input.parse({ mode: 'structure', title: 40, part: 'part 58' });
+    await browseCfrTool.handler(input, ctx);
+    expect(browseStructure).toHaveBeenCalledWith(40, '58', '2026-06-08', expect.anything());
+  });
+
+  it('treats a blank part as no filter rather than reporting one that never applied', async () => {
+    // `sourceScope` is what a caller reads to tell "no such regulation" from
+    // "wrong corpus", so a whitespace-only part must not leave it claiming a
+    // restriction — and must not require a title the query does not need.
+    mirrorReady.mockResolvedValue(false);
+    liveSearch.mockResolvedValue({ totalCount: 0, results: [] });
+    const ctx = createMockContext({ errors: browseCfrTool.errors });
+    const input = browseCfrTool.input.parse({ mode: 'search', query: 'ambient', part: '   ' });
+    const result = await browseCfrTool.handler(input, ctx);
+
+    expect(liveSearch).toHaveBeenCalledWith(
+      'ambient',
+      undefined,
+      undefined,
+      20,
+      '2026-08-06',
+      expect.anything(),
+    );
+    expect(result.sourceScope).not.toContain('part');
   });
 
   it('throws query_required when search mode has no query', async () => {

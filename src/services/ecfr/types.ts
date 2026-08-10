@@ -62,7 +62,14 @@ export interface EcfrSectionResult {
   title: number;
 }
 
-/** One hit from the live eCFR search API. */
+/**
+ * One search hit, from the live eCFR search API or the local mirror.
+ *
+ * `hierarchyPath` differs by provenance: a live hit pairs the part's label with
+ * the name eCFR returns for it ("Part 51 — Requirements for Preparation,
+ * Adoption, and Submittal of Implementation Plans"), while a mirror hit is
+ * structural only, because the mirror stores no level names.
+ */
 export interface EcfrSearchHit {
   cfrCite: string;
   excerpt: string;

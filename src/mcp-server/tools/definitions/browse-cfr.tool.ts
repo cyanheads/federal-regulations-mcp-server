@@ -5,6 +5,11 @@
  * answer the request; a scoped mirror, an unscoped (all-titles) query it cannot
  * answer completely, a historical date, or a cold deploy all route to the live
  * eCFR search API. Keyless. Feeds regulations_get_cfr_section.
+ *
+ * `title` and `part` scope both modes; a part with no title is refused rather
+ * than dropped, since part numbers repeat across titles and eCFR rejects the
+ * filter outright. A live search hit's path names the part it sits in, which a
+ * mirror hit cannot do — the index stores no level names.
  * @module mcp-server/tools/definitions/browse-cfr.tool
  */
 
@@ -19,20 +24,54 @@ import {
   mirrorSearch,
 } from '@/services/ecfr-mirror/ecfr-mirror.js';
 
-/** Restriction clause naming the caller's own title filter, if any. */
-function titleFilterClause(title: number | undefined): string {
-  return title === undefined ? '' : `, filtered to title ${title}`;
+/** Restriction clause naming the caller's own title (and part) filter, if any. */
+function filterClause(title: number | undefined, part: string | undefined): string {
+  if (title === undefined) return '';
+  return part === undefined
+    ? `, filtered to title ${title}`
+    : `, filtered to title ${title} part ${part}`;
 }
 
 /** Human-readable coverage of the mirror index, for the `sourceScope` field. */
-function describeMirrorScope(scope: MirrorScope, title: number | undefined): string {
+function describeMirrorScope(
+  scope: MirrorScope,
+  title: number | undefined,
+  part: string | undefined,
+): string {
   const held = scope.complete ? 'all CFR titles' : `CFR titles ${scope.titles.join(', ')}`;
-  return `Local mirror index — ${held}${titleFilterClause(title)}, current text only.`;
+  return `Local mirror index — ${held}${filterClause(title, part)}, current text only.`;
 }
 
 /** Human-readable coverage of the live eCFR search index, for `sourceScope`. */
-function describeLiveScope(date: string, title: number | undefined): string {
-  return `Live eCFR search — all CFR titles${titleFilterClause(title)}, text in effect on ${date}.`;
+function describeLiveScope(
+  date: string,
+  title: number | undefined,
+  part: string | undefined,
+): string {
+  return `Live eCFR search — all CFR titles${filterClause(title, part)}, text in effect on ${date}.`;
+}
+
+/**
+ * Canonicalize a caller-supplied part identifier, or `undefined` when nothing is
+ * left of it. eCFR matches `hierarchy[part]` exactly, and the mirror matches its
+ * `part` column exactly, so "Part 58" and "58 " both return zero rather than an
+ * error — strip the spelled-out prefix and the surrounding whitespace that
+ * produce that silent miss. A value that is blank to begin with, or blank once
+ * stripped, is no filter at all: returning it as one would put "part " in
+ * `sourceScope` and claim a restriction the query never carried.
+ *
+ * Deliberately conservative beyond that: case and leading zeros are left alone.
+ * Real part identifiers include an uppercase one (26 CFR 16A) and lowercase
+ * suffixes (14 CFR 1203a), and none begin with a zero, so folding either would
+ * rewrite a caller's part into a different one.
+ */
+function normalizePart(part: string | undefined): string | undefined {
+  return (
+    part
+      ?.trim()
+      .replace(/^(?:parts?|pts?\.?)\s+/i, '')
+      .trim() || undefined
+  );
 }
 
 const structureNode = z
@@ -69,7 +108,7 @@ const searchHit = z
     hierarchyPath: z
       .string()
       .describe(
-        'Structural path down to the match, e.g. "Title 40 › Chapter I › Part 51 › § 51.190".',
+        'Path down to the match. A live hit names the part it sits in — "Title 40 › Chapter I › Subchapter C › Part 51 — Requirements for Preparation, Adoption, and Submittal of Implementation Plans › § 51.190" — so the subject matter is readable without a second call. A mirror hit is structural only ("Title 14 › Part 25 › § 25.1043"): the index stores no level names. Check `source` before comparing paths across results.',
       ),
     excerpt: z.string().describe('Matched text snippet.'),
     cfrCite: z.string().describe('Assembled cite → regulations_get_cfr_section.'),
@@ -79,7 +118,7 @@ const searchHit = z
 export const browseCfrTool = tool('regulations_browse_cfr', {
   title: 'regulations_browse_cfr',
   description:
-    'Explore the codified Code of Federal Regulations via eCFR in two modes. "structure" walks the CFR hierarchy (all 50 titles, or one title\'s chapters → parts → sections) to discover a cite when the exact citation is unknown. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet. Both modes feed regulations_get_cfr_section. Every search result reports which corpus answered it — the synced local mirror or the live eCFR index — and what that corpus covers, in `source` and `sourceScope`.',
+    'Explore the codified Code of Federal Regulations via eCFR in two modes. "structure" walks the CFR hierarchy (all 50 titles, or one title\'s chapters → parts → sections) to discover a cite when the exact citation is unknown. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet. Both modes accept title and part to narrow the scope, so a part surfaced by structure mode can be searched directly instead of filtering a whole title\'s hits by eye. Both feed regulations_get_cfr_section. Every search result reports which corpus answered it — the synced local mirror or the live eCFR index — and what that corpus covers, in `source` and `sourceScope`.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     mode: z
@@ -100,7 +139,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .string()
       .optional()
       .describe(
-        "CFR part within the title (structure mode, optional) — narrows the returned tree to one part's sections. Parts can be alphanumeric.",
+        'CFR part within the title, in both modes — structure mode narrows the returned tree to that part\'s sections, search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly, so pass the identifier as eCFR writes it — "58", not "Part 58" or "058".',
       ),
     query: z
       .union([z.literal(''), z.string().min(2).describe('Search phrase, at least 2 characters.')])
@@ -149,7 +188,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .string()
       .optional()
       .describe(
-        "What the answering corpus covers — the mirror's title coverage, or the live index and the date it was read at (search mode). Read it before concluding a query found nothing.",
+        "What the answering corpus covers — the mirror's title coverage, or the live index and the date it was read at — narrowed by whichever of title and part the call supplied (search mode). Read it before concluding a query found nothing.",
       ),
     results: z
       .array(searchHit)
@@ -179,6 +218,13 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       recovery: 'Omit title to list all titles, or pick a number in 1–50 and a part that exists.',
     },
     {
+      reason: 'title_required_for_part',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'A part was given with no title. Part identifiers repeat across titles, and eCFR rejects a part filter that names no title.',
+      recovery:
+        'Add the title the part belongs to (e.g. title 40 with part 58), or drop part to search or browse the whole title set.',
+    },
+    {
       reason: 'date_out_of_range',
       code: JsonRpcErrorCode.InvalidParams,
       when: "Search mode with a date outside eCFR's indexed window (before 2017-01-03, or past its current index date).",
@@ -196,6 +242,16 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
   async handler(input, ctx) {
     const service = getEcfrService();
 
+    // A part scopes nothing on its own — part numbers repeat across titles, the
+    // versioner tree is fetched per title, and eCFR refuses `hierarchy[part]`
+    // without `hierarchy[title]`. Saying so beats silently dropping the filter.
+    const part = normalizePart(input.part);
+    if (part && input.title === undefined) {
+      throw ctx.fail('title_required_for_part', undefined, {
+        ...ctx.recoveryFor('title_required_for_part'),
+      });
+    }
+
     if (input.mode === 'structure') {
       if (input.title === undefined) {
         const nodes = await service.listTitleNodes(ctx);
@@ -206,7 +262,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       // resolve an explicit-free request to the title's latest issue date rather
       // than today(). A user-supplied historical date is honored as given.
       const date = input.date || (await service.latestIssueDate(input.title, ctx));
-      const nodes = await service.browseStructure(input.title, input.part || undefined, date, ctx);
+      const nodes = await service.browseStructure(input.title, part, date, ctx);
       return { mode: 'structure' as const, date, nodes };
     }
 
@@ -232,21 +288,28 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     let response: EcfrSearchResponse;
 
     if (answering) {
-      provenance = { source: 'mirror', sourceScope: describeMirrorScope(answering, input.title) };
-      response = await mirrorSearch(query, input.title, input.per_page);
+      provenance = {
+        source: 'mirror',
+        sourceScope: describeMirrorScope(answering, input.title, part),
+      };
+      response = await mirrorSearch(query, input.title, part, input.per_page);
     } else {
       // The live index holds every historical version of every section, so a
       // "current" search still has to name the day it wants.
       const date = input.date || (await service.currentDate(ctx));
-      provenance = { source: 'live', sourceScope: describeLiveScope(date, input.title), date };
-      response = await service.search(query, input.title, input.per_page, date, ctx);
+      provenance = {
+        source: 'live',
+        sourceScope: describeLiveScope(date, input.title, part),
+        date,
+      };
+      response = await service.search(query, input.title, part, input.per_page, date, ctx);
     }
 
     ctx.enrich.total(response.totalCount);
 
     if (response.results.length === 0) {
       ctx.enrich.notice(
-        `No CFR sections matched "${query}". Corpus searched: ${provenance.sourceScope} Broaden the phrase, drop the title filter, or try another title before concluding no such rule exists.`,
+        `No CFR sections matched "${query}". Corpus searched: ${provenance.sourceScope} Broaden the phrase, ${part ? 'drop the part filter, ' : ''}drop the title filter, or try another title before concluding no such rule exists.`,
       );
       return { mode: 'search' as const, ...provenance, results: [] };
     }
