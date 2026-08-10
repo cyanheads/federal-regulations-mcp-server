@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-09
+
+Connect-level failures, rejected Regulations.gov keys, and 500/501 responses across all three upstream services now classify and retry as their declared upstream_unavailable/auth_required/rate_limited reasons instead of a bare InternalError, and the eCFR mirror sync no longer throws on a mid-sync upstream failure.
+
 ## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-08-10
 
 Declared not_found/upstream_unavailable/title_not_found reasons now reach callers on every tool and resource, the eCFR mirror guards against ingesting truncated title documents, CFR body text carries source citations and figure references (mirror re-ingest required), and scripts/ plus tests/ are now typechecked.

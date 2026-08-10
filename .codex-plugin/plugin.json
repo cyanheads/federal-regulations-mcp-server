@@ -1,6 +1,6 @@
 {
   "name": "federal-regulations-mcp-server",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",
