@@ -3,10 +3,11 @@
  * API v1 (federalregister.gov/api/v1). Backs the document search, single-document
  * fetch (with the cross-source docket/CFR handles), and the open-comment-window
  * tools. Each method wraps the full fetch + parse pipeline in `withRetry`;
- * `fetchWithTimeout` throws a classified `McpError` on a non-OK response, and the
- * response parser detects HTML error pages and re-throws them as transient. A
- * transport failure that survives retry leaves as `upstream_unavailable`; a 404
- * on a document lookup leaves as `not_found`.
+ * `fetchWithTimeout` throws a classified `McpError` on a non-OK response, the
+ * response parser detects HTML error pages and re-throws them as transient, and
+ * `rethrowTransportFailure` re-codes the 5xx statuses the status→code map calls
+ * `InternalError`. A transport failure that survives retry leaves as
+ * `upstream_unavailable`; a 404 on a document lookup leaves as `not_found`.
  * @module services/federal-register/federal-register-service
  */
 
@@ -22,7 +23,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
-import { withUpstreamReason } from '@/services/upstream-failure.js';
+import { rethrowTransportFailure, withUpstreamReason } from '@/services/upstream-failure.js';
 import type {
   CfrReference,
   FrDocumentDetail,
@@ -221,7 +222,7 @@ export class FederalRegisterService {
           const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
             signal: ctx.signal,
             ...(expectedStatuses && { expectedStatuses }),
-          });
+          }).catch(rethrowTransportFailure);
           const text = await response.text();
           if (looksLikeHtml(text)) {
             throw serviceUnavailable(
@@ -236,13 +237,24 @@ export class FederalRegisterService {
     );
   }
 
-  /** Fetch plain text (document body) with retry. */
+  /**
+   * Fetch plain text (the document body) with retry.
+   *
+   * Every status this leg answers with is a transport failure. The URL is one the
+   * Federal Register just published in the document's own metadata, so no status
+   * it returns names a caller mistake — the document number was resolved by the
+   * fetch before it. A 404 here is the upstream contradicting itself, and the
+   * `NotFound` it maps to reads as "no such document" on a tool whose only
+   * declared `not_found` means exactly that.
+   */
   private fetchText(url: string, ctx: Context, operation: string): Promise<string> {
     const reqCtx = toRequestContext(ctx, operation);
     return withUpstreamReason(
       withRetry(
         async () => {
-          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
+            signal: ctx.signal,
+          }).catch(rethrowBodyFailure);
           return response.text();
         },
         { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
@@ -250,6 +262,24 @@ export class FederalRegisterService {
       ctx,
     );
   }
+}
+
+/**
+ * Re-raise a document-body fetch failure as a transport failure, so
+ * {@link withUpstreamReason} stamps it `upstream_unavailable` instead of letting
+ * the status→code map answer for a lookup this leg never performed. Keyed on
+ * `data.status`, which only a real HTTP response sets — a caller abort and a
+ * timeout keep their own classification.
+ */
+function rethrowBodyFailure(error: unknown): never {
+  if (error instanceof McpError && typeof error.data?.status === 'number') {
+    throw serviceUnavailable(
+      `Federal Register served HTTP ${error.data.status} for the document body URL it published.`,
+      { ...error.data },
+      { cause: error },
+    );
+  }
+  throw error;
 }
 
 /** Map raw FR `cfr_references` (sparse) → domain `CfrReference[]`. */

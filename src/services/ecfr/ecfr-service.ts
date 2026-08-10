@@ -3,7 +3,8 @@
  * the versioner (titles, structure, ancestry, full-text XML) and the search API.
  * Backs `browse_cfr` and `get_cfr_section`, and supplies the title list + XML the
  * eCFR mirror ingester walks. Section XML is parsed by `./xml.ts`. Retry wraps the
- * full fetch + parse pipeline; HTML error pages become transient errors, and a
+ * full fetch + parse pipeline; HTML error pages become transient errors, the 5xx
+ * statuses the status→code map calls `InternalError` are re-coded, and a
  * transport failure that survives retry leaves as `upstream_unavailable`. Search
  * scopes through `hierarchy[title]` / `hierarchy[part]`, and a hit's path names
  * the part it sits in.
@@ -23,7 +24,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
-import { withUpstreamReason } from '@/services/upstream-failure.js';
+import { rethrowTransportFailure, withUpstreamReason } from '@/services/upstream-failure.js';
 import { appendixCite, sectionCite } from './cite.js';
 import type {
   EcfrAppendixResult,
@@ -107,6 +108,10 @@ export class EcfrService {
    * The date eCFR currently serves as "now" (`meta.date` on the titles document).
    * The search API rejects any date past it, so a "current" search must pin to
    * this value rather than to the caller's clock. Cached for a few minutes.
+   *
+   * A titles document that answers 200 without one is an upstream failure like
+   * any other, but it is raised here rather than inside the fetch, past the reach
+   * of `withUpstreamReason` — so it stamps its own reason and hint.
    */
   async currentDate(ctx: Context): Promise<string> {
     if (this.currentDateCache && Date.now() < this.currentDateCache.expiresAt) {
@@ -120,7 +125,11 @@ export class EcfrService {
     );
     const date = raw.meta?.date;
     if (!date) {
-      throw serviceUnavailable('eCFR did not report a current index date.', { url });
+      throw serviceUnavailable('eCFR did not report a current index date.', {
+        url,
+        reason: 'upstream_unavailable',
+        ...ctx.recoveryFor('upstream_unavailable'),
+      });
     }
     this.currentDateCache = { date, expiresAt: Date.now() + CURRENT_DATE_TTL_MS };
     return date;
@@ -433,7 +442,7 @@ export class EcfrService {
           const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
             signal: ctx.signal,
             ...(expectedStatuses && { expectedStatuses }),
-          });
+          }).catch(rethrowTransportFailure);
           const text = await response.text();
           if (looksLikeHtml(text)) {
             throw serviceUnavailable(
@@ -462,7 +471,7 @@ export class EcfrService {
           const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
             signal: ctx.signal,
             ...(expectedStatuses && { expectedStatuses }),
-          });
+          }).catch(rethrowTransportFailure);
           const text = await response.text();
           if (looksLikeHtml(text)) {
             throw serviceUnavailable(

@@ -3,21 +3,30 @@
  * API (api.regulations.gov/v4, `X-Api-Key`). Backs `get_docket` and
  * `find_comments`, and enriches `list_open_comments`. JSON:API responses are
  * unwrapped to flat domain objects. The key is optional at the service level
- * (`hasKey()` lets keyless tools degrade or throw `auth_required`); 429s carry a
- * distinct `rate_limited` signal via `Retry-After`, and a 400 that names an
- * unusable resource ID joins the 404s on the `not_found` path. Comment bodies are
- * HTML-stripped and attachment-primary submissions flagged.
+ * (`hasKey()` lets keyless tools degrade or throw `auth_required`, which a key
+ * the API rejects raises too); 429s carry a distinct `rate_limited` signal via
+ * `Retry-After`, and a 400 that names an unusable resource ID joins the 404s on
+ * the `not_found` path. Those branches read the live `Response`, so requests go
+ * through `fetchUpstream` rather than the framework's `fetchWithTimeout`, which
+ * throws every non-2xx before a caller can inspect it; the wrapper keeps the
+ * branching and still classifies a connect-level failure as a transport failure.
+ * Comment bodies are HTML-stripped and attachment-primary submissions flagged.
  * @module services/regulations-gov/regulations-gov-service
  */
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { internalError, notFound, rateLimited } from '@cyanheads/mcp-ts-core/errors';
+import { internalError, notFound, rateLimited, unauthorized } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
-import { withUpstreamReason } from '@/services/upstream-failure.js';
+import {
+  fetchUpstream,
+  rethrowTransportFailure,
+  retryTransportOnly,
+  withUpstreamReason,
+} from '@/services/upstream-failure.js';
 import type {
   CommentAttachment,
   CommentDetailResult,
@@ -175,10 +184,25 @@ export class RegulationsGovService {
   }
 
   /**
-   * Fetch + parse JSON with key header and retry; maps 429 → rate_limited and
-   * both flavours of "no such record" (404, and the 400 Regulations.gov issues
-   * for an ID it cannot parse) → not_found. Whatever survives retry as a
-   * transport failure leaves as upstream_unavailable.
+   * Fetch + parse JSON with key header and retry; maps 401/403 → auth_required,
+   * 429 → rate_limited, and both flavours of "no such record" (404, and the 400
+   * Regulations.gov issues for an ID it cannot parse) → not_found. Whatever
+   * survives retry as a transport failure leaves as upstream_unavailable.
+   *
+   * The request goes through `fetchUpstream` rather than bare `fetch` so a
+   * connect-level failure — one that never produces a `Response`, so none of the
+   * status branches below can see it — is classified as a transport failure
+   * instead of reaching the caller as an unclassified `InternalError`. The
+   * branches themselves need the live `Response` (the 400 discrimination reads
+   * the body, the 429 reads `Retry-After`), which is why this is not
+   * `fetchWithTimeout`: that helper turns every non-2xx into a thrown `McpError`
+   * before the caller sees it, and its `expectedStatuses` option only lowers the
+   * log severity of that throw.
+   *
+   * Retry is scoped to `retryTransportOnly`: a 429 on the shared hourly key is
+   * deterministic for the rest of the window, and expressing that here rather
+   * than through `data.retryable` keeps the flag — which is also the caller's own
+   * backoff hint — from contradicting the contract both tools declare.
    */
   private fetchJson<T>(url: string, ctx: Context, operation: string): Promise<T> {
     const key = this.apiKey;
@@ -192,21 +216,42 @@ export class RegulationsGovService {
     return withUpstreamReason(
       withRetry(
         async () => {
-          const response = await fetch(url, {
-            headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
-            signal: ctx.signal,
-          });
+          const response = await fetchUpstream(
+            url,
+            {
+              headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
+              signal: ctx.signal,
+            },
+            { service: 'Regulations.gov', operation },
+          );
           if (!response.ok) {
             if (response.status === 429) {
               const retryAfter = response.headers.get('retry-after');
-              // Fail fast on the shared key's hourly limit: surface rate_limited so
-              // the agent backs off, rather than retry-storming the same key.
-              // `retryable: false` opts this throw out of withRetry's retry loop.
+              // Surface rate_limited so the agent backs off, rather than
+              // retry-storming the shared key's hourly limit. The fail-fast lives
+              // in this call's `isTransient`, not in `data.retryable` — that key
+              // is also the caller's own backoff hint, and both tools declare this
+              // failure retryable.
               throw rateLimited('Regulations.gov rate limit hit (1,000 requests/hour per key).', {
                 reason: 'rate_limited',
-                retryable: false,
                 ...(retryAfter ? { retryAfter } : {}),
+                ...rateLimitRecovery(ctx, retryAfter),
               });
+            }
+            if (response.status === 401 || response.status === 403) {
+              // The same failure the hasKey() gate names, one step further on: a
+              // key that is configured but rejected. api.data.gov answers both
+              // with 403 (API_KEY_INVALID / API_KEY_MISSING) and reserves 401 for
+              // the same class, and the caller's move is identical either way —
+              // supply a working key. Raised as Unauthorized because that is the
+              // code both tools declare auth_required against; a Forbidden here
+              // would answer with a code its own contract contradicts. The
+              // upstream body is deliberately not captured: a rejected-credential
+              // response is the one place an upstream echoes what it was sent.
+              throw unauthorized(
+                `Regulations.gov rejected the configured API key (HTTP ${response.status}).`,
+                { operation, reason: 'auth_required', ...ctx.recoveryFor('auth_required') },
+              );
             }
             if (response.status === 404) {
               // Translate the bare 404 into an actionable not_found so the tool's
@@ -231,18 +276,44 @@ export class RegulationsGovService {
                 );
               }
             }
-            throw await httpErrorFromResponse(response, {
-              service: 'Regulations.gov',
-              data: { operation },
-            });
+            rethrowTransportFailure(
+              await httpErrorFromResponse(response, {
+                service: 'Regulations.gov',
+                data: { operation },
+              }),
+            );
           }
           return (await response.json()) as T;
         },
-        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+        {
+          operation,
+          context: reqCtx,
+          baseDelayMs: BASE_DELAY_MS,
+          signal: ctx.signal,
+          isTransient: retryTransportOnly,
+        },
       ),
       ctx,
     );
   }
+}
+
+/**
+ * The declared `rate_limited` hint, carrying the wait Regulations.gov asked for
+ * when it sent one.
+ *
+ * `Retry-After` already reaches the JSON surface as `data.retryAfter`, but never
+ * reaches a client reading `content[]`, which sees the `Recovery:` line and
+ * nothing else — so the number is folded into the hint each tool declares rather
+ * than replacing it. Falls back to the declared hint alone when the header is
+ * absent, or when the calling definition declares no `rate_limited` recovery.
+ */
+function rateLimitRecovery(ctx: Context, retryAfter: string | null) {
+  const declared = ctx.recoveryFor('rate_limited');
+  if (!retryAfter || !('recovery' in declared)) return declared;
+  return {
+    recovery: { hint: `${declared.recovery.hint} Regulations.gov asked for ${retryAfter}s.` },
+  };
 }
 
 /**

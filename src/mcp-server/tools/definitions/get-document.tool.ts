@@ -102,7 +102,7 @@ export const getDocumentTool = tool('regulations_get_document', {
     {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
-      when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',
+      when: 'Federal Register returned a 5xx, timed out, served an HTML error page, or failed to serve the body URL it published (include_full_text only).',
       recovery: 'Retry after a brief wait; the Federal Register API may be momentarily down.',
     },
   ],

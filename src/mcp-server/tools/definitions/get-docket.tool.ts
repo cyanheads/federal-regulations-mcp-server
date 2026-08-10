@@ -2,7 +2,8 @@
  * @fileoverview regulations_get_docket — pull a rulemaking docket from
  * Regulations.gov by docket ID: docket metadata plus the documents filed in it.
  * Key-gated: returns an actionable auth_required error when REGULATIONS_GOV_API_KEY
- * is absent. Each document's objectId feeds regulations_find_comments.
+ * is absent, and the same one when the key it holds is rejected. Each document's
+ * objectId feeds regulations_find_comments.
  * @module mcp-server/tools/definitions/get-docket.tool
  */
 
@@ -104,9 +105,9 @@ export const getDocketTool = tool('regulations_get_docket', {
     {
       reason: 'auth_required',
       code: JsonRpcErrorCode.Unauthorized,
-      when: 'REGULATIONS_GOV_API_KEY is not configured.',
+      when: 'REGULATIONS_GOV_API_KEY is not configured, or Regulations.gov rejected the key that is.',
       recovery:
-        'Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it.',
+        'Set the REGULATIONS_GOV_API_KEY env var to a working key (free at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it.',
     },
     {
       reason: 'not_found',
@@ -125,7 +126,7 @@ export const getDocketTool = tool('regulations_get_docket', {
     {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
-      when: 'Regulations.gov returned a 5xx or timed out.',
+      when: 'Regulations.gov returned a 5xx, timed out, or could not be reached at all.',
       recovery: 'Retry after a brief wait.',
     },
   ],
@@ -133,7 +134,11 @@ export const getDocketTool = tool('regulations_get_docket', {
   async handler(input, ctx) {
     const service = getRegulationsGovService();
     if (!service.hasKey()) {
-      throw ctx.fail('auth_required', undefined, { ...ctx.recoveryFor('auth_required') });
+      // Stated rather than left to the contract's `when`, which now covers a
+      // rejected key too — this branch is only the absent one.
+      throw ctx.fail('auth_required', 'REGULATIONS_GOV_API_KEY is not configured.', {
+        ...ctx.recoveryFor('auth_required'),
+      });
     }
 
     const result = await service.getDocket(
