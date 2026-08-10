@@ -7,8 +7,8 @@
  * @module tests/tools/get-cfr-section.tool.test
  */
 
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { handlerContext } from '../helpers/handler-context.js';
 
 const getAppendixText = vi.hoisted(() => vi.fn());
 const getSectionText = vi.hoisted(() => vi.fn());
@@ -49,7 +49,7 @@ describe('getCfrSectionTool', () => {
       date: '2025-06-01',
       bodyText: 'As used in this part...',
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 40, part: '50', section: '50.1' });
     const result = await getCfrSectionTool.handler(input, ctx);
 
@@ -71,7 +71,7 @@ describe('getCfrSectionTool', () => {
       date: '2025-06-01',
       bodyText: 'Live versioner text.',
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 40, part: '50', section: '50.1' });
     const result = await getCfrSectionTool.handler(input, ctx);
 
@@ -89,7 +89,7 @@ describe('getCfrSectionTool', () => {
       date: '2019-01-01',
       bodyText: 'Historical text.',
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({
       title: 40,
       part: '50',
@@ -104,7 +104,7 @@ describe('getCfrSectionTool', () => {
   });
 
   it('throws date_out_of_range for a date before eCFR coverage', async () => {
-    const ctx = createMockContext({ errors: getCfrSectionTool.errors });
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({
       title: 40,
       part: '50',
@@ -129,7 +129,7 @@ describe('getCfrSectionTool', () => {
       date: '2026-08-05',
       bodyText: '1.0 Applicability\n\n1.1 This ultraviolet fluorescence (UVF) method...',
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({
       title: 40,
       part: '50',
@@ -166,7 +166,7 @@ describe('getCfrSectionTool', () => {
       date: '2026-08-05',
       bodyText: 'Body.',
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({
       title: 5,
       appendix: 'Appendix A to 5 CFR Chapter XIV',
@@ -191,7 +191,7 @@ describe('getCfrSectionTool', () => {
         { appendix: 'Appendix A-1 to Part 50', heading: 'Appendix A-1 to Part 50—Reference' },
       ],
     });
-    const ctx = createMockContext();
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 40, part: '50' });
     const result = await getCfrSectionTool.handler(input, ctx);
 
@@ -202,7 +202,7 @@ describe('getCfrSectionTool', () => {
   });
 
   it('rejects a call that names both a section and an appendix', async () => {
-    const ctx = createMockContext({ errors: getCfrSectionTool.errors });
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({
       title: 40,
       part: '50',
@@ -217,7 +217,7 @@ describe('getCfrSectionTool', () => {
   });
 
   it('rejects a call that names no location at all', async () => {
-    const ctx = createMockContext({ errors: getCfrSectionTool.errors });
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 40 });
     await expect(getCfrSectionTool.handler(input, ctx)).rejects.toMatchObject({
       data: { reason: 'location_required' },
@@ -229,12 +229,51 @@ describe('getCfrSectionTool', () => {
     // so, because the identifier is prose the caller cannot guess back.
     latestIssueDate.mockResolvedValue('2026-08-06');
     getAppendixText.mockResolvedValue(null);
-    const ctx = createMockContext({ errors: getCfrSectionTool.errors });
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 40, part: '50', appendix: 'A-1' });
 
-    const err = await getCfrSectionTool.handler(input, ctx).catch((e: unknown) => e);
+    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
+      (e: unknown) => e,
+    );
     expect(err).toMatchObject({ data: { reason: 'not_found' } });
     expect((err as { message: string }).message).toContain('A-1, Title 40');
+    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
+      /regulations_browse_cfr/,
+    );
+  });
+
+  it('tells a caller who cited a nonexistent section where a valid cite comes from', async () => {
+    // The declared not_found used to be unreachable on this path: the service
+    // threw its own bare notFound, so the answer carried no reason and no
+    // recovery — nothing saying the browse surface is where a cite is verified.
+    latestIssueDate.mockResolvedValue('2026-08-06');
+    getSectionText.mockResolvedValue(null);
+    const ctx = handlerContext(getCfrSectionTool);
+    const input = getCfrSectionTool.input.parse({ title: 40, part: '50', section: '50.999' });
+
+    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({ data: { reason: 'not_found' } });
+    expect((err as { message: string }).message).toBe(
+      'No codified text found for 40 CFR 50.999 as of 2026-08-06.',
+    );
+    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
+      /regulations_browse_cfr/,
+    );
+  });
+
+  it('carries the same reason and recovery for a whole part that does not exist', async () => {
+    latestIssueDate.mockResolvedValue('2026-08-06');
+    getSectionText.mockResolvedValue(null);
+    const ctx = handlerContext(getCfrSectionTool);
+    const input = getCfrSectionTool.input.parse({ title: 26, part: '99999' });
+
+    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({ data: { reason: 'not_found' } });
+    expect((err as { message: string }).message).toContain('26 CFR 99999');
     expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
       /regulations_browse_cfr/,
     );
@@ -243,10 +282,12 @@ describe('getCfrSectionTool', () => {
   it('names the section when a call gives one but no part', async () => {
     // `part` is optional for an appendix read, so a section without one reaches
     // the guard; a message about the title alone would deny the input it got.
-    const ctx = createMockContext({ errors: getCfrSectionTool.errors });
+    const ctx = handlerContext(getCfrSectionTool);
     const input = getCfrSectionTool.input.parse({ title: 14, section: '25' });
 
-    const err = await getCfrSectionTool.handler(input, ctx).catch((e: unknown) => e);
+    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
+      (e: unknown) => e,
+    );
     expect(err).toMatchObject({ data: { reason: 'location_required' } });
     expect((err as { message: string }).message).toContain('Section 25');
   });

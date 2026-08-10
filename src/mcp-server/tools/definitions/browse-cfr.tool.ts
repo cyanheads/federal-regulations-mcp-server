@@ -234,8 +234,9 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     {
       reason: 'title_not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'Structure mode with a title outside 1–50, or a part not found in the title.',
-      recovery: 'Omit title to list all titles, or pick a number in 1–50 and a part that exists.',
+      when: 'Structure mode where eCFR publishes no tree for the title at that date (a reserved title, or a date outside its coverage), or where the part is absent from the tree it does publish.',
+      recovery:
+        'Omit part to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all.',
     },
     {
       reason: 'title_required_for_part',

@@ -253,6 +253,8 @@ describe('EcfrService', () => {
     fetchMock.mockResolvedValueOnce(xmlResponse(SECTION_XML));
     const ctx = createMockContext();
     const result = await service.getSectionText(40, '50', '50.1', '2025-06-01', ctx);
+    // `getSectionText` reports "no such location" as null; narrow before reading.
+    if (!result) throw new Error('expected section text, got null');
     expect(result.section).toBe('50.1');
     expect(result.heading).toBe('§ 50.1 Definitions.');
     expect(result.bodyText).toContain('all terms not defined herein');
@@ -265,6 +267,7 @@ describe('EcfrService', () => {
     fetchMock.mockResolvedValueOnce(xmlResponse(PART_XML));
     const ctx = createMockContext();
     const result = await service.getSectionText(40, '50', undefined, '2026-08-06', ctx);
+    if (!result) throw new Error('expected part text, got null');
 
     expect(result.sections?.map((s) => s.section)).toEqual(['50.1', '50.2']);
     expect(result.appendices).toEqual([
@@ -281,6 +284,7 @@ describe('EcfrService', () => {
     fetchMock.mockResolvedValueOnce(xmlResponse(SECTION_XML));
     const ctx = createMockContext();
     const result = await service.getSectionText(40, '50', undefined, '2026-08-06', ctx);
+    if (!result) throw new Error('expected part text, got null');
 
     expect(result.appendices).toBeUndefined();
   });
@@ -296,6 +300,8 @@ describe('EcfrService', () => {
       ctx,
     );
 
+    // `getAppendixText` reports "no such appendix" as null; narrow before reading.
+    if (!result) throw new Error('expected an appendix result, got null');
     expect(result.appendix).toBe('Appendix A-1 to Part 50');
     // No <DIV5> wraps an appendix-filtered response, so the part comes off
     // hierarchy_metadata rather than from a wrapper that is not there.
@@ -423,14 +429,12 @@ describe('EcfrService', () => {
     expect(section.cfrCite).toBe('40 CFR 50.1');
   });
 
-  it('throws not_found when the versioner returns no sections', async () => {
+  it('reports no such location as null when the versioner returns no sections', async () => {
+    // The read tool owns the declared not_found and its recovery hint; a service
+    // that threw its own left the tool's contract entry unreachable.
     fetchMock.mockResolvedValueOnce(xmlResponse('<DIV5 TYPE="PART" N="50"></DIV5>'));
     const ctx = createMockContext();
-    const err = await service
-      .getSectionText(40, '50', '99.99', '2025-06-01', ctx)
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+    expect(await service.getSectionText(40, '50', '99.99', '2025-06-01', ctx)).toBeNull();
   });
 
   it('returns title-scoped hits from a request the live search API accepts', async () => {
@@ -668,19 +672,12 @@ describe('EcfrService', () => {
     expect(hit.hierarchyPath).toBe('Title 40 › Part 50 › § 50.1');
   });
 
-  it('translates a versioner 404 into an actionable not_found citing the section', async () => {
+  it('reports a versioner 404 as no such location rather than a fetch failure', async () => {
     fetchMock.mockRejectedValue(
       new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404'),
     );
     const ctx = createMockContext();
-    const err = await service
-      .getSectionText(26, '99999', '99999.1', '2026-06-04', ctx)
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
-    // The actionable message names the cite, not "Fetch failed 404".
-    expect((err as McpError).message).toContain('26 CFR 99999');
-    expect((err as McpError).message).not.toMatch(/Fetch failed/i);
+    expect(await service.getSectionText(26, '99999', '99999.1', '2026-06-04', ctx)).toBeNull();
   });
 
   it('maps an HTML error page to a transient ServiceUnavailable', async () => {
@@ -695,13 +692,15 @@ describe('EcfrService', () => {
     expect((err as McpError).code).toBe(JsonRpcErrorCode.ServiceUnavailable);
   });
 
-  it('propagates a thrown McpError when the upstream response is non-OK', async () => {
-    fetchMock.mockRejectedValue(new McpError(JsonRpcErrorCode.NotFound, 'HTTP 404'));
+  it('propagates a transport failure instead of reporting no such location', async () => {
+    // Only a 404 means "nothing is there"; anything else is the fetch failing,
+    // and answering null for it would report a live section as nonexistent.
+    fetchMock.mockRejectedValue(new McpError(JsonRpcErrorCode.ServiceUnavailable, 'HTTP 503'));
     const ctx = createMockContext();
     const err = await service
       .getSectionText(99, '1', '1.1', '2025-06-01', ctx)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.ServiceUnavailable);
   });
 });

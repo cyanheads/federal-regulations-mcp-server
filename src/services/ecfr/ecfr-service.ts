@@ -3,7 +3,8 @@
  * the versioner (titles, structure, ancestry, full-text XML) and the search API.
  * Backs `browse_cfr` and `get_cfr_section`, and supplies the title list + XML the
  * eCFR mirror ingester walks. Section XML is parsed by `./xml.ts`. Retry wraps the
- * full fetch + parse pipeline; HTML error pages become transient errors. Search
+ * full fetch + parse pipeline; HTML error pages become transient errors, and a
+ * transport failure that survives retry leaves as `upstream_unavailable`. Search
  * scopes through `hierarchy[title]` / `hierarchy[part]`, and a hit's path names
  * the part it sits in.
  * @module services/ecfr/ecfr-service
@@ -22,6 +23,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
+import { withUpstreamReason } from '@/services/upstream-failure.js';
 import { appendixCite, sectionCite } from './cite.js';
 import type {
   EcfrAppendixResult,
@@ -128,6 +130,11 @@ export class EcfrService {
    * Browse a title's structure tree. With no `part`, returns the title's direct
    * children; with a `part`, narrows to that part's subtree (flattened to one
    * level of nodes for the agent). Each citable node carries an assembled cite.
+   *
+   * Both ways this can name nothing — a title the versioner publishes no tree
+   * for, and a part absent from the tree it does publish — carry the browse
+   * tool's declared `title_not_found` reason, so the answer says which of the
+   * two happened and where a valid cite comes from.
    */
   async browseStructure(
     title: number,
@@ -136,11 +143,24 @@ export class EcfrService {
     ctx: Context,
   ): Promise<EcfrStructureNode[]> {
     const url = `${this.baseUrl}/versioner/v1/structure/${date}/title-${title}.json`;
-    const root = await this.fetchJson<RawEcfrStructureNode>(
-      url,
-      ctx,
-      'EcfrService.browseStructure',
-    );
+    let root: RawEcfrStructureNode;
+    try {
+      root = await this.fetchJson<RawEcfrStructureNode>(
+        url,
+        ctx,
+        'EcfrService.browseStructure',
+        [404],
+      );
+    } catch (err) {
+      // The versioner 404s a title it holds no tree for at that date — a
+      // reserved title, or a date outside its coverage.
+      if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
+      throw notFound(
+        `CFR title ${title} has no published structure as of ${date}.`,
+        { title, date, reason: 'title_not_found', ...ctx.recoveryFor('title_not_found') },
+        { cause: err },
+      );
+    }
 
     const partNode = part ? findPartNode(root, part) : root;
     if (!partNode) {
@@ -148,6 +168,8 @@ export class EcfrService {
         title,
         part,
         date,
+        reason: 'title_not_found',
+        ...ctx.recoveryFor('title_not_found'),
       });
     }
     const children = partNode.children ?? [];
@@ -171,6 +193,13 @@ export class EcfrService {
   /**
    * Fetch codified text for a section (or whole part) from the versioner
    * `/full/{date}/title-{n}.xml` endpoint, parsed into plain text.
+   *
+   * Returns null when no such location exists at that date, rather than throwing
+   * — the same contract {@link EcfrService.getAppendixText} keeps, and for the
+   * same reason: a cite that does not resolve is the expected failure here, and
+   * the recovery a caller needs for it (verify the cite through the browse
+   * surface) belongs to the read tool, which owns the declared `not_found`.
+   * Transport failures still throw.
    */
   async getSectionText(
     title: number,
@@ -178,39 +207,24 @@ export class EcfrService {
     section: string | undefined,
     date: string,
     ctx: Context,
-  ): Promise<EcfrSectionResult> {
+  ): Promise<EcfrSectionResult | null> {
     const search = new URLSearchParams({ part });
     if (section) search.set('section', section);
     const url = `${this.baseUrl}/versioner/v1/full/${date}/title-${title}.xml?${search.toString()}`;
 
-    const cite = `${title} CFR ${part}${section ? ` § ${section}` : ''}`;
     let xml: string;
     try {
       xml = await this.fetchXml(url, ctx, 'EcfrService.getSectionText', XML_TIMEOUT_MS, [404]);
     } catch (err) {
       // The versioner 404s for a nonexistent part/section (or a date past the
-      // title's latest issue). Translate that into an actionable not_found so the
-      // tool's contract recovery surfaces, rather than a raw "Fetch failed 404".
-      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
-        throw notFound(`No codified text found for ${cite} as of ${date}.`, {
-          title,
-          part,
-          section: section ?? null,
-          date,
-        });
-      }
+      // title's latest issue) — no such location, not a fetch failure.
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) return null;
       throw err;
     }
     const { sections, appendices } = parseCfrXml(xml);
 
-    if (sections.length === 0) {
-      throw notFound(`No codified text found for ${cite} as of ${date}.`, {
-        title,
-        part,
-        section: section ?? null,
-        date,
-      });
-    }
+    // A part that exists always has sections; none means the cite named nothing.
+    if (sections.length === 0) return null;
 
     if (section) {
       // sections is non-empty (guarded above), so [0] is defined when find misses.
@@ -413,21 +427,24 @@ export class EcfrService {
     expectedStatuses?: number[],
   ): Promise<T> {
     const reqCtx = toRequestContext(ctx, operation);
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
-          signal: ctx.signal,
-          ...(expectedStatuses && { expectedStatuses }),
-        });
-        const text = await response.text();
-        if (looksLikeHtml(text)) {
-          throw serviceUnavailable(
-            'eCFR returned an HTML error page instead of JSON — likely momentarily unavailable.',
-          );
-        }
-        return JSON.parse(text) as T;
-      },
-      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+    return withUpstreamReason(
+      withRetry(
+        async () => {
+          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
+            signal: ctx.signal,
+            ...(expectedStatuses && { expectedStatuses }),
+          });
+          const text = await response.text();
+          if (looksLikeHtml(text)) {
+            throw serviceUnavailable(
+              'eCFR returned an HTML error page instead of JSON — likely momentarily unavailable.',
+            );
+          }
+          return JSON.parse(text) as T;
+        },
+        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+      ),
+      ctx,
     );
   }
 
@@ -439,21 +456,24 @@ export class EcfrService {
     expectedStatuses?: number[],
   ): Promise<string> {
     const reqCtx = toRequestContext(ctx, operation);
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
-          signal: ctx.signal,
-          ...(expectedStatuses && { expectedStatuses }),
-        });
-        const text = await response.text();
-        if (looksLikeHtml(text)) {
-          throw serviceUnavailable(
-            'eCFR returned an HTML error page instead of XML — likely momentarily unavailable.',
-          );
-        }
-        return text;
-      },
-      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+    return withUpstreamReason(
+      withRetry(
+        async () => {
+          const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
+            signal: ctx.signal,
+            ...(expectedStatuses && { expectedStatuses }),
+          });
+          const text = await response.text();
+          if (looksLikeHtml(text)) {
+            throw serviceUnavailable(
+              'eCFR returned an HTML error page instead of XML — likely momentarily unavailable.',
+            );
+          }
+          return text;
+        },
+        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+      ),
+      ctx,
     );
   }
 }

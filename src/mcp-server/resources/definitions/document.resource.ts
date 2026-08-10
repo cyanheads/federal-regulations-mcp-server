@@ -7,6 +7,7 @@
  */
 
 import { resource, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 
 export const documentResource = resource('regulations://document/{documentNumber}', {
@@ -21,6 +22,21 @@ export const documentResource = resource('regulations://document/{documentNumber
       .regex(/^[0-9]{4}-[0-9]+$/)
       .describe('Federal Register document number (e.g. "2025-14555").'),
   }),
+  errors: [
+    {
+      reason: 'not_found',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'No Federal Register document exists with that number.',
+      recovery:
+        'Verify the number via regulations_search_rules; FR numbers look like "2025-14555".',
+    },
+    {
+      reason: 'upstream_unavailable',
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',
+      recovery: 'Retry after a brief wait; the Federal Register API may be momentarily down.',
+    },
+  ],
 
   async handler(params, ctx) {
     const service = getFederalRegisterService();

@@ -17,6 +17,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
+import { withUpstreamReason } from '@/services/upstream-failure.js';
 import type {
   CommentAttachment,
   CommentDetailResult,
@@ -176,7 +177,8 @@ export class RegulationsGovService {
   /**
    * Fetch + parse JSON with key header and retry; maps 429 → rate_limited and
    * both flavours of "no such record" (404, and the 400 Regulations.gov issues
-   * for an ID it cannot parse) → not_found.
+   * for an ID it cannot parse) → not_found. Whatever survives retry as a
+   * transport failure leaves as upstream_unavailable.
    */
   private fetchJson<T>(url: string, ctx: Context, operation: string): Promise<T> {
     const key = this.apiKey;
@@ -187,55 +189,58 @@ export class RegulationsGovService {
       throw internalError('RegulationsGovService called without an API key.', { operation });
     }
     const reqCtx = toRequestContext(ctx, operation);
-    return withRetry(
-      async () => {
-        const response = await fetch(url, {
-          headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
-          signal: ctx.signal,
-        });
-        if (!response.ok) {
-          if (response.status === 429) {
-            const retryAfter = response.headers.get('retry-after');
-            // Fail fast on the shared key's hourly limit: surface rate_limited so
-            // the agent backs off, rather than retry-storming the same key.
-            // `retryable: false` opts this throw out of withRetry's retry loop.
-            throw rateLimited('Regulations.gov rate limit hit (1,000 requests/hour per key).', {
-              reason: 'rate_limited',
-              retryable: false,
-              ...(retryAfter ? { retryAfter } : {}),
-            });
-          }
-          if (response.status === 404) {
-            // Translate the bare 404 into an actionable not_found so the tool's
-            // contract recovery surfaces, rather than "returned HTTP 404".
-            throw notFound(
-              'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
-              { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
-            );
-          }
-          if (response.status === 400) {
-            // 400 is overloaded upstream: a resource ID the API cannot parse
-            // ("Invalid ID: …") sits alongside genuine caller mistakes ("Invalid
-            // filter field name: …", "Page size parameter must be …"). Only the
-            // first is a missing record, so discriminate on the body's own text
-            // rather than on the status. Clone first — httpErrorFromResponse
-            // consumes the body for the fall-through case.
-            const invalidId = await readInvalidIdTitle(response.clone());
-            if (invalidId) {
+    return withUpstreamReason(
+      withRetry(
+        async () => {
+          const response = await fetch(url, {
+            headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
+            signal: ctx.signal,
+          });
+          if (!response.ok) {
+            if (response.status === 429) {
+              const retryAfter = response.headers.get('retry-after');
+              // Fail fast on the shared key's hourly limit: surface rate_limited so
+              // the agent backs off, rather than retry-storming the same key.
+              // `retryable: false` opts this throw out of withRetry's retry loop.
+              throw rateLimited('Regulations.gov rate limit hit (1,000 requests/hour per key).', {
+                reason: 'rate_limited',
+                retryable: false,
+                ...(retryAfter ? { retryAfter } : {}),
+              });
+            }
+            if (response.status === 404) {
+              // Translate the bare 404 into an actionable not_found so the tool's
+              // contract recovery surfaces, rather than "returned HTTP 404".
               throw notFound(
-                `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
+                'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
                 { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
               );
             }
+            if (response.status === 400) {
+              // 400 is overloaded upstream: a resource ID the API cannot parse
+              // ("Invalid ID: …") sits alongside genuine caller mistakes ("Invalid
+              // filter field name: …", "Page size parameter must be …"). Only the
+              // first is a missing record, so discriminate on the body's own text
+              // rather than on the status. Clone first — httpErrorFromResponse
+              // consumes the body for the fall-through case.
+              const invalidId = await readInvalidIdTitle(response.clone());
+              if (invalidId) {
+                throw notFound(
+                  `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
+                  { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+                );
+              }
+            }
+            throw await httpErrorFromResponse(response, {
+              service: 'Regulations.gov',
+              data: { operation },
+            });
           }
-          throw await httpErrorFromResponse(response, {
-            service: 'Regulations.gov',
-            data: { operation },
-          });
-        }
-        return (await response.json()) as T;
-      },
-      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+          return (await response.json()) as T;
+        },
+        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+      ),
+      ctx,
     );
   }
 }

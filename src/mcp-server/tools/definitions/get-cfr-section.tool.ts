@@ -94,7 +94,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
     bodyText: z
       .string()
       .describe(
-        'Text of the section, part, or appendix, XML stripped to plain text. Paragraphs, subheadings, editorial notes, and tables (one pipe-delimited line per row) are kept in document order. Empty for a reserved appendix and for one whose whole content is a figure image.',
+        'Text of the section, part, or appendix, XML stripped to plain text. Paragraphs, subheadings, editorial notes, tables (one pipe-delimited line per row), figure references ("[Figure: /graphics/…]"), and the trailing source citation are kept in document order. The source citation is the bracketed Federal Register history the text ends in ("[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]") — pass one of its FR cites to regulations_search_rules to reach the rulemaking that produced this text. Empty only where the location is a placeholder carrying nothing but its heading — "[Reserved]", or an agency variant of it.',
       ),
     sections: z
       .array(
@@ -252,6 +252,16 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
 
     const date = requestedDate ?? (await service.latestIssueDate(input.title, ctx));
     const result = await service.getSectionText(input.title, part, section, date, ctx);
+    if (!result) {
+      const cite = section ? sectionCite(input.title, part, section) : `${input.title} CFR ${part}`;
+      throw ctx.fail('not_found', `No codified text found for ${cite} as of ${date}.`, {
+        ...ctx.recoveryFor('not_found'),
+        title: input.title,
+        part,
+        section: section ?? null,
+        date,
+      });
+    }
     const hierarchyPath = await service.hierarchyPath(
       input.title,
       { part, section },

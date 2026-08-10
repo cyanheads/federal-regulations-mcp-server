@@ -4,7 +4,9 @@
  * fetch (with the cross-source docket/CFR handles), and the open-comment-window
  * tools. Each method wraps the full fetch + parse pipeline in `withRetry`;
  * `fetchWithTimeout` throws a classified `McpError` on a non-OK response, and the
- * response parser detects HTML error pages and re-throws them as transient.
+ * response parser detects HTML error pages and re-throws them as transient. A
+ * transport failure that survives retry leaves as `upstream_unavailable`; a 404
+ * on a document lookup leaves as `not_found`.
  * @module services/federal-register/federal-register-service
  */
 
@@ -20,6 +22,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { toRequestContext } from '@/services/request-context.js';
+import { withUpstreamReason } from '@/services/upstream-failure.js';
 import type {
   CfrReference,
   FrDocumentDetail,
@@ -150,7 +153,7 @@ export class FederalRegisterService {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw notFound(
           `No Federal Register document found with number ${documentNumber}.`,
-          { documentNumber },
+          { documentNumber, reason: 'not_found', ...ctx.recoveryFor('not_found') },
           { cause: err },
         );
       }
@@ -212,33 +215,39 @@ export class FederalRegisterService {
     expectedStatuses?: number[],
   ): Promise<T> {
     const reqCtx = toRequestContext(ctx, operation);
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
-          signal: ctx.signal,
-          ...(expectedStatuses && { expectedStatuses }),
-        });
-        const text = await response.text();
-        if (looksLikeHtml(text)) {
-          throw serviceUnavailable(
-            'Federal Register returned an HTML error page instead of JSON — likely momentarily unavailable.',
-          );
-        }
-        return JSON.parse(text) as T;
-      },
-      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+    return withUpstreamReason(
+      withRetry(
+        async () => {
+          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
+            signal: ctx.signal,
+            ...(expectedStatuses && { expectedStatuses }),
+          });
+          const text = await response.text();
+          if (looksLikeHtml(text)) {
+            throw serviceUnavailable(
+              'Federal Register returned an HTML error page instead of JSON — likely momentarily unavailable.',
+            );
+          }
+          return JSON.parse(text) as T;
+        },
+        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+      ),
+      ctx,
     );
   }
 
   /** Fetch plain text (document body) with retry. */
   private fetchText(url: string, ctx: Context, operation: string): Promise<string> {
     const reqCtx = toRequestContext(ctx, operation);
-    return withRetry(
-      async () => {
-        const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
-        return response.text();
-      },
-      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+    return withUpstreamReason(
+      withRetry(
+        async () => {
+          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, { signal: ctx.signal });
+          return response.text();
+        },
+        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
+      ),
+      ctx,
     );
   }
 }
