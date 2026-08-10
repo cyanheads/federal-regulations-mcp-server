@@ -15,8 +15,11 @@
  * Idempotent DDL at sync start is the contract.
  *
  * Those two aux tables also carry the mirror's title coverage — which titles the
- * index holds, and which titles the whole Code had at ingest time. `mirrorScope`
- * reads them so a partial mirror is never asked a question it cannot answer.
+ * index holds, and which titles the whole Code had at ingest time — and the
+ * ingest version that produced the rows. `mirrorScope` reads the coverage so a
+ * partial mirror is never asked a question it cannot answer; `mirrorReady` reads
+ * the ingest version so an index built by a superseded ingester is not asked at
+ * all (see {@link INGEST_VERSION}).
  *
  * @module services/ecfr-mirror/ecfr-mirror
  */
@@ -31,9 +34,10 @@ import {
 } from '@cyanheads/mcp-ts-core/mirror';
 import { logger, requestContextService } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
+import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
 import type { EcfrSearchHit, EcfrSectionResult } from '@/services/ecfr/types.js';
-import { parseSections } from '@/services/ecfr/xml.js';
+import { parseCfrXml } from '@/services/ecfr/xml.js';
 
 /** Primary table name for the mirror. */
 const TABLE = 'cfr_sections';
@@ -43,6 +47,30 @@ const PART_INDEX_TABLE = 'cfr_part_index';
 const META_TABLE = 'cfr_mirror_meta';
 /** Meta key holding the non-reserved eCFR title list the last sync saw upstream. */
 const CORPUS_TITLES_KEY = 'corpus_titles';
+/** Meta key holding the {@link INGEST_VERSION} that produced the current rows. */
+const INGEST_VERSION_KEY = 'ingest_version';
+
+/**
+ * Version of the row-producing logic, bumped whenever an ingest change makes
+ * previously written rows wrong rather than merely stale. It is not a schema
+ * version: the columns are unchanged across the bump; their *contents* are not.
+ *
+ * The database on disk outlives the code that wrote it, and an upgraded server
+ * pointed at an older index would keep serving those rows with no outward sign.
+ * So the version is written only by a run that re-derived every title the index
+ * holds, and a stored value below this one makes {@link mirrorReady} report
+ * false — every read path then
+ * falls back to live eCFR, exactly as it does for a mirror that never finished
+ * an init, until `mirror:refresh` (or `mirror:init`) re-derives the rows.
+ *
+ * 1. Initial ingest.
+ * 2. A section's part comes from its enclosing `<DIV5 TYPE="PART">` rather than
+ *    from cutting the section number at its first dot. A part numbering its
+ *    sections without a dot (14 CFR 241) had every row filed under a part named
+ *    after the section, so `14 CFR 241` Section 25 answered searches scoped to
+ *    Part 25 — Airworthiness Standards — with traffic-reporting text.
+ */
+const INGEST_VERSION = 2;
 
 /** Composite primary-key value for a section row: `title:part:section`. */
 function rowId(title: number, part: string, section: string): string {
@@ -78,12 +106,29 @@ function ensureAuxTables(handle: SqliteHandle): void {
  * property of that index, not of the environment the server later boots with.
  */
 function recordCorpusTitles(handle: SqliteHandle, titles: number[]): void {
+  writeMeta(handle, CORPUS_TITLES_KEY, titles.join(','));
+}
+
+/** Upsert one key into the meta table. */
+function writeMeta(handle: SqliteHandle, key: string, value: string): void {
   handle
     .prepare(
       `INSERT INTO ${META_TABLE} (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value;`,
     )
-    .run(CORPUS_TITLES_KEY, titles.join(','));
+    .run(key, value);
+}
+
+/** Read one key from the meta table, or undefined when it cannot be read. */
+function readMeta(handle: SqliteHandle, key: string): string | undefined {
+  try {
+    return handle
+      .prepare<{ value: string }>(`SELECT value FROM ${META_TABLE} WHERE key = ?;`)
+      .get(key)?.value;
+  } catch {
+    // An index predating the meta table has no such table to read.
+    return;
+  }
 }
 
 /** Upsert a part's section count into the aux index. */
@@ -145,6 +190,7 @@ export const ecfrMirror: Mirror = defineMirror({
       titles.filter((t) => !t.reserved).map((t) => t.number),
     );
 
+    const rewritten = new Set<number>();
     for (const title of titles) {
       if (signal.aborted) return;
       if (title.reserved) continue;
@@ -156,48 +202,135 @@ export const ecfrMirror: Mirror = defineMirror({
       const xml = await fetchTitleXml(ecfr, title.number, issueDate, ctx);
       if (!xml) continue;
 
-      const sections = parseSections(xml);
+      const { sections } = parseCfrXml(xml);
       const records: MirrorRow[] = [];
       const partCounts = new Map<string, number>();
+      let unplaced = 0;
 
       for (const s of sections) {
-        if (!s.section) continue;
-        const part = derivePart(s.section);
+        // The part comes from the section's enclosing <DIV5 TYPE="PART"> in the
+        // XML. A whole-title document always supplies one; a section with none
+        // cannot be filed under a part, and a guessed part is what put Part 241
+        // text under Part 25 — so it is counted and dropped, not invented.
+        if (!s.section || !s.part) {
+          unplaced++;
+          continue;
+        }
         records.push({
-          id: rowId(title.number, part, s.section),
+          id: rowId(title.number, s.part, s.section),
           title: title.number,
-          part,
+          part: s.part,
           section: s.section,
           heading: s.heading,
           body_text: s.bodyText,
           issue_date: issueDate,
         });
-        partCounts.set(part, (partCounts.get(part) ?? 0) + 1);
+        partCounts.set(s.part, (partCounts.get(s.part) ?? 0) + 1);
+      }
+
+      if (unplaced > 0) {
+        logger.warning(
+          `eCFR mirror: skipped ${unplaced} section(s) in title ${title.number} with no enclosing part`,
+          requestContextService.createRequestContext({ operation: 'ecfr-mirror:sync' }),
+        );
+      }
+
+      // A non-reserved title always has sections, so a document that yields none
+      // is one the walk could not read — a truncated body, an error page served
+      // as XML. Tombstoning against it would delete every row the title holds and
+      // then report the run complete, so the title is left exactly as it was.
+      if (records.length === 0) {
+        logger.warning(
+          `eCFR mirror: title ${title.number} (${issueDate}) parsed to zero sections; leaving its existing rows untouched`,
+          requestContextService.createRequestContext({ operation: 'ecfr-mirror:sync' }),
+        );
+        continue;
       }
 
       // Maintain the aux index from the sync mapping (the mirror-owned secondary structure).
-      const auxHandle = await ecfrMirror.raw();
-      auxHandle.transaction(() => {
+      const tombstones = staleRowIds(handle, title.number, records);
+      handle.transaction(() => {
+        handle.prepare(`DELETE FROM ${PART_INDEX_TABLE} WHERE title = ?;`).run(title.number);
         for (const [part, count] of partCounts) {
-          upsertPartIndex(auxHandle, title.number, part, count, issueDate);
+          upsertPartIndex(handle, title.number, part, count, issueDate);
         }
       });
 
+      rewritten.add(title.number);
       yield {
         records,
+        tombstones,
         checkpoint: issueDate,
       };
     }
+
+    // The marker certifies the rows, so it is written only once every title the
+    // index holds has been re-derived by this run — not merely once the loop
+    // ends. A run abandoned halfway, one narrowed by `ECFR_MIRROR_TITLES`, and
+    // one that skipped a title on a failed fetch all leave rows behind that this
+    // ingester never wrote, and stamping over them would certify exactly the
+    // wrong data as current.
+    if (signal.aborted) return;
+    const unrewritten = heldTitles(handle).filter((t) => !rewritten.has(t));
+    if (unrewritten.length > 0) {
+      logger.warning(
+        `eCFR mirror: title(s) ${unrewritten.join(', ')} were not re-derived by this run; leaving the index marked stale (every read stays on live eCFR). Re-run without ECFR_MIRROR_TITLES, or with a scope covering them.`,
+        requestContextService.createRequestContext({ operation: 'ecfr-mirror:sync' }),
+      );
+      return;
+    }
+    writeMeta(handle, INGEST_VERSION_KEY, String(INGEST_VERSION));
   },
 });
 
-/** Whether the mirror has ever completed a full init (queryable even mid-refresh). */
+/** CFR titles the index currently holds rows for. */
+function heldTitles(handle: SqliteHandle): number[] {
+  return handle
+    .prepare<{ title: number }>(`SELECT DISTINCT title FROM ${TABLE};`)
+    .all()
+    .map((r) => Number(r.title));
+}
+
+/**
+ * Rows the index already holds for a title that this ingest is not rewriting —
+ * sections withdrawn upstream, and rows a superseded ingester filed under a key
+ * the current one no longer produces. Both are indistinguishable from here and
+ * want the same treatment: an upsert leaves them in place, so they are
+ * tombstoned in the same transaction as the new rows.
+ */
+function staleRowIds(handle: SqliteHandle, title: number, records: MirrorRow[]): string[] {
+  const fresh = new Set(records.map((r) => String(r.id)));
+  return handle
+    .prepare<{ id: string }>(`SELECT id FROM ${TABLE} WHERE title = ?;`)
+    .all(title)
+    .map((r) => String(r.id))
+    .filter((id) => !fresh.has(id));
+}
+
+/**
+ * Whether the mirror may answer a read: a full init has completed at some point
+ * (it stays queryable mid-refresh), and the rows were produced by the current
+ * ingester. A stale index is treated exactly like a cold one — every caller
+ * already has a live-eCFR fallback for that case, so honest unavailability
+ * costs a round trip, while serving its rows costs correctness silently.
+ */
 export async function mirrorReady(): Promise<boolean> {
   try {
-    return await ecfrMirror.ready();
+    return (await ecfrMirror.ready()) && !(await mirrorIngestStale());
   } catch {
     return false;
   }
+}
+
+/**
+ * True when the index was written by an ingester older than {@link
+ * INGEST_VERSION} — including one that predates the marker entirely, which is
+ * every index built before the marker was introduced and therefore by
+ * definition an older ingester.
+ */
+export async function mirrorIngestStale(): Promise<boolean> {
+  const stored = Number(readMeta(await ecfrMirror.raw(), INGEST_VERSION_KEY));
+  return !Number.isInteger(stored) || stored < INGEST_VERSION;
 }
 
 /** What a ready mirror can actually answer for. */
@@ -246,16 +379,10 @@ export async function mirrorScope(): Promise<MirrorScope> {
  * which reads as incomplete and routes all-titles searches live.
  */
 function readCorpusTitles(handle: SqliteHandle): number[] | undefined {
-  try {
-    return handle
-      .prepare<{ value: string }>(`SELECT value FROM ${META_TABLE} WHERE key = ?;`)
-      .get(CORPUS_TITLES_KEY)
-      ?.value.split(',')
-      .map(Number)
-      .filter((n) => Number.isInteger(n));
-  } catch {
-    return;
-  }
+  return readMeta(handle, CORPUS_TITLES_KEY)
+    ?.split(',')
+    .map(Number)
+    .filter((n) => Number.isInteger(n));
 }
 
 /**
@@ -291,6 +418,11 @@ export async function mirrorGetSection(
  * The stored columns carry no level names, so a mirror hit's `hierarchyPath` is
  * structural where a live hit's names the part. `sourceScope` says which corpus
  * answered, and the `hierarchyPath` field description spells out the difference.
+ *
+ * Every hit is a section: the index holds `<DIV8 TYPE="SECTION">` text alone, so
+ * `appendix` is always null here where a live hit may carry one. `sourceScope`
+ * says so, because an appendix match the mirror cannot make is otherwise
+ * indistinguishable from an appendix that does not exist.
  */
 export async function mirrorSearch(
   query: string,
@@ -319,20 +451,15 @@ export async function mirrorSearch(
       title: rowTitle,
       part: rowPart,
       section,
+      appendix: null,
       heading,
       hierarchyPath: `Title ${rowTitle} › Part ${rowPart}${section ? ` › § ${section}` : ''}`,
       excerpt: excerpt(String(row.body_text ?? ''), query),
-      cfrCite: section ? `${rowTitle} CFR ${section}` : `${rowTitle} CFR ${rowPart}`,
+      cfrCite: section ? sectionCite(rowTitle, rowPart, section) : `${rowTitle} CFR ${rowPart}`,
     };
   });
 
   return { totalCount: result.total, results };
-}
-
-/** Derive the part identifier from a section number ("50.1" → "50"). */
-function derivePart(section: string): string {
-  const idx = section.indexOf('.');
-  return idx === -1 ? section : section.slice(0, idx);
 }
 
 /**

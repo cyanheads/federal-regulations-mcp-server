@@ -1,15 +1,21 @@
 #!/usr/bin/env bun
 /**
  * @fileoverview `mirror:verify` — read-only health check of the codified CFR
- * mirror: prints sync status (ready marker, checkpoint, record count), the title
- * coverage that decides which searches the mirror may answer, and a sample FTS
- * query so an operator can confirm the index is queryable.
+ * mirror: prints sync status (ready marker, checkpoint, record count), whether
+ * the rows were produced by the current ingester, the title coverage that
+ * decides which searches the mirror may answer, and a sample FTS query so an
+ * operator can confirm the index is queryable.
  *
  * @module scripts/ecfr-mirror-verify
  */
 
 import { logger } from '@cyanheads/mcp-ts-core/utils';
-import { ecfrMirror, mirrorScope, mirrorSearch } from '@/services/ecfr-mirror/ecfr-mirror.js';
+import {
+  ecfrMirror,
+  mirrorIngestStale,
+  mirrorScope,
+  mirrorSearch,
+} from '@/services/ecfr-mirror/ecfr-mirror.js';
 import { bootstrapMirrorServices } from './_mirror-context.js';
 
 await bootstrapMirrorServices();
@@ -23,6 +29,17 @@ logger.info('eCFR mirror status', {
   completedAt: status.completedAt,
 });
 
+// A sync that completed can still hold rows a superseded ingester derived
+// wrongly, and the server refuses to read such an index. An operator seeing a
+// healthy status but no mirror-sourced answers needs this line to know why.
+if (await mirrorIngestStale()) {
+  logger.warning(
+    'eCFR mirror index is STALE: its rows predate the current ingester and will not be served. Every read falls back to live eCFR until `bun run mirror:refresh` re-derives them.',
+  );
+} else {
+  logger.info('eCFR mirror index was written by the current ingester');
+}
+
 if (status.ready) {
   const scope = await mirrorScope();
   logger.info('eCFR mirror title coverage', {
@@ -33,7 +50,7 @@ if (status.ready) {
     answersAllTitleSearches: scope.complete,
   });
 
-  const sample = await mirrorSearch('definitions', undefined, 3);
+  const sample = await mirrorSearch('definitions', undefined, undefined, 3);
   logger.info('eCFR mirror sample query "definitions"', {
     totalCount: sample.totalCount,
     firstHit: sample.results[0]?.cfrCite ?? '(none)',
