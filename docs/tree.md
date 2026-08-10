@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-08-09 23:27:41
+Generated on: 2026-08-10 02:27:33
 
 ```text
 federal-regulations-mcp-server/
@@ -22,6 +22,7 @@ federal-regulations-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── data/
 ├── docs/
@@ -155,6 +156,7 @@ federal-regulations-mcp-server/
 │   │           └── search-rules.tool.ts
 │   ├── services/
 │   │   ├── ecfr/
+│   │   │   ├── cite.ts
 │   │   │   ├── ecfr-service.ts
 │   │   │   ├── types.ts
 │   │   │   └── xml.ts
