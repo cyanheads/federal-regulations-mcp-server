@@ -1,7 +1,10 @@
 {
   "extends": "@cyanheads/mcp-ts-core/tsconfig.base.json",
   "compilerOptions": {
+    "rootDir": ".",
     "outDir": "dist",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -3,8 +3,12 @@
 #
 # This stage installs all dependencies (including dev), builds the TypeScript
 # source code into JavaScript, and prepares the production assets.
+#
+# Pinned to BUILDPLATFORM because this stage emits platform-independent
+# JavaScript and only `dist/` is copied into the target-platform image. This
+# keeps cross-architecture builds native instead of running Bun under emulation.
 # ==============================================================================
-FROM oven/bun:1.3.14 AS build
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.0 AS build
 
 WORKDIR /usr/src/app
 
@@ -34,7 +38,7 @@ RUN bun run build
 # application. It uses a slim base image and only includes production
 # dependencies and build artifacts.
 # ==============================================================================
-FROM oven/bun:1.3.14-slim AS production
+FROM oven/bun:1.4.0-slim AS production
 
 WORKDIR /usr/src/app
 
@@ -54,9 +58,12 @@ LABEL org.opencontainers.image.source="https://github.com/cyanheads/federal-regu
 COPY package.json bun.lock ./
 
 # Install only production dependencies, ignoring any lifecycle scripts (like 'prepare')
-# that are not needed in the final production image.
+# that are not needed in the final production image. `--omit=peer` excludes the
+# framework's optional service/parser/testing tiers; runtime imports remain
+# direct dependencies. The OTEL install repeats the flag so it cannot re-resolve
+# those optional peers back into the image.
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --production --frozen-lockfile --ignore-scripts
+    bun install --production --omit=peer --frozen-lockfile --ignore-scripts
 
 # Conditionally install OpenTelemetry optional peer dependencies (Tier 3).
 # These are not bundled by default to keep the base image lean. Enable at build time
@@ -64,7 +71,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 ARG OTEL_ENABLED=true
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     if [ "$OTEL_ENABLED" = "true" ]; then \
-      bun add --omit=dev --ignore-scripts @hono/otel \
+      bun add --omit=dev --omit=peer --ignore-scripts @hono/otel \
         @opentelemetry/instrumentation-http \
         @opentelemetry/exporter-metrics-otlp-http \
         @opentelemetry/exporter-trace-otlp-http \

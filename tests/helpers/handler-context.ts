@@ -2,12 +2,9 @@
  * @fileoverview Test helper: a mock `Context` typed as the context a definition's
  * own handler declares.
  *
- * `createMockContext()` is declared to return the base `Context`, but a tool or
- * resource that declares an `errors[]` contract types its handler's second
- * parameter as `HandlerContext<Reason>` — `Context` plus `fail` and a narrowed
- * `recoveryFor`. The mock does wire both at runtime when the contract is passed,
- * so the gap is in the signature alone; this helper passes the definition's own
- * contract and states the resulting type once, instead of at every call site.
+ * `createMockContext()` infers `HandlerContext<Reason>` when a definition's
+ * `errors[]` contract is passed. This helper keeps the definition and contract
+ * paired at every call site while preserving that inferred reason union.
  *
  * @module tests/helpers/handler-context
  */
@@ -32,6 +29,9 @@ type HandlerContextOf<TDefinition extends HandlerBearing> = Parameters<TDefiniti
 export function handlerContext<TDefinition extends HandlerBearing>(
   definition: TDefinition,
 ): HandlerContextOf<TDefinition> {
+  // Definition interfaces keep `errors` optional even when the builder received
+  // a concrete contract. The mock infers its reason union from that contract;
+  // this one cast bridges only the definition interface's optional property.
   return createMockContext(
     definition.errors ? { errors: definition.errors } : {},
   ) as HandlerContextOf<TDefinition>;

@@ -27,7 +27,7 @@ export function mirrorLogContext(
   operation: string,
   fields: Record<string, unknown>,
 ): RequestContext {
-  return requestContextService.createRequestContext({ operation, ...fields });
+  return requestContextService.createRequestContext({ operation, additionalContext: fields });
 }
 
 /**
