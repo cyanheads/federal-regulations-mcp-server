@@ -34,13 +34,13 @@
  *      `name`/`title` pair warns without failing (issue #231).
  *  10. Plugin marketplace manifests (`.claude-plugin/plugin.json`,
  *      `.codex-plugin/plugin.json`, `.codex-plugin/mcp.json`): non-empty
- *      descriptions, and identity/install correctness — display fields
- *      (`name`, server key, `interface.displayName`) carry the unscoped machine
- *      name while the `npx -y` install arg carries the full `package.json`
- *      name (scoped if scoped). An unscoped install arg for a scoped package
- *      is a guaranteed install 404. Gated by `devcheck.config.json`
- *      `packaging.pluginManifests` (default on); each manifest is skipped
- *      cleanly when absent (issue #240).
+ *      descriptions, package-version parity, and identity/install correctness —
+ *      display fields (`name`, server key, `interface.displayName`) carry the
+ *      unscoped machine name while the `npx -y` install arg carries the full
+ *      `package.json` name (scoped if scoped). An unscoped install arg for a
+ *      scoped package is a guaranteed install 404. Gated by
+ *      `devcheck.config.json` `packaging.pluginManifests` (default on); each
+ *      manifest is skipped cleanly when absent (issue #240).
  *
  * Every check skips cleanly when its input is absent — consumers who deleted
  * `manifest.json` for an HTTP-only deploy, or who haven't built a bundle,
@@ -422,17 +422,19 @@ function installArg(entry: Record<string, unknown>): unknown {
 }
 
 /**
- * Check 10: plugin marketplace manifests. Display fields (`name`, server key,
- * `interface.displayName`) must equal the unscoped machine name; the install
- * arg must equal the full `package.json` name (the real `npx` target). Empty
- * descriptions ship blank marketplace cards. Each manifest is validated only
- * when present, so HTTP-only and non-plugin consumers are unaffected. The
- * caller gates the whole check on `packaging.pluginManifests`.
+ * Check 10: plugin marketplace manifests. Version fields must match
+ * `package.json`; display fields (`name`, server key, `interface.displayName`)
+ * must equal the unscoped machine name; the install arg must equal the full
+ * `package.json` name (the real `npx` target). Empty descriptions ship blank
+ * marketplace cards. Each manifest is validated only when present, so
+ * HTTP-only and non-plugin consumers are unaffected. The caller gates the whole
+ * check on `packaging.pluginManifests`.
  */
 export function checkPluginManifests(
   inputs: PluginManifestInputs,
   unscopedName: string,
   fullName: string,
+  packageVersion: string,
 ): string[] {
   const errors: string[] = [];
   const optOut =
@@ -442,6 +444,11 @@ export function checkPluginManifests(
   const claude = inputs.claudePlugin;
   if (isRecord(claude)) {
     const f = '.claude-plugin/plugin.json';
+    if (claude.version !== packageVersion) {
+      errors.push(
+        `${f} "version" is "${String(claude.version)}" — must match package.json "version" "${packageVersion}"`,
+      );
+    }
     if (!isNonEmptyString(claude.description)) {
       errors.push(`${f} "description" is empty — populate it ${optOut}`);
     }
@@ -471,6 +478,11 @@ export function checkPluginManifests(
   const codex = inputs.codexPlugin;
   if (isRecord(codex)) {
     const f = '.codex-plugin/plugin.json';
+    if (codex.version !== packageVersion) {
+      errors.push(
+        `${f} "version" is "${String(codex.version)}" — must match package.json "version" "${packageVersion}"`,
+      );
+    }
     if (!isNonEmptyString(codex.description)) {
       errors.push(`${f} "description" is empty — populate it ${optOut}`);
     }
@@ -533,7 +545,7 @@ async function main(): Promise<void> {
   const warnings: string[] = [];
   const notes: string[] = [];
 
-  const pkg = tryReadJson<{ name?: string }>(resolve('package.json'));
+  const pkg = tryReadJson<{ name?: string; version?: string }>(resolve('package.json'));
   const unscopedName = pkg?.name?.split('/').pop();
 
   // ── Manifest-dependent checks (1–4 + manifest identity) ──
@@ -651,7 +663,7 @@ async function main(): Promise<void> {
   }
 
   // ── Plugin marketplace manifests (check 10) ──
-  if (unscopedName && pkg?.name) {
+  if (unscopedName && pkg?.name && pkg.version) {
     if (pluginManifestsEnabled()) {
       errors.push(
         ...checkPluginManifests(
@@ -662,6 +674,7 @@ async function main(): Promise<void> {
           },
           unscopedName,
           pkg.name,
+          pkg.version,
         ),
       );
     } else {
