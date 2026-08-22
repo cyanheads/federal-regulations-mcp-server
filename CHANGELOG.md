@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-08-22
+
+Plugin manifests now stay version-aligned with the package, and packaging checks block future drift.
+
 ## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-08-22 · ⚠️ Breaking
 
 Request budgets and SDK v2 update keep upstream failures actionable within client timeouts; strict tool inputs and structured error schemas are now breaking client-visible behavior.

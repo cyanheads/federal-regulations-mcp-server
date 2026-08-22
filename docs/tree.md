@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-08-22 13:34:01
+Generated on: 2026-08-22 14:33:57
 
 ```text
 federal-regulations-mcp-server/
@@ -178,6 +178,8 @@ federal-regulations-mcp-server/
 │   │   └── handler-context.ts
 │   ├── resources/
 │   │   └── resources.test.ts
+│   ├── scripts/
+│   │   └── lint-packaging.test.ts
 │   ├── services/
 │   │   ├── ecfr-mirror.test.ts
 │   │   ├── ecfr-service.test.ts
