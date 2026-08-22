@@ -132,19 +132,19 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
     },
     {
       reason: 'location_required',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Neither part nor appendix was given, so the call names no location to read.',
       recovery: 'Add the part to read, or the appendix identifier from regulations_browse_cfr.',
     },
     {
       reason: 'conflicting_target',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Both section and appendix were given. They name two different locations, and picking one silently would return text the call did not ask for.',
       recovery: 'Send section or appendix, not both; make two calls to read both.',
     },
     {
       reason: 'date_out_of_range',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The requested date precedes eCFR historical coverage.',
       recovery: 'Use a date from ~2017 onward, or omit date for the current text.',
     },

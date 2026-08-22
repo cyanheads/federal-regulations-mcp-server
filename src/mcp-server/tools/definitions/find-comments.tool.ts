@@ -198,14 +198,14 @@ export const findCommentsTool = tool('regulations_find_comments', {
     },
     {
       reason: 'target_required',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'None of docket_id / document_object_id / fr_document_number / comment_id was given.',
       recovery:
         'Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID.',
     },
     {
       reason: 'multiple_targets',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'More than one of docket_id / document_object_id / fr_document_number / comment_id was given.',
       recovery:
         'Keep the single target you meant and drop the rest: comment_id reads one comment in detail, the other three list a set. To read a comment found in a docket listing, call again with comment_id alone.',

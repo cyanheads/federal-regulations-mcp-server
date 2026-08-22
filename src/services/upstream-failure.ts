@@ -1,10 +1,13 @@
 /**
- * @fileoverview The shared pieces of how a transport failure becomes
- * `upstream_unavailable` on this surface: `fetchUpstream` raises one from a
- * request that never produced a response, `rethrowTransportFailure` re-codes the
- * 5xx statuses the status→code map does not call one, `retryTransportOnly` says
- * which of them a retry can fix, and `withUpstreamReason` stamps the contract
- * reason onto whichever transport failure reaches it.
+ * @fileoverview How every upstream call on this surface is run, and how whatever
+ * it fails with becomes `upstream_unavailable`. `runUpstream` is the one pipeline
+ * all three services fetch through — attempt deadline, retry, request budget,
+ * classification — and the rest are the pieces it composes: `fetchUpstream`
+ * raises a transport failure from a request that never produced a response,
+ * `rethrowTransportFailure` re-codes the 5xx statuses the status→code map does
+ * not call one, `retryTransportOnly` says which of them a retry can fix, and
+ * `withUpstreamReason` stamps the contract reason onto whichever transport
+ * failure reaches it.
  *
  * Every tool on this surface declares `upstream_unavailable`, but the failure it
  * describes is raised below any handler: the framework's fetch pipeline
@@ -23,7 +26,14 @@
  */
 
 import type { Context } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import {
+  JsonRpcErrorCode,
+  McpError,
+  serviceUnavailable,
+  timeout,
+} from '@cyanheads/mcp-ts-core/errors';
+import { type RequestContext, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import type { RequestBudget } from '@/services/request-budget.js';
 
 /** Identifies the request in the raised error's message and `data`. */
 interface UpstreamRequestContext {
@@ -56,9 +66,9 @@ interface UpstreamRequestContext {
  *
  * An abort is the exception and re-throws untouched: the caller ending its own
  * request is not an upstream failure, and the framework already classifies it.
- *
- * This wrapper adds no deadline of its own — the request is bounded only by
- * `init.signal`, unlike the `fetchWithTimeout` legs.
+ * That covers an attempt deadline too — {@link runUpstream} composes it into
+ * `init.signal` and identifies its own expiry above this wrapper, so the raw
+ * rejection is exactly what it needs to see.
  */
 export async function fetchUpstream(
   url: string,
@@ -154,13 +164,119 @@ export function retryTransportOnly(error: unknown): boolean {
  * Anything else passes through untouched — an already-classified domain failure,
  * a parse error, a caller abort, a programmer error.
  */
-export function withUpstreamReason<T>(work: Promise<T>, ctx: Context): Promise<T> {
+function withUpstreamReason<T>(work: Promise<T>, ctx: Context): Promise<T> {
   return work.catch((err: unknown) => {
     if (!(err instanceof McpError) || !TRANSPORT_CODES.has(err.code)) throw err;
     throw serviceUnavailable(
       err.message,
       { ...err.data, reason: 'upstream_unavailable', ...ctx.recoveryFor('upstream_unavailable') },
       { cause: err },
+    );
+  });
+}
+
+/** What {@link runUpstream} needs to know about the leg it is running. */
+export interface UpstreamSpec {
+  /** The leg's own per-attempt deadline, before the budget has its say. */
+  attemptMs: number;
+  /** Retry backoff base, calibrated to the upstream. */
+  baseDelayMs: number;
+  /** Correlated log bindings, shared with the fetch inside the attempt. */
+  context: RequestContext;
+  /** Retry classification, where the leg's default differs from the framework's. */
+  isTransient?: ((error: unknown) => boolean) | undefined;
+  /** Service method raising the request, e.g. `EcfrService.getSectionText`. */
+  operation: string;
+}
+
+/**
+ * Run one upstream fetch+parse pipeline: an attempt deadline, `withRetry` around
+ * it, the request's shared wall-clock budget over both, and the classification
+ * that turns whatever comes out into a reason the caller can switch on.
+ *
+ * **Three deadlines, one clock.** `attempt` is handed the deadline for *this*
+ * attempt — the shorter of the leg's own and what the budget has left — and a
+ * signal that fires when it expires. The budget's signal drives `withRetry`, so
+ * a spent budget ends the loop and cuts short a backoff already sleeping rather
+ * than waiting out an attempt that cannot finish in time. Nothing here is
+ * per-call: a tool making three upstream calls draws all of them down the same
+ * budget, so the answer arrives inside the client's request timeout regardless
+ * of how the work is split.
+ *
+ * **A deadline is not a cancellation.** The attempt signal composes the caller's
+ * own, so both abort the same fetch — but the two answer differently, and have
+ * to. A deadline is the upstream failing to respond, so it leaves as a `Timeout`
+ * that {@link withUpstreamReason} stamps `upstream_unavailable`, retryable and
+ * actionable. A caller abort is the caller ending its own request, with nothing
+ * to recover and nothing to advertise, so it passes through with whatever
+ * classification the layer that caught it gave it. They are told apart by
+ * identity — this attempt's own abort reason, and the caller's `ctx.signal` —
+ * never by the rejection's text, which is a different string per runtime.
+ */
+export function runUpstream<T>(
+  ctx: Context,
+  budget: RequestBudget,
+  spec: UpstreamSpec,
+  attempt: (deadlineMs: number, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const attempts = withRetry(
+    () => runAttempt(ctx, budget.attemptMs(spec.attemptMs), spec.operation, attempt),
+    {
+      operation: spec.operation,
+      context: spec.context,
+      baseDelayMs: spec.baseDelayMs,
+      signal: budget.signal,
+      ...(spec.isTransient && { isTransient: spec.isTransient }),
+    },
+  );
+  return withUpstreamReason(asSpentBudget(attempts, ctx, budget, spec.operation), ctx);
+}
+
+/** One attempt under its own deadline, raised as a `Timeout` when it expires. */
+async function runAttempt<T>(
+  ctx: Context,
+  deadlineMs: number,
+  operation: string,
+  attempt: (deadlineMs: number, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const message = `${operation} exceeded its ${deadlineMs}ms deadline.`;
+  const expiry = new DOMException(message, 'TimeoutError');
+  const timer = setTimeout(() => controller.abort(expiry), deadlineMs);
+  try {
+    return await attempt(deadlineMs, AbortSignal.any([controller.signal, ctx.signal]));
+  } catch (error) {
+    // Identity, not message: the rejection a runtime raises for an aborted fetch
+    // says nothing reliable, and the caller's own abort travels the same signal.
+    if (controller.signal.reason !== expiry || ctx.signal.aborted) throw error;
+    throw timeout(message, { operation, errorSource: 'AttemptDeadline' }, { cause: error });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Classify a budget that ran out between attempts.
+ *
+ * A budget spent mid-backoff rejects out of `withRetry`'s sleep with the raw
+ * abort reason, which carries no code — so an exhausted budget would answer as
+ * whatever the framework's classifier made of a `DOMException`, while the same
+ * budget spent mid-attempt answered `upstream_unavailable`. One failure, one
+ * answer. An error that already classified itself is left alone, and a caller
+ * abort is never read as a spent budget.
+ */
+function asSpentBudget<T>(
+  work: Promise<T>,
+  ctx: Context,
+  budget: RequestBudget,
+  operation: string,
+): Promise<T> {
+  return work.catch((error: unknown) => {
+    if (error instanceof McpError || ctx.signal.aborted || !budget.expired()) throw error;
+    throw timeout(
+      `${operation} exhausted the request's upstream budget.`,
+      { operation, errorSource: 'RequestBudget' },
+      { cause: error },
     );
   });
 }

@@ -10,22 +10,32 @@
  * through `fetchUpstream` rather than the framework's `fetchWithTimeout`, which
  * throws every non-2xx before a caller can inspect it; the wrapper keeps the
  * branching and still classifies a connect-level failure as a transport failure.
+ * The deadline the wrapper does not impose comes from `runUpstream`, which bounds
+ * each attempt and draws every one of them down the request's shared budget.
  * Comment bodies are HTML-stripped and attachment-primary submissions flagged.
  * @module services/regulations-gov/regulations-gov-service
  */
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { internalError, notFound, rateLimited, unauthorized } from '@cyanheads/mcp-ts-core/errors';
+import {
+  internalError,
+  JsonRpcErrorCode,
+  McpError,
+  notFound,
+  rateLimited,
+  unauthorized,
+  validationError,
+} from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { httpErrorFromResponse, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
-import { toRequestContext } from '@/services/request-context.js';
+import { requestBudget } from '@/services/request-budget.js';
 import {
   fetchUpstream,
   rethrowTransportFailure,
   retryTransportOnly,
-  withUpstreamReason,
+  runUpstream,
 } from '@/services/upstream-failure.js';
 import type {
   CommentAttachment,
@@ -44,6 +54,13 @@ import type {
 } from './types.js';
 
 const BASE_DELAY_MS = 1500;
+/**
+ * Per-attempt deadline. Matches the Federal Register leg rather than eCFR's
+ * looser one: every Regulations.gov response here is a page of JSON:API metadata
+ * capped at 250 records, not a bulk document, so an attempt still running at 15s
+ * is a peer that is not going to answer.
+ */
+const TIMEOUT_MS = 15_000;
 
 /** Parameters for a docket fetch. */
 export interface DocketParams {
@@ -199,6 +216,14 @@ export class RegulationsGovService {
    * before the caller sees it, and its `expectedStatuses` option only lowers the
    * log severity of that throw.
    *
+   * Keeping the raw `Response` used to mean keeping no deadline either — this
+   * leg was bounded by `ctx.signal` alone, so an upstream that accepted the
+   * connection and then said nothing held the request open for as long as it
+   * pleased, once per retry. `runUpstream` supplies the deadline the branching
+   * ruled out, as a signal composed into the request rather than a helper that
+   * consumes the response: every branch below still reads a live `Response`, and
+   * both the fetch and the `.json()` that follows it are inside the deadline.
+   *
    * Retry is scoped to `retryTransportOnly`: a 429 on the shared hourly key is
    * deterministic for the rest of the window, and expressing that here rather
    * than through `data.retryable` keeps the flag — which is also the caller's own
@@ -212,88 +237,89 @@ export class RegulationsGovService {
       // is a programmer error (a caller bypassed the gate), not an operational one.
       throw internalError('RegulationsGovService called without an API key.', { operation });
     }
-    const reqCtx = toRequestContext(ctx, operation);
-    return withUpstreamReason(
-      withRetry(
-        async () => {
-          const response = await fetchUpstream(
-            url,
-            {
-              headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
-              signal: ctx.signal,
-            },
-            { service: 'Regulations.gov', operation },
-          );
-          if (!response.ok) {
-            if (response.status === 429) {
-              const retryAfter = response.headers.get('retry-after');
-              // Surface rate_limited so the agent backs off, rather than
-              // retry-storming the shared key's hourly limit. The fail-fast lives
-              // in this call's `isTransient`, not in `data.retryable` — that key
-              // is also the caller's own backoff hint, and both tools declare this
-              // failure retryable.
-              throw rateLimited('Regulations.gov rate limit hit (1,000 requests/hour per key).', {
-                reason: 'rate_limited',
-                ...(retryAfter ? { retryAfter } : {}),
-                ...rateLimitRecovery(ctx, retryAfter),
-              });
-            }
-            if (response.status === 401 || response.status === 403) {
-              // The same failure the hasKey() gate names, one step further on: a
-              // key that is configured but rejected. api.data.gov answers both
-              // with 403 (API_KEY_INVALID / API_KEY_MISSING) and reserves 401 for
-              // the same class, and the caller's move is identical either way —
-              // supply a working key. Raised as Unauthorized because that is the
-              // code both tools declare auth_required against; a Forbidden here
-              // would answer with a code its own contract contradicts. The
-              // upstream body is deliberately not captured: a rejected-credential
-              // response is the one place an upstream echoes what it was sent.
-              throw unauthorized(
-                `Regulations.gov rejected the configured API key (HTTP ${response.status}).`,
-                { operation, reason: 'auth_required', ...ctx.recoveryFor('auth_required') },
-              );
-            }
-            if (response.status === 404) {
-              // Translate the bare 404 into an actionable not_found so the tool's
-              // contract recovery surfaces, rather than "returned HTTP 404".
+    const reqCtx = withExtra(ctx, { operation });
+    return runUpstream(
+      ctx,
+      requestBudget(ctx),
+      {
+        operation,
+        context: reqCtx,
+        attemptMs: TIMEOUT_MS,
+        baseDelayMs: BASE_DELAY_MS,
+        isTransient: retryTransportOnly,
+      },
+      async (_deadlineMs, signal) => {
+        const response = await fetchUpstream(
+          url,
+          {
+            headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
+            signal,
+          },
+          { service: 'Regulations.gov', operation },
+        );
+        if (!response.ok) {
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('retry-after');
+            // Surface rate_limited so the agent backs off, rather than
+            // retry-storming the shared key's hourly limit. The fail-fast lives
+            // in this call's `isTransient`, not in `data.retryable` — that key
+            // is also the caller's own backoff hint, and both tools declare this
+            // failure retryable.
+            throw rateLimited('Regulations.gov rate limit hit (1,000 requests/hour per key).', {
+              reason: 'rate_limited',
+              ...(retryAfter ? { retryAfter } : {}),
+              ...rateLimitRecovery(ctx, retryAfter),
+            });
+          }
+          if (response.status === 401 || response.status === 403) {
+            // The same failure the hasKey() gate names, one step further on: a
+            // key that is configured but rejected. api.data.gov answers both
+            // with 403 (API_KEY_INVALID / API_KEY_MISSING) and reserves 401 for
+            // the same class, and the caller's move is identical either way —
+            // supply a working key. Raised as Unauthorized because that is the
+            // code both tools declare auth_required against; a Forbidden here
+            // would answer with a code its own contract contradicts. The
+            // upstream body is deliberately not captured: a rejected-credential
+            // response is the one place an upstream echoes what it was sent.
+            throw unauthorized(
+              `Regulations.gov rejected the configured API key (HTTP ${response.status}).`,
+              { operation, reason: 'auth_required', ...ctx.recoveryFor('auth_required') },
+            );
+          }
+          if (response.status === 404) {
+            // Translate the bare 404 into an actionable not_found so the tool's
+            // contract recovery surfaces, rather than "returned HTTP 404".
+            throw notFound(
+              'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
+              { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+            );
+          }
+          if (response.status === 400) {
+            // 400 is overloaded upstream: a resource ID the API cannot parse
+            // ("Invalid ID: …") sits alongside genuine caller mistakes ("Invalid
+            // filter field name: …", "Page size parameter must be …"). Only the
+            // first is a missing record, so discriminate on the body's own text
+            // rather than on the status. Clone first — httpErrorFromResponse
+            // consumes the body for the fall-through case.
+            const invalidId = await readInvalidIdTitle(response.clone());
+            if (invalidId) {
               throw notFound(
-                'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
+                `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
                 { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
               );
             }
-            if (response.status === 400) {
-              // 400 is overloaded upstream: a resource ID the API cannot parse
-              // ("Invalid ID: …") sits alongside genuine caller mistakes ("Invalid
-              // filter field name: …", "Page size parameter must be …"). Only the
-              // first is a missing record, so discriminate on the body's own text
-              // rather than on the status. Clone first — httpErrorFromResponse
-              // consumes the body for the fall-through case.
-              const invalidId = await readInvalidIdTitle(response.clone());
-              if (invalidId) {
-                throw notFound(
-                  `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
-                  { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
-                );
-              }
-            }
-            rethrowTransportFailure(
-              await httpErrorFromResponse(response, {
-                service: 'Regulations.gov',
-                data: { operation },
-              }),
-            );
           }
-          return (await response.json()) as T;
-        },
-        {
-          operation,
-          context: reqCtx,
-          baseDelayMs: BASE_DELAY_MS,
-          signal: ctx.signal,
-          isTransient: retryTransportOnly,
-        },
-      ),
-      ctx,
+          const failure = await httpErrorFromResponse(response, {
+            service: 'Regulations.gov',
+            data: { operation },
+          });
+          if (failure instanceof McpError && failure.code === JsonRpcErrorCode.InvalidParams) {
+            throw validationError(failure.message, { ...failure.data }, { cause: failure });
+          }
+          rethrowTransportFailure(failure);
+        }
+        return (await response.json()) as T;
+      },
     );
   }
 }
@@ -321,7 +347,8 @@ function rateLimitRecovery(ctx: Context, retryAfter: string | null) {
  * resource ID, or null for every other 400. The API answers a single-resource
  * lookup it cannot parse with `{"errors":[{"status":"400","title":"Invalid ID:
  * <id>"}]}`; a malformed request (bad filter name, out-of-range page size)
- * carries a different title and must keep its InvalidParams classification.
+ * carries a different title and is domain validation rather than malformed
+ * JSON-RPC parameters.
  */
 async function readInvalidIdTitle(response: Response): Promise<string | null> {
   let parsed: { errors?: Array<{ title?: string }> };

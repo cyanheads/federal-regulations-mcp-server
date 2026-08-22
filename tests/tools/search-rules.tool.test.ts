@@ -35,6 +35,11 @@ const sampleRow = {
 describe('searchRulesTool', () => {
   beforeEach(() => searchFn.mockReset());
 
+  it('rejects the Federal Register per_page=1 quirk and accepts the minimum of 2', () => {
+    expect(searchRulesTool.input.safeParse({ per_page: 1 }).success).toBe(false);
+    expect(searchRulesTool.input.parse({ per_page: 2 }).per_page).toBe(2);
+  });
+
   it('returns matching rules for a query (the headline goal)', async () => {
     searchFn.mockResolvedValue({ totalCount: 1, results: [sampleRow] } satisfies FrSearchResponse);
     const ctx = handlerContext(searchRulesTool);

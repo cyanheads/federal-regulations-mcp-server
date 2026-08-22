@@ -28,6 +28,7 @@ import type { Context } from '@cyanheads/mcp-ts-core';
 import {
   defineMirror,
   type Mirror,
+  type MirrorLogger,
   type MirrorRow,
   type SqliteHandle,
   sqliteMirrorStore,
@@ -38,6 +39,7 @@ import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
 import type { EcfrSearchHit, EcfrSectionResult } from '@/services/ecfr/types.js';
 import { isCompleteXmlDocument, parseCfrXml } from '@/services/ecfr/xml.js';
+import { ingestBudget } from '@/services/request-budget.js';
 
 /** Primary table name for the mirror. */
 const TABLE = 'cfr_sections';
@@ -49,6 +51,23 @@ const META_TABLE = 'cfr_mirror_meta';
 const CORPUS_TITLES_KEY = 'corpus_titles';
 /** Meta key holding the {@link INGEST_VERSION} that produced the current rows. */
 const INGEST_VERSION_KEY = 'ingest_version';
+
+/** Adapt the framework logger's correlated context parameter to MirrorService metadata. */
+const mirrorLogger: MirrorLogger = {
+  debug: (message, meta) => logger.debug(message, mirrorLoggerContext(meta)),
+  error: (message, meta) => logger.error(message, mirrorLoggerContext(meta)),
+  info: (message, meta) => logger.info(message, mirrorLoggerContext(meta)),
+  notice: (message, meta) => logger.notice(message, mirrorLoggerContext(meta)),
+  warning: (message, meta) => logger.warning(message, mirrorLoggerContext(meta)),
+};
+
+/** Correlate one MirrorService log line while keeping its metadata in the canonical bag. */
+function mirrorLoggerContext(meta: Readonly<Record<string, unknown>> | undefined) {
+  return requestContextService.createRequestContext({
+    operation: 'ecfr-mirror:runner',
+    ...(meta && { additionalContext: meta }),
+  });
+}
 
 /**
  * Version of the row-producing logic, bumped whenever an ingest change makes
@@ -166,7 +185,7 @@ function upsertPartIndex(
  */
 export const ecfrMirror: Mirror = defineMirror({
   name: 'ecfr-cfr-sections',
-  logger,
+  logger: mirrorLogger,
   store: sqliteMirrorStore({
     path: getServerConfig().ecfrMirrorPath,
     table: TABLE,
@@ -557,13 +576,22 @@ async function fetchTitleXml(
  * place of the classified error — swallowed into a misleading "failed to fetch
  * title N" on the per-title path, and fatal to the run on `listTitles`. `{}` is
  * what the real resolver returns for a caller that declares nothing.
+ *
+ * The context is claimed for {@link ingestBudget} the moment it exists, because
+ * it is the one thing a whole run shares. A sync is hours of work against
+ * ~150 MB titles with nobody waiting on the answer, so the 45-second wall clock
+ * an MCP request gets is the wrong bound for every call it makes — not only the
+ * bulk read that asks for a long deadline outright, but the titles list the
+ * whole title loop is built from.
  */
 function mirrorContext(signal: AbortSignal): Context {
   const base = requestContextService.createRequestContext({ operation: 'ecfr-mirror:sync' });
-  return {
+  const ctx = {
     ...base,
     signal,
     log: logger,
     recoveryFor: () => ({}),
   } as unknown as Context;
+  ingestBudget(ctx);
+  return ctx;
 }

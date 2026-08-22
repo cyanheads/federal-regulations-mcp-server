@@ -58,6 +58,11 @@ describe('listOpenCommentsTool', () => {
     hasKey.mockReset();
   });
 
+  it('rejects the Federal Register per_page=1 quirk and accepts the minimum of 2', () => {
+    expect(listOpenCommentsTool.input.safeParse({ per_page: 1 }).success).toBe(false);
+    expect(listOpenCommentsTool.input.parse({ per_page: 2 }).per_page).toBe(2);
+  });
+
   it('lists open rules closing soonest first (the headline goal)', async () => {
     hasKey.mockReturnValue(true);
     listOpenComments.mockResolvedValue(response);

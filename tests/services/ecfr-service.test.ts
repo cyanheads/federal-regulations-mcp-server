@@ -507,7 +507,7 @@ describe('EcfrService', () => {
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.ValidationError);
     expect((err as McpError).message).toContain('must be specified if specifying hierarchy');
     expect((err as McpError).data?.part).toBe('58');
   });
@@ -591,7 +591,7 @@ describe('EcfrService', () => {
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.ValidationError);
     expect((err as McpError).data?.reason).toBe('date_out_of_range');
     expect((err as McpError).message).toContain('1/03/2017');
     expect((err as McpError).message).toContain(FAKE_INDEX_DATE);
@@ -609,7 +609,7 @@ describe('EcfrService', () => {
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
-    expect((err as McpError).code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.ValidationError);
     expect((err as McpError).data?.reason).toBe('date_out_of_range');
     expect((err as McpError).message).toContain('2017-01-03');
     expect((err as McpError).message).toContain(FAKE_INDEX_DATE);

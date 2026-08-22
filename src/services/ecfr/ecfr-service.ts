@@ -2,29 +2,32 @@
  * @fileoverview EcfrService — keyless client for the eCFR API (ecfr.gov/api):
  * the versioner (titles, structure, ancestry, full-text XML) and the search API.
  * Backs `browse_cfr` and `get_cfr_section`, and supplies the title list + XML the
- * eCFR mirror ingester walks. Section XML is parsed by `./xml.ts`. Retry wraps the
- * full fetch + parse pipeline; HTML error pages become transient errors, the 5xx
- * statuses the status→code map calls `InternalError` are re-coded, and a
- * transport failure that survives retry leaves as `upstream_unavailable`. Search
- * scopes through `hierarchy[title]` / `hierarchy[part]`, and a hit's path names
- * the part it sits in.
+ * eCFR mirror ingester walks. Section XML is parsed by `./xml.ts`. `runUpstream`
+ * wraps the full fetch + parse pipeline in a retry loop bounded by the request's
+ * shared budget; HTML error pages become transient errors, the 5xx statuses the
+ * status→code map calls `InternalError` are re-coded, and a transport failure
+ * that survives retry leaves as `upstream_unavailable`. The one leg that keeps
+ * its own long deadline is the bulk whole-title read, which the mirror ingest
+ * runs out of band with no client waiting on it. Search scopes through
+ * `hierarchy[title]` / `hierarchy[part]`, and a hit's path names the part it
+ * sits in.
  * @module services/ecfr/ecfr-service
  */
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import {
-  invalidParams,
   JsonRpcErrorCode,
   McpError,
   notFound,
   serviceUnavailable,
+  validationError,
 } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
-import { toRequestContext } from '@/services/request-context.js';
-import { rethrowTransportFailure, withUpstreamReason } from '@/services/upstream-failure.js';
+import { requestBudget } from '@/services/request-budget.js';
+import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
 import { appendixCite, sectionCite } from './cite.js';
 import type {
   EcfrAppendixResult,
@@ -223,7 +226,9 @@ export class EcfrService {
 
     let xml: string;
     try {
-      xml = await this.fetchXml(url, ctx, 'EcfrService.getSectionText', XML_TIMEOUT_MS, [404]);
+      xml = await this.fetchXml(url, ctx, 'EcfrService.getSectionText', {
+        expectedStatuses: [404],
+      });
     } catch (err) {
       // The versioner 404s for a nonexistent part/section (or a date past the
       // title's latest issue) — no such location, not a fetch failure.
@@ -298,7 +303,9 @@ export class EcfrService {
 
     let xml: string;
     try {
-      xml = await this.fetchXml(url, ctx, 'EcfrService.getAppendixText', XML_TIMEOUT_MS, [404]);
+      xml = await this.fetchXml(url, ctx, 'EcfrService.getAppendixText', {
+        expectedStatuses: [404],
+      });
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) return null;
       throw err;
@@ -319,11 +326,20 @@ export class EcfrService {
 
   /**
    * Fetch a whole title's full XML (no part/section filter) — the bulk payload
-   * the mirror ingester walks. Long timeout: Title 40 alone is ~150 MB.
+   * the mirror ingester walks. Long deadline: Title 40 alone is ~150 MB.
+   *
+   * Ingest is not a request, and the exemption that says so belongs to the
+   * ingest context rather than to this method: the mirror claims its context for
+   * `ingestBudget` where it builds it, so the 10-minute deadline below is what
+   * every attempt actually gets. Claiming it here as well would put a second
+   * unbounded-budget switch on a public method, where a caller that did have a
+   * client waiting would silently take a request out from under its own clock.
    */
   fetchFullTitleXml(title: number, date: string, ctx: Context): Promise<string> {
     const url = `${this.baseUrl}/versioner/v1/full/${date}/title-${title}.xml`;
-    return this.fetchXml(url, ctx, 'EcfrService.fetchFullTitleXml', FULL_TITLE_TIMEOUT_MS);
+    return this.fetchXml(url, ctx, 'EcfrService.fetchFullTitleXml', {
+      attemptMs: FULL_TITLE_TIMEOUT_MS,
+    });
   }
 
   /**
@@ -411,7 +427,7 @@ export class EcfrService {
       // spelled out here, with both ends, rather than left to the caller to guess.
       if (rejection.fields.includes('date')) {
         const latest = await this.currentDate(ctx).catch(() => null);
-        throw invalidParams(
+        throw validationError(
           `${rejection.detail} The search index covers ${ECFR_SEARCH_EARLIEST_DATE} through ${latest ?? "eCFR's current index date"}.`,
           {
             reason: 'date_out_of_range',
@@ -420,7 +436,7 @@ export class EcfrService {
           },
         );
       }
-      throw invalidParams(rejection.detail, { date, title: title ?? null, part: part ?? null });
+      throw validationError(rejection.detail, { date, title: title ?? null, part: part ?? null });
     }
 
     return {
@@ -435,54 +451,64 @@ export class EcfrService {
     operation: string,
     expectedStatuses?: number[],
   ): Promise<T> {
-    const reqCtx = toRequestContext(ctx, operation);
-    return withUpstreamReason(
-      withRetry(
-        async () => {
-          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
-            signal: ctx.signal,
-            ...(expectedStatuses && { expectedStatuses }),
-          }).catch(rethrowTransportFailure);
-          const text = await response.text();
-          if (looksLikeHtml(text)) {
-            throw serviceUnavailable(
-              'eCFR returned an HTML error page instead of JSON — likely momentarily unavailable.',
-            );
-          }
-          return JSON.parse(text) as T;
-        },
-        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
-      ),
+    const reqCtx = withExtra(ctx, { operation });
+    return runUpstream(
       ctx,
+      requestBudget(ctx),
+      { operation, context: reqCtx, attemptMs: TIMEOUT_MS, baseDelayMs: BASE_DELAY_MS },
+      async (deadlineMs, signal) => {
+        const response = await fetchWithTimeout(url, deadlineMs, reqCtx, {
+          signal,
+          ...(expectedStatuses && { expectedStatuses }),
+        }).catch(rethrowTransportFailure);
+        const text = await response.text();
+        if (looksLikeHtml(text)) {
+          throw serviceUnavailable(
+            'eCFR returned an HTML error page instead of JSON — likely momentarily unavailable.',
+          );
+        }
+        return JSON.parse(text) as T;
+      },
     );
   }
 
+  /**
+   * The budget is always the one the context already carries — a request's 45
+   * seconds, or the ingest's unbounded clock on a context the mirror claimed.
+   * `attemptMs` is the only thing a caller varies, and it is a ceiling: the
+   * budget still clamps it to whatever the request has left.
+   *
+   * Reading the body counts against the deadline like the fetch does — a title's
+   * XML runs to ~157 MB, so the stream is where the time actually goes.
+   */
   private fetchXml(
     url: string,
     ctx: Context,
     operation: string,
-    timeoutMs: number = XML_TIMEOUT_MS,
-    expectedStatuses?: number[],
+    options: {
+      attemptMs?: number;
+      expectedStatuses?: number[];
+    } = {},
   ): Promise<string> {
-    const reqCtx = toRequestContext(ctx, operation);
-    return withUpstreamReason(
-      withRetry(
-        async () => {
-          const response = await fetchWithTimeout(url, timeoutMs, reqCtx, {
-            signal: ctx.signal,
-            ...(expectedStatuses && { expectedStatuses }),
-          }).catch(rethrowTransportFailure);
-          const text = await response.text();
-          if (looksLikeHtml(text)) {
-            throw serviceUnavailable(
-              'eCFR returned an HTML error page instead of XML — likely momentarily unavailable.',
-            );
-          }
-          return text;
-        },
-        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
-      ),
+    const reqCtx = withExtra(ctx, { operation });
+    const { attemptMs = XML_TIMEOUT_MS, expectedStatuses } = options;
+    return runUpstream(
       ctx,
+      requestBudget(ctx),
+      { operation, context: reqCtx, attemptMs, baseDelayMs: BASE_DELAY_MS },
+      async (deadlineMs, signal) => {
+        const response = await fetchWithTimeout(url, deadlineMs, reqCtx, {
+          signal,
+          ...(expectedStatuses && { expectedStatuses }),
+        }).catch(rethrowTransportFailure);
+        const text = await response.text();
+        if (looksLikeHtml(text)) {
+          throw serviceUnavailable(
+            'eCFR returned an HTML error page instead of XML — likely momentarily unavailable.',
+          );
+        }
+        return text;
+      },
     );
   }
 }

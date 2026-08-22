@@ -57,11 +57,13 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
     per_page: z
       .number()
       .int()
-      .min(1)
+      .min(2)
       .max(100)
       .optional()
       .default(20)
-      .describe('Results per page (1–100, default 20).'),
+      .describe(
+        'Results per page (2–100, default 20). The Federal Register API treats exactly 1 as its default page size instead of returning one result.',
+      ),
     page: z
       .number()
       .int()

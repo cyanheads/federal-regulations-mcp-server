@@ -2,8 +2,9 @@
  * @fileoverview FederalRegisterService — keyless client for the Federal Register
  * API v1 (federalregister.gov/api/v1). Backs the document search, single-document
  * fetch (with the cross-source docket/CFR handles), and the open-comment-window
- * tools. Each method wraps the full fetch + parse pipeline in `withRetry`;
- * `fetchWithTimeout` throws a classified `McpError` on a non-OK response, the
+ * tools. Each method runs the full fetch + parse pipeline through `runUpstream`,
+ * which bounds every attempt by the request's shared budget and retries inside
+ * it; `fetchWithTimeout` throws a classified `McpError` on a non-OK response, the
  * response parser detects HTML error pages and re-throws them as transient, and
  * `rethrowTransportFailure` re-codes the 5xx statuses the status→code map calls
  * `InternalError`. A transport failure that survives retry leaves as
@@ -20,10 +21,10 @@ import {
   serviceUnavailable,
 } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import { fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
-import { toRequestContext } from '@/services/request-context.js';
-import { rethrowTransportFailure, withUpstreamReason } from '@/services/upstream-failure.js';
+import { requestBudget } from '@/services/request-budget.js';
+import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
 import type {
   CfrReference,
   FrDocumentDetail,
@@ -215,25 +216,28 @@ export class FederalRegisterService {
     operation: string,
     expectedStatuses?: number[],
   ): Promise<T> {
-    const reqCtx = toRequestContext(ctx, operation);
-    return withUpstreamReason(
-      withRetry(
-        async () => {
-          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
-            signal: ctx.signal,
-            ...(expectedStatuses && { expectedStatuses }),
-          }).catch(rethrowTransportFailure);
-          const text = await response.text();
-          if (looksLikeHtml(text)) {
-            throw serviceUnavailable(
-              'Federal Register returned an HTML error page instead of JSON — likely momentarily unavailable.',
-            );
-          }
-          return JSON.parse(text) as T;
-        },
-        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
-      ),
+    const reqCtx = withExtra(ctx, { operation });
+    return runUpstream(
       ctx,
+      requestBudget(ctx),
+      { operation, context: reqCtx, attemptMs: TIMEOUT_MS, baseDelayMs: BASE_DELAY_MS },
+      async (deadlineMs, signal) => {
+        const response = await fetchWithTimeout(url, deadlineMs, reqCtx, {
+          signal,
+          ...(expectedStatuses && { expectedStatuses }),
+        }).catch(rethrowTransportFailure);
+        // Reading the body is part of the attempt, so it runs under the same
+        // signal: a peer that sends headers and then stalls the stream is the
+        // same failure as one that never answers, and the deadline has to reach
+        // both.
+        const text = await response.text();
+        if (looksLikeHtml(text)) {
+          throw serviceUnavailable(
+            'Federal Register returned an HTML error page instead of JSON — likely momentarily unavailable.',
+          );
+        }
+        return JSON.parse(text) as T;
+      },
     );
   }
 
@@ -248,18 +252,17 @@ export class FederalRegisterService {
    * declared `not_found` means exactly that.
    */
   private fetchText(url: string, ctx: Context, operation: string): Promise<string> {
-    const reqCtx = toRequestContext(ctx, operation);
-    return withUpstreamReason(
-      withRetry(
-        async () => {
-          const response = await fetchWithTimeout(url, TIMEOUT_MS, reqCtx, {
-            signal: ctx.signal,
-          }).catch(rethrowBodyFailure);
-          return response.text();
-        },
-        { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, signal: ctx.signal },
-      ),
+    const reqCtx = withExtra(ctx, { operation });
+    return runUpstream(
       ctx,
+      requestBudget(ctx),
+      { operation, context: reqCtx, attemptMs: TIMEOUT_MS, baseDelayMs: BASE_DELAY_MS },
+      async (deadlineMs, signal) => {
+        const response = await fetchWithTimeout(url, deadlineMs, reqCtx, { signal }).catch(
+          rethrowBodyFailure,
+        );
+        return response.text();
+      },
     );
   }
 }

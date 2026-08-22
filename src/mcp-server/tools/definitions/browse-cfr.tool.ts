@@ -227,7 +227,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
   errors: [
     {
       reason: 'query_required',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'mode="search" with no query phrase.',
       recovery: 'Provide a query phrase for search mode, or switch to mode="structure" to browse.',
     },
@@ -240,14 +240,14 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     },
     {
       reason: 'title_required_for_part',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'A part was given with no title. Part identifiers repeat across titles, and eCFR rejects a part filter that names no title.',
       recovery:
         'Add the title the part belongs to (e.g. title 40 with part 58), or drop part to search or browse the whole title set.',
     },
     {
       reason: 'date_out_of_range',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: "Search mode with a date outside eCFR's indexed window (before 2017-01-03, or past its current index date).",
       recovery:
         'Pick a date inside the window the error names, or omit date to search the current text.',

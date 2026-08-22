@@ -16,7 +16,11 @@
  * without ten seconds of sleep per case. One test deliberately omits it to cover
  * the exhausted-retry path, where the reason has to survive the re-wrap that
  * appends the attempt count. A failure with no response at all cannot carry a
- * header to shorten it, so those cases run the backoff on fake timers instead.
+ * header to shorten it, so those cases run the backoff on fake timers instead,
+ * and read the elapsed time off the same clock the retry loop and the request
+ * budget do — which is what a wall-clock claim can be asserted against without
+ * spending it. That the clock is real is asserted in
+ * `tests/services/request-budget`.
  * @module tests/tools/error-contracts.test
  */
 
@@ -25,6 +29,7 @@ import type { McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { REQUEST_BUDGET_MS } from '@/services/request-budget.js';
 import { handlerContext } from '../helpers/handler-context.js';
 
 /** The mirror is not the subject here — every read takes the live eCFR path. */
@@ -72,8 +77,38 @@ function unavailable(): Response {
   });
 }
 
-function serveEverything(respond: () => Promise<Response> | Response): void {
+function serveEverything(respond: (request: Request) => Promise<Response> | Response): void {
   http.route({ match: ANY_UPSTREAM, respond });
+}
+
+/** Long enough for any backoff, deadline, or budget under test to have fired. */
+const TIMER_HORIZON_MS = 120_000;
+
+/**
+ * Runs `work` with every timer faked, and reports how long it took on the clock
+ * the retry loop, the attempt deadlines, and the request budget all read.
+ *
+ * A failure that never produces a response carries no `Retry-After` to shorten
+ * it, so `withRetry` spends its full backoff — ten seconds of real sleep per case
+ * on the Regulations.gov leg, and forty-five more once a budget is involved. The
+ * elapsed value is taken when the work settles rather than after the advance, so
+ * it is the simulated instant of the answer and not the horizon.
+ */
+async function withoutWaiting<T>(
+  work: () => Promise<T>,
+): Promise<{ result: T; elapsedMs: number }> {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now();
+    let settledAt = startedAt;
+    const pending = work().finally(() => {
+      settledAt = Date.now();
+    });
+    await vi.advanceTimersByTimeAsync(TIMER_HORIZON_MS);
+    return { result: await pending, elapsedMs: settledAt - startedAt };
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 /** The error surface a client reads: the JSON one and the markdown one. */
@@ -300,22 +335,6 @@ describe('upstream_unavailable reaches the caller', () => {
     return Promise.reject(new Error('Unable to connect. Is the computer able to access the url?'));
   }
 
-  /**
-   * Runs `work` with the retry backoff on fake timers. A connect-level failure
-   * carries no `Retry-After`, so `withRetry` spends its full budget — ten seconds
-   * of real sleep per case on the Regulations.gov leg.
-   */
-  async function withoutWaiting<T>(work: () => Promise<T>): Promise<T> {
-    vi.useFakeTimers();
-    try {
-      const pending = work();
-      await vi.advanceTimersByTimeAsync(120_000);
-      return await pending;
-    } finally {
-      vi.useRealTimers();
-    }
-  }
-
   const keyedTools = [
     {
       name: 'regulations_get_docket',
@@ -335,7 +354,8 @@ describe('upstream_unavailable reaches the caller', () => {
       // nothing below them classified the throw — this used to arrive as a bare
       // InternalError with no reason for the one failure worth retrying.
       serveEverything(connectFailure);
-      const { error, text } = surfaces(await withoutWaiting(() => runToolContract(tool, input)));
+      const { result } = await withoutWaiting(() => runToolContract(tool, input));
+      const { error, text } = surfaces(result);
 
       expect(error.code).toBe(-32000);
       expect(error.data?.reason).toBe('upstream_unavailable');
@@ -378,6 +398,155 @@ describe('upstream_unavailable reaches the caller', () => {
     expect(err.code).toBe(-32000);
     expect(err.data?.reason).toBe('upstream_unavailable');
     expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/eCFR/);
+  });
+});
+
+describe('a request budget reaches the caller', () => {
+  /**
+   * The failure shape the whole budget exists for: a peer that accepts the
+   * connection and answers nothing. It ends only when something aborts it, so a
+   * leg with no deadline of its own hangs here for as long as the peer lets it —
+   * which is what the Regulations.gov leg used to do, once per retry.
+   */
+  function neverAnswers(request: Request): Promise<Response> {
+    return new Promise((_, reject) => {
+      onAbort(request.signal, reject);
+    });
+  }
+
+  /** A peer that answers, eventually. Slow success, not failure. */
+  function answersAfter(request: Request, ms: number, body: unknown): Promise<Response> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(Response.json(body)), ms);
+      onAbort(request.signal, (reason) => {
+        clearTimeout(timer);
+        reject(reason);
+      });
+    });
+  }
+
+  /** Fires now when the signal has already aborted, which a listener never does. */
+  function onAbort(signal: AbortSignal, reject: (reason: unknown) => void): void {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }
+
+  const everyTool = [
+    { name: 'regulations_search_rules', tool: searchRulesTool, input: { query: 'ozone' } },
+    {
+      name: 'regulations_get_document',
+      tool: getDocumentTool,
+      input: { document_number: '2025-14555' },
+    },
+    {
+      name: 'regulations_browse_cfr',
+      tool: browseCfrTool,
+      input: { mode: 'structure' as const, title: 40 },
+    },
+    {
+      name: 'regulations_get_cfr_section',
+      tool: getCfrSectionTool,
+      input: { title: 40, part: '50', section: '50.1' },
+    },
+    { name: 'regulations_list_open_comments', tool: listOpenCommentsTool, input: {} },
+    {
+      name: 'regulations_get_docket',
+      tool: getDocketTool,
+      input: { docket_id: 'EPA-HQ-OAR-2025-0194' },
+    },
+    {
+      name: 'regulations_find_comments',
+      tool: findCommentsTool,
+      input: { docket_id: 'EPA-HQ-OAR-2025-0194' },
+    },
+  ];
+
+  for (const { name, tool, input } of everyTool) {
+    it(`${name} answers inside the budget when the upstream never responds`, async () => {
+      serveEverything(neverAnswers);
+      const { result, elapsedMs } = await withoutWaiting(() => runToolContract(tool, input));
+      const { error, text } = surfaces(result);
+
+      // The point of the whole mechanism: an answer, not a client-side timeout
+      // with nothing on the wire. 60s is the MCP SDK's default client request
+      // timeout, which nothing here overrides.
+      expect(elapsedMs).toBeLessThanOrEqual(REQUEST_BUDGET_MS);
+      expect(error.code).toBe(-32000);
+      expect(error.data?.reason).toBe('upstream_unavailable');
+      expect(text).toMatch(/^Recovery: .+$/m);
+    });
+  }
+
+  it('spends one budget across a tool’s whole chain of upstream calls', async () => {
+    // regulations_get_docket reads the docket, then the documents filed in it.
+    // Bounding those separately bounds nothing a caller can act on: a slow first
+    // call plus a full retry budget on the second is 90s of per-call deadlines,
+    // and the second call has to inherit what the first left behind.
+    let served = 0;
+    serveEverything((request) => {
+      served += 1;
+      return served === 1
+        ? answersAfter(request, 30_000, { data: { attributes: { title: 'A docket' } } })
+        : neverAnswers(request);
+    });
+
+    const { result, elapsedMs } = await withoutWaiting(() =>
+      runToolContract(getDocketTool, { docket_id: 'EPA-HQ-OAR-2025-0194' }),
+    );
+    const { error } = surfaces(result);
+
+    expect(error.data?.reason).toBe('upstream_unavailable');
+    expect(elapsedMs).toBeLessThanOrEqual(REQUEST_BUDGET_MS);
+    // The second call inherited the 15s the first left, rather than opening a
+    // four-attempt budget of its own — which would put five requests on the wire
+    // and the answer past a minute.
+    expect(http.calls.length).toBeLessThan(5);
+  });
+
+  const perAttemptDeadline = [
+    { name: 'regulations_search_rules', tool: searchRulesTool, input: { query: 'ozone' } },
+    {
+      name: 'regulations_get_docket',
+      tool: getDocketTool,
+      input: { docket_id: 'EPA-HQ-OAR-2025-0194' },
+    },
+  ];
+
+  for (const { name, tool, input } of perAttemptDeadline) {
+    it(`${name} retries a hung upstream instead of spending the budget on one attempt`, async () => {
+      // The budget alone would answer in time with a single attempt that never
+      // ends, and that is not the same server: a deadline is exactly the failure
+      // a retry exists for. Each leg's own 15s deadline fits inside the budget
+      // three times over, so a hung peer is retried before the budget runs out.
+      serveEverything(neverAnswers);
+      const { result } = await withoutWaiting(() => runToolContract(tool, input));
+
+      expect(surfaces(result).error.data?.reason).toBe('upstream_unavailable');
+      expect(http.calls.length).toBeGreaterThan(1);
+    });
+  }
+
+  it('does not read a caller-cancelled Federal Register request as an upstream failure', async () => {
+    // The counterpart to the Regulations.gov case above, on the leg whose abort
+    // is named by fetchWithTimeout rather than by the framework's classifier —
+    // the codes differ, and neither may collapse into the deadline's answer.
+    const controller = new AbortController();
+    controller.abort();
+    serveEverything(neverAnswers);
+
+    const { error } = surfaces(
+      await runToolContract(
+        searchRulesTool,
+        { query: 'ozone' },
+        { context: { signal: controller.signal } },
+      ),
+    );
+
+    expect(error.data?.reason).toBeUndefined();
+    expect(error.code).toBe(-32603);
   });
 });
 
