@@ -1,10 +1,9 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-08-10 03:56:04
+Generated on: 2026-08-22 13:34:01
 
 ```text
 federal-regulations-mcp-server/
-├── .claude/
 ├── .claude-plugin/
 │   └── plugin.json
 ├── .codex-plugin/
@@ -15,6 +14,8 @@ federal-regulations-mcp-server/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
 │   │   └── feature_request.yml
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
 │   ├── FUNDING.yml
 │   └── SECURITY.md
 ├── .vscode/
@@ -24,7 +25,6 @@ federal-regulations-mcp-server/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
 │   └── template.md
-├── data/
 ├── docs/
 │   └── design.md
 ├── scripts/
@@ -168,7 +168,7 @@ federal-regulations-mcp-server/
 │   │   ├── regulations-gov/
 │   │   │   ├── regulations-gov-service.ts
 │   │   │   └── types.ts
-│   │   ├── request-context.ts
+│   │   ├── request-budget.ts
 │   │   └── upstream-failure.ts
 │   └── index.ts
 ├── tests/
@@ -183,7 +183,8 @@ federal-regulations-mcp-server/
 │   │   ├── ecfr-service.test.ts
 │   │   ├── ecfr-xml.test.ts
 │   │   ├── federal-register-service.test.ts
-│   │   └── regulations-gov-service.test.ts
+│   │   ├── regulations-gov-service.test.ts
+│   │   └── request-budget.test.ts
 │   ├── tools/
 │   │   ├── browse-cfr.tool.test.ts
 │   │   ├── error-contracts.test.ts

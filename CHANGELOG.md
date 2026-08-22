@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-08-22 · ⚠️ Breaking
+
+Request budgets and SDK v2 update keep upstream failures actionable within client timeouts; strict tool inputs and structured error schemas are now breaking client-visible behavior.
+
 ## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-09
 
 Connect-level failures, rejected Regulations.gov keys, and 500/501 responses across all three upstream services now classify and retry as their declared upstream_unavailable/auth_required/rate_limited reasons instead of a bare InternalError, and the eCFR mirror sync no longer throws on a mid-sync upstream failure.
