@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.5](changelog/0.2.x/0.2.5.md) — 2026-09-20
+
+HTTP deployments now declare stateless session mode explicitly, and markdown table cells with a backslash render correctly.
+
 ## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-08-22
 
 Plugin manifests now stay version-aligned with the package, and packaging checks block future drift.
