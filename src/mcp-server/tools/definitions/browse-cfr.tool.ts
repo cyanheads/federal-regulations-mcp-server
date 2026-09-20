@@ -237,6 +237,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       when: 'Structure mode where eCFR publishes no tree for the title at that date (a reserved title, or a date outside its coverage), or where the part is absent from the tree it does publish.',
       recovery:
         'Omit part to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all.',
+      thrownBy: 'service',
     },
     {
       reason: 'title_required_for_part',
@@ -251,12 +252,14 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       when: "Search mode with a date outside eCFR's indexed window (before 2017-01-03, or past its current index date).",
       recovery:
         'Pick a date inside the window the error names, or omit date to search the current text.',
+      thrownBy: 'service',
     },
     {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'eCFR returned a 5xx, timed out, or served an HTML error page (live path).',
       recovery: 'Retry after a brief wait; the eCFR API may be momentarily down.',
+      thrownBy: 'service',
     },
   ],
 

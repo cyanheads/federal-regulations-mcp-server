@@ -533,6 +533,8 @@ describe('a request budget reaches the caller', () => {
     // The counterpart to the Regulations.gov case above, on the leg whose abort
     // is named by fetchWithTimeout rather than by the framework's classifier —
     // the codes differ, and neither may collapse into the deadline's answer.
+    // Here the handler unwinds with the request's signal already fired, which
+    // the framework resolves to RequestCancelled whatever the leg threw.
     const controller = new AbortController();
     controller.abort();
     serveEverything(neverAnswers);
@@ -546,7 +548,7 @@ describe('a request budget reaches the caller', () => {
     );
 
     expect(error.data?.reason).toBeUndefined();
-    expect(error.code).toBe(-32603);
+    expect(error.code).toBe(-32011);
   });
 });
 

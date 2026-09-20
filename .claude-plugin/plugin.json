@@ -1,20 +1,34 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "federal-regulations-mcp-server",
   "version": "0.2.4",
   "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
   "author": {
-    "name": "cyanheads"
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
   },
   "homepage": "https://github.com/cyanheads/federal-regulations-mcp-server",
   "repository": "https://github.com/cyanheads/federal-regulations-mcp-server",
   "license": "Apache-2.0",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "federal-register", "ecfr", "regulations-gov"],
+  "userConfig": {
+    "regulations_gov_api_key": {
+      "type": "string",
+      "title": "Regulations.gov API key",
+      "description": "api.data.gov key for the Regulations.gov tools (get_docket, find_comments). Free at https://api.data.gov/signup/. The Federal Register and eCFR tools work without it.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  },
   "mcpServers": {
     "federal-regulations-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/federal-regulations-mcp-server"],
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
-        "REGULATIONS_GOV_API_KEY": "${REGULATIONS_GOV_API_KEY}"
+        "REGULATIONS_GOV_API_KEY": "${user_config.regulations_gov_api_key}"
       }
     }
   }

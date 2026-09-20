@@ -115,6 +115,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       when: 'No docket exists with that ID.',
       recovery:
         'Verify the docket ID from a Federal Register document\'s docketId; format is like "EPA-HQ-OAR-2025-0194".',
+      thrownBy: 'service',
     },
     {
       reason: 'rate_limited',
@@ -122,12 +123,14 @@ export const getDocketTool = tool('regulations_get_docket', {
       when: 'Regulations.gov returned 429 (1,000 requests/hour per key).',
       retryable: true,
       recovery: 'Wait and retry — the per-key hourly limit was hit.',
+      thrownBy: 'service',
     },
     {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'Regulations.gov returned a 5xx, timed out, or could not be reached at all.',
       recovery: 'Retry after a brief wait.',
+      thrownBy: 'service',
     },
   ],
 

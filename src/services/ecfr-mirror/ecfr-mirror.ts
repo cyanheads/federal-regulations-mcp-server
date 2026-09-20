@@ -7,12 +7,16 @@
  * Build-time ingest uses `better-sqlite3` on Node; runtime reads go through Bun's
  * `bun:sqlite` — both behind the framework's runtime-agnostic SQLite handle.
  *
- * CRITICAL build-correctness contract: the auxiliary tables (`cfr_part_index`,
+ * Build-correctness contract: the auxiliary tables (`cfr_part_index`,
  * `cfr_mirror_meta`) are created idempotently (`CREATE TABLE IF NOT EXISTS`) at
- * the top of the `sync` routine via the raw handle — NOT via a framework
- * migration. The MirrorService skips migrations on a brand-new DB, so a
- * migration-created aux table fails the cold `mirror:init` with `no such table`.
- * Idempotent DDL at sync start is the contract.
+ * the top of the `sync` routine via the raw handle — not via a framework
+ * migration. They are server-owned, sit outside the store's declarative schema,
+ * and are rewritten by the same routine that fills them, so their DDL belongs
+ * beside it: no schema version to bump, no migration list to keep ordered, and
+ * the cold `mirror:init` and every later refresh take the identical path.
+ * MirrorStore migrations do run on a brand-new database as well as on upgrade,
+ * so a migration would work here — it would only split ownership of these two
+ * tables across two places.
  *
  * Those two aux tables also carry the mirror's title coverage — which titles the
  * index holds, and which titles the whole Code had at ingest time — and the
@@ -106,8 +110,9 @@ function rowId(title: number, part: string, section: string): string {
 
 /**
  * Create the server-owned auxiliary tables idempotently. Called once at the top
- * of `sync`, via the raw handle — NEVER through a migration (the runner skips
- * migrations on a fresh DB). `CREATE TABLE IF NOT EXISTS` is safe on every run.
+ * of `sync`, via the raw handle rather than through a framework migration: the
+ * routine below rewrites both tables on every run, so their DDL belongs beside
+ * it. `CREATE TABLE IF NOT EXISTS` is safe on every run.
  */
 function ensureAuxTables(handle: SqliteHandle): void {
   handle.exec(`
@@ -206,7 +211,7 @@ export const ecfrMirror: Mirror = defineMirror({
     const ecfr = getEcfrService();
     const ctx = mirrorContext(signal);
 
-    // Idempotent aux-table DDL at sync start — never a migration.
+    // Idempotent aux-table DDL at sync start — server-owned, not a migration.
     const handle = await ecfrMirror.raw();
     ensureAuxTables(handle);
 

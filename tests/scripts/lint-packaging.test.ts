@@ -53,13 +53,13 @@ describe('checkPluginManifests version parity', () => {
 
   it('reports the Claude plugin path when its version is stale', () => {
     expect(checkVersions({ claudeVersion: '0.2.2' })).toContain(
-      '.claude-plugin/plugin.json "version" is "0.2.2" — must match package.json "version" "0.2.3"',
+      '.claude-plugin/plugin.json "version" is "0.2.2" — must equal the package.json version "0.2.3"',
     );
   });
 
   it('reports the Codex plugin path when its version is stale', () => {
     expect(checkVersions({ codexVersion: '0.2.2' })).toContain(
-      '.codex-plugin/plugin.json "version" is "0.2.2" — must match package.json "version" "0.2.3"',
+      '.codex-plugin/plugin.json "version" is "0.2.2" — must equal the package.json version "0.2.3"',
     );
   });
 });

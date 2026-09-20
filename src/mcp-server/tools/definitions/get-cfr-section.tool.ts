@@ -153,6 +153,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'eCFR returned a 5xx, timed out, or served an HTML error page (live path).',
       recovery: 'Retry after a brief wait; the eCFR API may be momentarily unavailable.',
+      thrownBy: 'service',
     },
   ],
 

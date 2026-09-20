@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-08-22 14:33:57
+Generated on: 2026-09-20 20:40:38
 
 ```text
 federal-regulations-mcp-server/
@@ -14,6 +14,8 @@ federal-regulations-mcp-server/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
 │   │   └── feature_request.yml
+│   ├── workflows/
+│   │   └── codeql.yml
 │   ├── CODE_OF_CONDUCT.md
 │   ├── CONTRIBUTING.md
 │   ├── FUNDING.yml
@@ -27,27 +29,7 @@ federal-regulations-mcp-server/
 │   └── template.md
 ├── docs/
 │   └── design.md
-├── scripts/
-│   ├── _mirror-context.ts
-│   ├── build-changelog.ts
-│   ├── build.ts
-│   ├── check-dependency-specifiers.ts
-│   ├── check-docs-sync.ts
-│   ├── check-framework-antipatterns.ts
-│   ├── check-skill-versions.ts
-│   ├── check-skills-sync.ts
-│   ├── clean-mcpb.ts
-│   ├── clean.ts
-│   ├── devcheck.ts
-│   ├── ecfr-mirror-init.ts
-│   ├── ecfr-mirror-refresh.ts
-│   ├── ecfr-mirror-verify.ts
-│   ├── lint-mcp.ts
-│   ├── lint-packaging.ts
-│   ├── list-skills.ts
-│   ├── release-github.ts
-│   └── tree.ts
-├── skills/
+├── framework-skills/
 │   ├── add-app-tool/
 │   │   └── SKILL.md
 │   ├── add-prompt/
@@ -118,6 +100,8 @@ federal-regulations-mcp-server/
 │   │   └── SKILL.md
 │   ├── release-and-publish/
 │   │   └── SKILL.md
+│   ├── release-pr-review/
+│   │   └── SKILL.md
 │   ├── report-issue-framework/
 │   │   └── SKILL.md
 │   ├── report-issue-local/
@@ -130,8 +114,29 @@ federal-regulations-mcp-server/
 │   │   ├── references/
 │   │   │   └── outline-on-overflow.md
 │   │   └── SKILL.md
-│   └── tool-defs-analysis/
-│       └── SKILL.md
+│   ├── tool-defs-analysis/
+│   │   └── SKILL.md
+│   └── README.md
+├── scripts/
+│   ├── _mirror-context.ts
+│   ├── build-changelog.ts
+│   ├── build.ts
+│   ├── check-dependency-specifiers.ts
+│   ├── check-docs-sync.ts
+│   ├── check-framework-antipatterns.ts
+│   ├── check-skill-versions.ts
+│   ├── check-skills-sync.ts
+│   ├── clean-mcpb.ts
+│   ├── clean.ts
+│   ├── devcheck.ts
+│   ├── ecfr-mirror-init.ts
+│   ├── ecfr-mirror-refresh.ts
+│   ├── ecfr-mirror-verify.ts
+│   ├── lint-mcp.ts
+│   ├── lint-packaging.ts
+│   ├── list-skills.ts
+│   ├── release-github.ts
+│   └── tree.ts
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -191,6 +196,7 @@ federal-regulations-mcp-server/
 │   │   ├── browse-cfr.tool.test.ts
 │   │   ├── error-contracts.test.ts
 │   │   ├── find-comments.tool.test.ts
+│   │   ├── format-utils.test.ts
 │   │   ├── get-cfr-section.tool.test.ts
 │   │   ├── get-docket.tool.test.ts
 │   │   ├── get-document.tool.test.ts

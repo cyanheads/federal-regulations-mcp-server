@@ -43,6 +43,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'eCFR returned a 5xx, timed out, or served an HTML error page (live path, mirror not ready or missing the section).',
       recovery: 'Retry after a brief wait; the eCFR API may be momentarily unavailable.',
+      thrownBy: 'service',
     },
   ],
 

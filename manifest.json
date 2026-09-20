@@ -39,7 +39,8 @@
       "title": "Regulations.gov API key",
       "description": "api.data.gov key for the Regulations.gov tools (get_docket, find_comments). Free at https://api.data.gov/signup/. The Federal Register and eCFR tools work without it.",
       "sensitive": true,
-      "required": false
+      "required": false,
+      "default": ""
     }
   }
 }

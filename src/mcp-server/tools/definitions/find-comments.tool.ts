@@ -223,12 +223,14 @@ export const findCommentsTool = tool('regulations_find_comments', {
       when: 'Regulations.gov returned 429.',
       retryable: true,
       recovery: 'Wait and retry — the per-key hourly limit (1,000/hr) was hit.',
+      thrownBy: 'service',
     },
     {
       reason: 'upstream_unavailable',
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'Regulations.gov returned a 5xx, timed out, or could not be reached at all.',
       recovery: 'Retry after a brief wait.',
+      thrownBy: 'service',
     },
   ],
 
