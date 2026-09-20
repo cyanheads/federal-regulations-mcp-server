@@ -97,4 +97,23 @@ describe('searchRulesTool', () => {
     expect(text).toContain('EPA-HQ-OAR-2025-0194');
     expect(text).toContain('40 CFR 50');
   });
+
+  it('format() keeps a backslash-bearing title inside its own cell', () => {
+    // A title carrying both a backslash and a pipe is where cell escaping
+    // fails quietly: the row still renders, with a column boundary the data
+    // invented and characters the renderer ate.
+    const blocks = searchRulesTool.format!({
+      results: [{ ...sampleRow, title: 'PM2.5 \\ PM10 | NAAQS' }],
+    });
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    // Drop the escape sequences before splitting, so only the pipes a renderer
+    // reads as column boundaries are counted.
+    const columns = (row: string) => row.replace(/\\./g, '').split('|').length;
+    const rows = text.split('\n').filter((line) => line.startsWith('|'));
+    const header = columns(rows[0] ?? '');
+
+    expect(header).toBeGreaterThan(2);
+    for (const row of rows) expect(columns(row)).toBe(header);
+    expect(text).toContain('PM2.5 \\\\ PM10 \\| NAAQS');
+  });
 });
