@@ -40,7 +40,7 @@ export const documentResource = resource('regulations://document/{documentNumber
 
   async handler(params, ctx) {
     const service = getFederalRegisterService();
-    const detail = await service.getDocument(params.documentNumber, false, ctx);
+    const detail = await service.getDocument(params.documentNumber, undefined, ctx);
     // Drop the (absent) fullText field; the resource omits the body by contract.
     const { fullText: _omit, ...rest } = detail;
     return rest;

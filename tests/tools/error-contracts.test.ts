@@ -577,6 +577,185 @@ describe('not_found reaches the caller', () => {
   });
 });
 
+describe('a Federal Register 400 without a field report', () => {
+  const cases = [
+    { name: 'regulations_search_rules', tool: searchRulesTool, input: { query: 'ozone' } },
+    { name: 'regulations_list_open_comments', tool: listOpenCommentsTool, input: {} },
+  ];
+
+  for (const { name, tool, input } of cases) {
+    it(`${name} keeps the framework's classification when the body names no field`, async () => {
+      serveEverything(() => new Response('Bad Request', { status: 400 }));
+      const { error } = surfaces(await runToolContract(tool, input));
+
+      expect(error.code).toBe(-32602);
+      expect(error.message).toMatch(/Status: 400/);
+      expect(error.data?.reason).toBeUndefined();
+      // A 400 is an answer, not a transport failure — one request, no retry.
+      expect(http.calls).toHaveLength(1);
+    });
+  }
+});
+
+describe('invalid_filter reaches the caller', () => {
+  /** A Federal Register 400 exactly as it is served (probed live). */
+  function rejected(errors: Record<string, unknown>): Response {
+    return Response.json({ errors }, { status: 400 });
+  }
+
+  /** Everything a client can read, as one string. */
+  function everything(error: McpError, text: string): string {
+    return `${error.message} ${JSON.stringify(error.data)} ${text}`;
+  }
+
+  const agencyCases = [
+    {
+      name: 'regulations_search_rules',
+      tool: searchRulesTool,
+      input: { agencies: ['Environmental Protection Agency'] },
+    },
+    {
+      name: 'regulations_list_open_comments',
+      tool: listOpenCommentsTool,
+      input: { agencies: ['EPA'] },
+    },
+  ];
+
+  for (const { name, tool, input } of agencyCases) {
+    it(`${name} names the agencies parameter and how to find a slug`, async () => {
+      serveEverything(() => rejected({ agencies: 'invalid value' }));
+      const { error, text } = surfaces(await runToolContract(tool, input));
+
+      expect(error.code).toBe(-32007);
+      expect(error.data?.reason).toBe('invalid_filter');
+      expect(error.message).toMatch(/`agencies`/);
+      const hint = String((error.data?.recovery as { hint?: string })?.hint);
+      expect(hint).toMatch(/kebab-case/);
+      expect(hint).toMatch(/environmental-protection-agency/);
+      expect(hint).toMatch(/agencies\[\]\.slug/);
+      expect(text).toMatch(/^Recovery: .+$/m);
+      // The upstream's own payload stays out of every surface.
+      expect(everything(error, text)).not.toContain('{"errors"');
+      expect(error.data).not.toHaveProperty('body');
+      // A rejected filter is an answer; retrying it returns the same 400.
+      expect(http.calls).toHaveLength(1);
+    });
+  }
+
+  it('maps publication_date to the date parameter the caller set', async () => {
+    serveEverything(() => rejected({ publication_date: 'Publication Date is not a valid date.' }));
+    const { error } = surfaces(
+      await runToolContract(searchRulesTool, { published_before: '2025-06-30' }),
+    );
+
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`published_before`/);
+    expect(error.message).not.toMatch(/published_after|publication_date/);
+    expect(error.message).toMatch(/Publication Date is not a valid date\./);
+  });
+
+  it('names both date parameters when both were set', async () => {
+    serveEverything(() => rejected({ publication_date: 'Publication Date is not a valid date.' }));
+    const { error } = surfaces(
+      await runToolContract(searchRulesTool, {
+        published_after: '2025-01-01',
+        published_before: '2025-06-30',
+      }),
+    );
+
+    expect(error.message).toMatch(/`published_after`/);
+    expect(error.message).toMatch(/`published_before`/);
+  });
+
+  it('names every field one rejection reports', async () => {
+    // Probed live: a bad agency and a bad date come back in one body.
+    serveEverything(() =>
+      rejected({
+        publication_date: 'Publication Date is not a valid date.',
+        agencies: 'invalid value',
+      }),
+    );
+    const { error } = surfaces(
+      await runToolContract(searchRulesTool, {
+        agencies: ['EPA'],
+        published_after: '2025-01-01',
+      }),
+    );
+
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`published_after`/);
+    expect(error.message).toMatch(/`agencies`/);
+    const hint = String((error.data?.recovery as { hint?: string })?.hint);
+    expect(hint).toMatch(/agencies\[\]\.slug/);
+    expect(hint).toMatch(/YYYY-MM-DD/);
+  });
+
+  it('maps comment_date to closing_before on the open-comment window', async () => {
+    serveEverything(() => rejected({ comment_date: 'Comment Close Date is not a valid date.' }));
+    const { error, text } = surfaces(
+      await runToolContract(listOpenCommentsTool, { closing_before: '2026-10-01' }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`closing_before`/);
+    expect(error.message).not.toMatch(/comment_date/);
+    expect(text).toMatch(/^Recovery: .+YYYY-MM-DD.+$/m);
+  });
+
+  it('reads the array form of a field report too', async () => {
+    serveEverything(() => rejected({ agencies: ['invalid value'] }));
+    const { error } = surfaces(await runToolContract(searchRulesTool, { agencies: ['EPA'] }));
+
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`agencies`: invalid value/);
+  });
+
+  it('names a field it has no parameter for as the Federal Register spells it', async () => {
+    serveEverything(() => rejected({ something_new: 'is not supported' }));
+    const { error } = surfaces(await runToolContract(searchRulesTool, { query: 'ozone' }));
+
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`something_new`: is not supported/);
+  });
+
+  it('keeps the framework’s classification for an empty field report', async () => {
+    serveEverything(() => rejected({}));
+    const { error } = surfaces(await runToolContract(searchRulesTool, { query: 'ozone' }));
+
+    expect(error.code).toBe(-32602);
+    expect(error.data?.reason).toBeUndefined();
+  });
+
+  it('keeps the framework’s classification for a list of errors naming no field', async () => {
+    // The shape the Federal Register uses for a 404 body: nothing to map.
+    serveEverything(() => Response.json({ errors: ['bad request'] }, { status: 400 }));
+    const { error } = surfaces(await runToolContract(searchRulesTool, { query: 'ozone' }));
+
+    expect(error.code).toBe(-32602);
+    expect(error.data?.reason).toBeUndefined();
+  });
+});
+
+describe('a calendar-invalid date never reaches the Federal Register', () => {
+  const cases = [
+    { tool: searchRulesTool, input: { published_after: '2025-13-45' } },
+    { tool: searchRulesTool, input: { published_before: '2025-02-30' } },
+    { tool: listOpenCommentsTool, input: { closing_before: '2026-02-30' } },
+  ];
+
+  for (const { tool, input } of cases) {
+    it(`${tool.name} rejects ${JSON.stringify(input)} at the schema`, async () => {
+      serveEverything(() => Response.json({ count: 0, results: [] }));
+      const { error } = surfaces(await runToolContract(tool, input));
+
+      expect(error.code).toBe(-32602);
+      expect(error.data?.reason).toBe('invalid_arguments');
+      expect(http.calls).toHaveLength(0);
+    });
+  }
+});
+
 describe('auth_required reaches the caller', () => {
   const keyedCases = [
     {

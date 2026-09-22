@@ -2,8 +2,10 @@
  * @fileoverview Tests for regulations_list_open_comments — the headline "what's
  * open for comment" goal, graceful degradation without the key (no comment
  * counts, a notice, but a complete list), comment-count enrichment when keyed,
- * and closing-soonest-first sorting. The FR and Regulations.gov services are
- * mocked.
+ * local paging over the sorted window, and a truncation flag that does not
+ * depend on the key. The FR and Regulations.gov services are mocked; the whole
+ * window fetch and sort run against the real service in
+ * list-open-comments-window.test.ts.
  * @module tests/tools/list-open-comments.tool.test
  */
 
@@ -26,28 +28,31 @@ const { listOpenCommentsTool } = await import(
   '@/mcp-server/tools/definitions/list-open-comments.tool.js'
 );
 
+// The service hands back the window already sorted by close date.
 const response: OpenCommentsResponse = {
-  totalCount: 2,
+  truncated: false,
   results: [
-    {
-      documentNumber: '2025-2',
-      title: 'Closes later',
-      type: 'Proposed Rule',
-      agencies: ['Department of Agriculture'],
-      publicationDate: '2025-05-10',
-      commentsCloseOn: '2025-09-01',
-      docketIds: ['AG-2025-2'],
-      commentCount: 50,
-    },
     {
       documentNumber: '2025-1',
       title: 'Closes sooner',
       type: 'Proposed Rule',
-      agencies: ['Environmental Protection Agency'],
+      agencies: [
+        { name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' },
+      ],
       publicationDate: '2025-05-01',
       commentsCloseOn: '2025-06-20',
       docketIds: ['EPA-2025-1'],
       commentCount: 12,
+    },
+    {
+      documentNumber: '2025-2',
+      title: 'Closes later',
+      type: 'Proposed Rule',
+      agencies: [{ name: 'Agriculture Department', slug: 'agriculture-department' }],
+      publicationDate: '2025-05-10',
+      commentsCloseOn: '2025-09-01',
+      docketIds: ['AG-2025-2'],
+      commentCount: 50,
     },
   ],
 };
@@ -58,9 +63,37 @@ describe('listOpenCommentsTool', () => {
     hasKey.mockReset();
   });
 
-  it('rejects the Federal Register per_page=1 quirk and accepts the minimum of 2', () => {
-    expect(listOpenCommentsTool.input.safeParse({ per_page: 1 }).success).toBe(false);
-    expect(listOpenCommentsTool.input.parse({ per_page: 2 }).per_page).toBe(2);
+  it('bounds per_page to 1–100 and page to at least 1', () => {
+    expect(listOpenCommentsTool.input.parse({ per_page: 1 }).per_page).toBe(1);
+    expect(listOpenCommentsTool.input.safeParse({ per_page: 0 }).success).toBe(false);
+    expect(listOpenCommentsTool.input.safeParse({ per_page: 101 }).success).toBe(false);
+    expect(listOpenCommentsTool.input.safeParse({ page: 0 }).success).toBe(false);
+  });
+
+  it('asks the service for the default types, and for comment counts only when keyed', async () => {
+    listOpenComments.mockResolvedValue(response);
+    for (const keyed of [true, false]) {
+      hasKey.mockReturnValue(keyed);
+      const ctx = handlerContext(listOpenCommentsTool);
+      await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({ type: [] }), ctx);
+    }
+    expect(listOpenComments.mock.calls.map(([params]) => params)).toEqual([
+      expect.objectContaining({ types: ['PRORULE', 'RULE'], includeCommentCounts: true }),
+      expect.objectContaining({ types: ['PRORULE', 'RULE'], includeCommentCounts: false }),
+    ]);
+  });
+
+  it('flags a truncated window when keyed as well as unkeyed', async () => {
+    listOpenComments.mockResolvedValue({ ...response, truncated: true });
+    for (const keyed of [true, false]) {
+      hasKey.mockReturnValue(keyed);
+      const ctx = handlerContext(listOpenCommentsTool);
+      await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({}), ctx);
+      const enrichment = getEnrichment(ctx);
+      expect(enrichment.truncated).toBe(true);
+      expect(enrichment.notice).toMatch(/10,000/);
+      expect(enrichment.notice).not.toMatch(/list itself is complete/i);
+    }
   });
 
   it('lists open rules closing soonest first (the headline goal)', async () => {
@@ -95,13 +128,13 @@ describe('listOpenCommentsTool', () => {
     // a no_results error the handler never throws.
     hasKey.mockReturnValue(false);
     listOpenComments.mockResolvedValue({
-      totalCount: 0,
+      truncated: false,
       results: [],
     } satisfies OpenCommentsResponse);
     const ctx = handlerContext(listOpenCommentsTool);
     const result = await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({}), ctx);
     expect(result.results).toEqual([]);
-    expect(getEnrichment(ctx).notice).toMatch(/no rules are open for comment/i);
+    expect(getEnrichment(ctx).notice).toMatch(/no documents are open for comment/i);
     expect(listOpenCommentsTool.errors?.map((e) => e.reason as string)).not.toContain('no_results');
   });
 
@@ -114,7 +147,9 @@ describe('listOpenCommentsTool', () => {
           documentNumber: '2025-1',
           title: 'Closes sooner',
           type: 'Proposed Rule',
-          agencies: ['Environmental Protection Agency'],
+          agencies: [
+            { name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' },
+          ],
           publicationDate: '2025-05-01',
           commentsCloseOn: '2025-06-20',
           daysRemaining: 7,
@@ -127,5 +162,82 @@ describe('listOpenCommentsTool', () => {
     expect(text).toContain('Closes sooner');
     expect(text).toContain('EPA-2025-1');
     expect(text).toContain('12');
+  });
+
+  it('closing_before rejects a date that is not a real calendar day', () => {
+    for (const value of ['2026-02-30', '2026-13-01', '2026-09-31']) {
+      expect(listOpenCommentsTool.input.safeParse({ closing_before: value }).success).toBe(false);
+    }
+    for (const value of ['2026-10-01', '2028-02-29', '']) {
+      expect(listOpenCommentsTool.input.safeParse({ closing_before: value }).success).toBe(true);
+    }
+  });
+
+  describe('format() agency and docket cells', () => {
+    const jointRow = {
+      documentNumber: '2026-18766',
+      title: 'Capital requirements',
+      type: 'Proposed Rule',
+      agencies: [
+        { name: 'Treasury Department', slug: 'treasury-department' },
+        { name: 'Comptroller of the Currency', slug: 'comptroller-of-the-currency' },
+        { name: 'Office of the Secretary', slug: null },
+      ],
+      publicationDate: '2026-09-01',
+      commentsCloseOn: '2026-11-01',
+      daysRemaining: 40,
+      docketIds: ['Docket ID OCC-2026-0012', 'R-1850', 'RIN 3064-AG12'],
+      commentCount: null,
+    };
+
+    function row(results: unknown[]): string[] {
+      const blocks = listOpenCommentsTool.format!({
+        asOf: '2026-09-22',
+        keyed: false,
+        results,
+      } as never);
+      const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+      const line = text.split('\n').find((l) => l.includes('[FR 2026-18766]'))!;
+      return line.split(' | ');
+    }
+
+    it('renders every agency with its slug and every docket ID', () => {
+      const cells = row([jointRow]);
+      expect(cells[2]).toBe(
+        'Treasury Department (treasury-department); Comptroller of the Currency (comptroller-of-the-currency); Office of the Secretary',
+      );
+      expect(cells[7]).toBe('Docket ID OCC-2026-0012; R-1850; RIN 3064-AG12 |');
+    });
+
+    it('keeps a comma-bearing docket ID distinguishable from its neighbors', () => {
+      const cells = row([
+        {
+          ...jointRow,
+          docketIds: ['FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1', 'R-1850'],
+        },
+      ]);
+      expect(cells[7]).toBe(
+        'FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1; R-1850 |',
+      );
+    });
+
+    it('escapes a pipe in a docket ID so the row keeps its columns', () => {
+      const blocks = listOpenCommentsTool.format!({
+        asOf: '2026-09-22',
+        keyed: false,
+        results: [{ ...jointRow, docketIds: ['A|B', 'C'] }],
+      } as never);
+      const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+      const columns = (line: string) => line.replace(/\\./g, '').split('|').length;
+      const rows = text.split('\n').filter((line) => line.startsWith('|'));
+      for (const r of rows) expect(columns(r)).toBe(columns(rows[0]!));
+      expect(text).toContain('A\\|B; C');
+    });
+
+    it('renders an em dash for an empty agency or docket list', () => {
+      const cells = row([{ ...jointRow, agencies: [], docketIds: [] }]);
+      expect(cells[2]).toBe('—');
+      expect(cells[7]).toBe('— |');
+    });
   });
 });

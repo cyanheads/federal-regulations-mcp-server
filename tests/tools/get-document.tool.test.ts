@@ -26,7 +26,7 @@ const detail: FrDocumentDetail = {
   publicationDate: '2025-06-01',
   effectiveOn: '2025-08-01',
   commentsCloseOn: null,
-  agencies: ['Environmental Protection Agency'],
+  agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
   regulationIdNumbers: ['2060-AV12'],
   cfrReferences: [{ title: 40, part: '50' }],
   docketId: 'EPA-HQ-OAR-2025-0194',
@@ -52,16 +52,70 @@ describe('getDocumentTool', () => {
     expect(result.commentCount).toBe(4200);
   });
 
-  it('passes include_full_text through to the service', async () => {
-    getDocumentFn.mockResolvedValue({ ...detail, fullText: 'Body text.' });
+  it('asks the service for the default window when include_full_text is set', async () => {
+    getDocumentFn.mockResolvedValue({
+      ...detail,
+      fullText: 'Body text.',
+      fullTextOffset: 0,
+      fullTextLength: 10,
+    });
     const ctx = handlerContext(getDocumentTool);
     const input = getDocumentTool.input.parse({
       document_number: '2025-14555',
       include_full_text: true,
     });
     const result = await getDocumentTool.handler(input, ctx);
-    expect(getDocumentFn).toHaveBeenCalledWith('2025-14555', true, ctx);
+    expect(getDocumentFn).toHaveBeenCalledWith('2025-14555', { offset: 0, maxChars: 64_000 }, ctx);
     expect(result.fullText).toBe('Body text.');
+  });
+
+  it('asks for no body when neither include_full_text nor a window is given', async () => {
+    getDocumentFn.mockResolvedValue(detail);
+    for (const extra of [{}, { include_full_text: false }]) {
+      const ctx = handlerContext(getDocumentTool);
+      await getDocumentTool.handler(
+        getDocumentTool.input.parse({ document_number: '2025-14555', ...extra }),
+        ctx,
+      );
+      expect(getDocumentFn).toHaveBeenLastCalledWith('2025-14555', undefined, ctx);
+    }
+  });
+
+  it('passes an explicit window through', async () => {
+    getDocumentFn.mockResolvedValue(detail);
+    const ctx = handlerContext(getDocumentTool);
+    await getDocumentTool.handler(
+      getDocumentTool.input.parse({ document_number: '2025-14555', offset: 5, max_chars: 7 }),
+      ctx,
+    );
+    expect(getDocumentFn).toHaveBeenCalledWith('2025-14555', { offset: 5, maxChars: 7 }, ctx);
+  });
+
+  it('rejects a window alongside include_full_text: false before any fetch', async () => {
+    const ctx = handlerContext(getDocumentTool);
+    const input = getDocumentTool.input.parse({
+      document_number: '2025-14555',
+      include_full_text: false,
+      offset: 0,
+    });
+    await expect(getDocumentTool.handler(input, ctx)).rejects.toMatchObject({
+      data: { reason: 'full_text_disabled' },
+    });
+    expect(getDocumentFn).not.toHaveBeenCalled();
+  });
+
+  it('format() renders the window position and the resume offset', () => {
+    const blocks = getDocumentTool.format!({
+      ...detail,
+      fullText: 'abc',
+      fullTextOffset: 64_000,
+      fullTextLength: 1_212_392,
+      fullTextNextOffset: 64_003,
+    });
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toContain('characters 64,000–64,003 of 1,212,392');
+    expect(text).toContain('offset=64003');
+    expect(text).toContain('abc');
   });
 
   it('rejects a malformed document number at the schema boundary', () => {
@@ -75,5 +129,34 @@ describe('getDocumentTool', () => {
     expect(text).toContain('regulations_get_docket');
     expect(text).toContain('regulations_get_cfr_section');
     expect(text).toContain('40 CFR 50');
+  });
+
+  it('format() lists every agency with its slug in the header line', () => {
+    const blocks = getDocumentTool.format!({
+      ...detail,
+      agencies: [
+        { name: 'Transportation Department', slug: 'transportation-department' },
+        { name: 'Office of the Secretary', slug: null },
+      ],
+    } as never);
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toMatch(
+      /^\*\*FR 2025-14555\*\* · Rule · Transportation Department \(transportation-department\); Office of the Secretary · published/m,
+    );
+  });
+
+  it('declares agencies as name + slug objects in its output', () => {
+    const agencies = [
+      { name: 'Transportation Department', slug: 'transportation-department' },
+      { name: 'Office of the Secretary', slug: null },
+    ];
+    expect(getDocumentTool.output.parse({ ...detail, agencies }).agencies).toEqual(agencies);
+    expect(getDocumentTool.output.safeParse({ ...detail, agencies: ['EPA'] }).success).toBe(false);
+  });
+
+  it('format() names the issuing agency in the header line', () => {
+    const blocks = getDocumentTool.format!(detail);
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toMatch(/^\*\*FR 2025-14555\*\* · Rule · Environmental Protection Agency/m);
   });
 });

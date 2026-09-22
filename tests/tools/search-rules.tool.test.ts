@@ -23,7 +23,7 @@ const sampleRow = {
   type: 'Proposed Rule',
   abstract: 'A proposal.',
   publicationDate: '2025-06-01',
-  agencies: ['Environmental Protection Agency'],
+  agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
   docketIds: ['EPA-HQ-OAR-2025-0194'],
   regulationIdNumbers: ['2060-AV12'],
   cfrReferences: [{ title: 40, part: '50' }],
@@ -96,6 +96,106 @@ describe('searchRulesTool', () => {
     expect(text).toContain('Environmental Protection Agency');
     expect(text).toContain('EPA-HQ-OAR-2025-0194');
     expect(text).toContain('40 CFR 50');
+  });
+
+  describe('order', () => {
+    beforeEach(() =>
+      searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse),
+    );
+
+    async function sentOrder(args: Record<string, unknown>): Promise<unknown> {
+      const ctx = handlerContext(searchRulesTool);
+      await searchRulesTool.handler(searchRulesTool.input.parse(args), ctx);
+      return searchFn.mock.calls.at(-1)?.[0]?.order;
+    }
+
+    it('accepts only the three Federal Register orders', () => {
+      for (const order of ['relevance', 'newest', 'oldest']) {
+        expect(searchRulesTool.input.safeParse({ order }).success).toBe(true);
+      }
+      expect(searchRulesTool.input.safeParse({ order: 'bogus' }).success).toBe(false);
+      expect(searchRulesTool.input.safeParse({ order: 'NEWEST' }).success).toBe(false);
+    });
+
+    it('defaults to relevance when there is a query', async () => {
+      expect(await sentOrder({ query: 'PFAS drinking water' })).toBe('relevance');
+    });
+
+    it('defaults to newest when there is no query', async () => {
+      expect(await sentOrder({ type: ['RULE'] })).toBe('newest');
+      // Form clients send '' for an untouched field; that is no query.
+      expect(await sentOrder({ query: '' })).toBe('newest');
+    });
+
+    it('sends an explicit order as given', async () => {
+      expect(await sentOrder({ query: 'ozone', order: 'oldest' })).toBe('oldest');
+      expect(await sentOrder({ query: 'ozone', order: 'newest' })).toBe('newest');
+      expect(await sentOrder({ order: 'relevance' })).toBe('relevance');
+    });
+  });
+
+  describe('publication date bounds', () => {
+    for (const field of ['published_after', 'published_before'] as const) {
+      it(`${field} rejects a date that is not a real calendar day`, () => {
+        for (const value of [
+          '2025-13-45',
+          '2025-02-30',
+          '2025-04-31',
+          '2025-02-29',
+          '2025-00-10',
+        ]) {
+          expect(searchRulesTool.input.safeParse({ [field]: value }).success).toBe(false);
+        }
+      });
+
+      it(`${field} accepts a real day, a leap day, and the empty form-client value`, () => {
+        for (const value of ['2025-06-30', '2024-02-29', '']) {
+          expect(searchRulesTool.input.safeParse({ [field]: value }).success).toBe(true);
+        }
+      });
+    }
+  });
+
+  describe('format() agency cell', () => {
+    const jointRow = {
+      ...sampleRow,
+      documentNumber: '2026-18560',
+      agencies: [
+        { name: 'Transportation Department', slug: 'transportation-department' },
+        { name: 'Federal Aviation Administration', slug: 'federal-aviation-administration' },
+        { name: 'Office of the Secretary', slug: null },
+      ],
+    };
+
+    function render(rows: unknown[]): string {
+      const blocks = searchRulesTool.format!({ results: rows } as never);
+      return blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    }
+
+    it('renders every agency, each with the slug the agencies filter takes', () => {
+      const text = render([jointRow]);
+      const row = text.split('\n').find((line) => line.startsWith('| 2026-18560 '))!;
+      const agencyCell = row.split(' | ')[3];
+      expect(agencyCell).toBe(
+        'Transportation Department (transportation-department); Federal Aviation Administration (federal-aviation-administration); Office of the Secretary',
+      );
+    });
+
+    it('keeps the row’s column count when an agency name carries a pipe', () => {
+      const text = render([
+        { ...jointRow, agencies: [{ name: 'Odd | Name', slug: 'odd-name' }, ...jointRow.agencies] },
+      ]);
+      const columns = (line: string) => line.replace(/\\./g, '').split('|').length;
+      const rows = text.split('\n').filter((line) => line.startsWith('|'));
+      for (const row of rows) expect(columns(row)).toBe(columns(rows[0]!));
+      expect(text).toContain('Odd \\| Name (odd-name)');
+    });
+
+    it('renders an em dash when the document lists no agency', () => {
+      const text = render([{ ...jointRow, agencies: [] }]);
+      const row = text.split('\n').find((line) => line.startsWith('| 2026-18560 '))!;
+      expect(row.split(' | ')[3]).toBe('—');
+    });
   });
 
   it('format() keeps a backslash-bearing title inside its own cell', () => {

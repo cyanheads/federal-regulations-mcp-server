@@ -1,15 +1,16 @@
 /**
  * @fileoverview regulations_search_rules — the 80% entry point. Searches the
  * Federal Register for proposed rules, final rules, notices, and presidential
- * documents, filterable by agency, document type, date range, topic, and
- * open-for-comment window. Keyless (Federal Register API).
+ * documents, filterable by agency, document type, date range, and topic, ranked
+ * by relevance or date. Keyless (Federal Register API).
  * @module mcp-server/tools/definitions/search-rules.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
-import { escapePipes } from './format-utils.js';
+import { isoDate } from './date-input.js';
+import { escapePipes, formatAgencies } from './format-utils.js';
 
 /** Above this match count the FR's 50-page navigation ceiling (5,000 records) bites. */
 const FR_NAV_CEILING = 5000;
@@ -17,7 +18,7 @@ const FR_NAV_CEILING = 5000;
 export const searchRulesTool = tool('regulations_search_rules', {
   title: 'regulations_search_rules',
   description:
-    'Search the Federal Register — the daily journal of US proposed rules, final rules, notices, and presidential documents (1994–present) — filtering by full-text query, document type, agency slug, publication date range, and whether the rule is open for comment. The primary discovery entry point: results carry the document number (open with regulations_get_document), docket IDs, RINs, and affected CFR parts that chain into the comment and codified-text tools. The Federal Register caps navigation at 50 pages and the match count at 10,000; when a result set is larger, narrow with published_after/published_before rather than paging deeper.',
+    'Search the Federal Register — the daily journal of US proposed rules, final rules, notices, and presidential documents (1994–present) — filtering by full-text query, document type, agency slug, and publication date range. The primary discovery entry point: results carry the document number (open with regulations_get_document), each issuing agency with its filterable slug, docket IDs, RINs, and affected CFR parts that chain into the comment and codified-text tools. A query ranks by relevance unless order says otherwise; filter-only browsing lists newest first. The Federal Register caps navigation at 50 pages and the match count at 10,000; when a result set is larger, narrow with published_after/published_before rather than paging deeper.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     query: z
@@ -36,30 +37,24 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .array(z.string())
       .optional()
       .describe(
-        'Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency", "securities-and-exchange-commission"). Slugs are the kebab-case agency name; if unsure, search by query and read the agency slugs off the results.',
+        'Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency", "securities-and-exchange-commission") — lowercase kebab-case, not a name or acronym. Every result lists its agencies with their slugs; if unsure, search by query and read agencies[].slug off a result. One unrecognized slug fails the whole request.',
       ),
     published_after: z
-      .union([
-        z.literal(''),
-        z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/)
-          .describe('ISO 8601 date (YYYY-MM-DD).'),
-      ])
+      .union([z.literal(''), isoDate()])
       .optional()
       .describe(
-        'Earliest publication date, ISO 8601 (YYYY-MM-DD). Combine with published_before to window large result sets — the FR caps navigation at 50 pages.',
+        'Earliest publication date, ISO 8601 (YYYY-MM-DD), a real calendar day. Combine with published_before to window large result sets — the FR caps navigation at 50 pages.',
       ),
     published_before: z
-      .union([
-        z.literal(''),
-        z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/)
-          .describe('ISO 8601 date (YYYY-MM-DD).'),
-      ])
+      .union([z.literal(''), isoDate()])
       .optional()
-      .describe('Latest publication date, ISO 8601 (YYYY-MM-DD).'),
+      .describe('Latest publication date, ISO 8601 (YYYY-MM-DD), a real calendar day.'),
+    order: z
+      .enum(['relevance', 'newest', 'oldest'])
+      .optional()
+      .describe(
+        'Result order. Defaults to relevance with a query, newest without one. relevance without a query falls back to newest first; oldest lists the earliest publications first.',
+      ),
     per_page: z
       .number()
       .int()
@@ -97,7 +92,21 @@ export const searchRulesTool = tool('regulations_search_rules', {
               ),
             abstract: z.string().nullable().describe('Abstract summary, or null when absent.'),
             publicationDate: z.string().describe('Publication date (ISO 8601).'),
-            agencies: z.array(z.string()).describe('Issuing agency names.'),
+            agencies: z
+              .array(
+                z
+                  .object({
+                    name: z.string().describe('Agency name.'),
+                    slug: z
+                      .string()
+                      .nullable()
+                      .describe(
+                        'Federal Register agency slug — pass it back as the agencies filter. Null when the Federal Register lists the agency by raw name only, so it cannot be filtered on.',
+                      ),
+                  })
+                  .describe('One issuing agency.'),
+              )
+              .describe('Issuing agencies.'),
             docketIds: z
               .array(z.string())
               .describe(
@@ -148,17 +157,28 @@ export const searchRulesTool = tool('regulations_search_rules', {
       when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',
       recovery: 'Retry after a brief wait; the Federal Register API may be momentarily down.',
     },
+    {
+      reason: 'invalid_filter',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The Federal Register rejected a filter value — most often an agency name or acronym passed where a slug belongs.',
+      recovery:
+        'Correct the parameter the message names: agencies takes Federal Register slugs in lowercase kebab-case (e.g. "environmental-protection-agency"; read one off agencies[].slug in a result), and dates must be real YYYY-MM-DD days.',
+      severity: 'notice',
+      thrownBy: 'service',
+    },
   ],
 
   async handler(input, ctx) {
     const service = getFederalRegisterService();
+    const query = input.query || undefined;
     const result = await service.search(
       {
-        query: input.query || undefined,
+        query,
         types: input.type,
         agencies: input.agencies?.length ? input.agencies : undefined,
         publishedAfter: input.published_after || undefined,
         publishedBefore: input.published_before || undefined,
+        order: input.order ?? (query ? 'relevance' : 'newest'),
         perPage: input.per_page,
         page: input.page,
       },
@@ -191,13 +211,12 @@ export const searchRulesTool = tool('regulations_search_rules', {
       '|---|---|---|---|---|---|',
     ];
     for (const r of result.results) {
-      const agency = r.agencies[0] ?? '—';
       const cite = r.cfrReferences.map((c) => `${c.title} CFR ${c.part}`).join(', ');
       lines.push(
-        `| ${r.documentNumber} | ${r.type} | ${escapePipes(r.title)} | ${escapePipes(agency)} | ${r.publicationDate} | ${r.commentsCloseOn ?? '—'} |`,
+        `| ${r.documentNumber} | ${r.type} | ${escapePipes(r.title)} | ${escapePipes(formatAgencies(r.agencies))} | ${r.publicationDate} | ${r.commentsCloseOn ?? '—'} |`,
       );
       const tail: string[] = [];
-      if (r.docketIds.length) tail.push(`dockets: ${r.docketIds.join(', ')}`);
+      if (r.docketIds.length) tail.push(`dockets: ${r.docketIds.join('; ')}`);
       if (cite) tail.push(`CFR: ${cite}`);
       if (r.regulationIdNumbers.length) tail.push(`RIN: ${r.regulationIdNumbers.join(', ')}`);
       if (r.abstract) tail.push(`abstract: ${r.abstract}`);

@@ -15,3 +15,17 @@
 export function escapePipes(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
+
+/**
+ * Render a document's issuing agencies: each name, followed by its slug in
+ * parentheses when it has one — the slug is what the `agencies` filter takes,
+ * so a `content[]`-only reader can pass it back. Joined on `; ` because agency
+ * names can carry commas; `—` when there are none. Not escaped — callers
+ * placing it in a table cell pass it through {@link escapePipes}.
+ */
+export function formatAgencies(
+  agencies: ReadonlyArray<{ name: string; slug: string | null }>,
+): string {
+  if (agencies.length === 0) return '—';
+  return agencies.map((a) => (a.slug ? `${a.name} (${a.slug})` : a.name)).join('; ');
+}

@@ -11,6 +11,15 @@ export interface CfrReference {
   title: number;
 }
 
+/**
+ * One issuing agency. `slug` is the value the `agencies` search filter takes;
+ * null when the Federal Register lists the agency by raw name only.
+ */
+export interface FrAgency {
+  name: string;
+  slug: string | null;
+}
+
 /** Raw `regulations_dot_gov_info` block embedded in a Federal Register document. */
 export interface RawRegulationsDotGovInfo {
   comments_count?: number | null;
@@ -27,8 +36,11 @@ export interface RawRegulationsDotGovInfo {
 export interface RawFrDocument {
   abstract?: string | null;
   action?: string | null;
-  agencies?: Array<{ name?: string | null; slug?: string | null }> | null;
-  agency_names?: string[] | null;
+  agencies?: Array<{
+    name?: string | null;
+    raw_name?: string | null;
+    slug?: string | null;
+  }> | null;
   body_html_url?: string | null;
   cfr_references?: Array<{ title?: number | null; part?: string | null }> | null;
   comments_close_on?: string | null;
@@ -57,7 +69,7 @@ export interface RawFrSearchResponse {
 /** Normalized search-result row. */
 export interface FrSearchResult {
   abstract: string | null;
-  agencies: string[];
+  agencies: FrAgency[];
   cfrReferences: CfrReference[];
   commentsCloseOn: string | null;
   docketIds: string[];
@@ -80,7 +92,7 @@ export interface FrSearchResponse {
 export interface FrDocumentDetail {
   abstract: string | null;
   action: string | null;
-  agencies: string[];
+  agencies: FrAgency[];
   bodyHtmlUrl: string;
   cfrReferences: CfrReference[];
   commentCount: number | null;
@@ -89,7 +101,14 @@ export interface FrDocumentDetail {
   docketId: string | null;
   documentNumber: string;
   effectiveOn: string | null;
+  /** One window of the plain-text body — present only when a window was requested. */
   fullText?: string;
+  /** Characters in the whole plain-text body — present with `fullText`. */
+  fullTextLength?: number;
+  /** Offset the next window starts at — present only when body text remains past this window. */
+  fullTextNextOffset?: number;
+  /** Offset `fullText` starts at in the whole body — present with `fullText`. */
+  fullTextOffset?: number;
   htmlUrl: string;
   publicationDate: string;
   rawTextUrl: string;
@@ -102,7 +121,7 @@ export interface FrDocumentDetail {
 
 /** Normalized open-comment-window row (FR-only; comment count enriched separately). */
 export interface OpenCommentRule {
-  agencies: string[];
+  agencies: FrAgency[];
   commentCount: number | null;
   commentsCloseOn: string;
   docketIds: string[];
@@ -112,15 +131,23 @@ export interface OpenCommentRule {
   type: string;
 }
 
-/** Normalized open-comment-window response. */
+/**
+ * The whole open-comment window, sorted by close date then document number.
+ * `truncated` is set when the Federal Register reported its 10,000-item maximum,
+ * so the window holds only the 10,000 most recently published matches.
+ */
 export interface OpenCommentsResponse {
   results: OpenCommentRule[];
-  totalCount: number;
+  truncated: boolean;
 }
+
+/** Result orders the Federal Register documents endpoint accepts. */
+export type FrSearchOrder = 'relevance' | 'newest' | 'oldest';
 
 /** Parameters for a Federal Register document search. */
 export interface FrSearchParams {
   agencies?: string[] | undefined;
+  order: FrSearchOrder;
   page: number;
   perPage: number;
   publishedAfter?: string | undefined;
@@ -129,11 +156,21 @@ export interface FrSearchParams {
   types?: string[] | undefined;
 }
 
+/** Federal Register document types that carry a comment period. */
+export type OpenCommentType = 'PRORULE' | 'RULE' | 'NOTICE';
+
 /** Parameters for the open-comment-window query. */
 export interface OpenCommentsParams {
   agencies?: string[] | undefined;
   closingBefore?: string | undefined;
-  page: number;
-  perPage: number;
+  /** Request each document's Regulations.gov block, the source of its comment count. */
+  includeCommentCounts: boolean;
   query?: string | undefined;
+  types: readonly OpenCommentType[];
+}
+
+/** Which slice of a document's plain-text body to return. */
+export interface FullTextWindow {
+  maxChars: number;
+  offset: number;
 }

@@ -8,7 +8,8 @@
  * response parser detects HTML error pages and re-throws them as transient, and
  * `rethrowTransportFailure` re-codes the 5xx statuses the status→code map calls
  * `InternalError`. A transport failure that survives retry leaves as
- * `upstream_unavailable`; a 404 on a document lookup leaves as `not_found`.
+ * `upstream_unavailable`; a 404 on a document lookup leaves as `not_found`; a
+ * 400 naming the filters it rejected leaves as `invalid_filter`.
  * @module services/federal-register/federal-register-service
  */
 
@@ -19,6 +20,7 @@ import {
   McpError,
   notFound,
   serviceUnavailable,
+  validationError,
 } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
@@ -27,10 +29,12 @@ import { requestBudget } from '@/services/request-budget.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
 import type {
   CfrReference,
+  FrAgency,
   FrDocumentDetail,
   FrSearchParams,
   FrSearchResponse,
   FrSearchResult,
+  FullTextWindow,
   OpenCommentRule,
   OpenCommentsParams,
   OpenCommentsResponse,
@@ -48,7 +52,7 @@ const SEARCH_FIELDS = [
   'type',
   'abstract',
   'publication_date',
-  'agency_names',
+  'agencies',
   'docket_ids',
   'regulation_id_numbers',
   'cfr_references',
@@ -63,24 +67,110 @@ function looksLikeHtml(text: string): boolean {
   return /^\s*<(!DOCTYPE\s+html|html[\s>])/i.test(text);
 }
 
+/** Upper bound on one `/documents.json` page — a larger `per_page` silently falls back to 20. */
+const FR_MAX_PER_PAGE = 2000;
+
+/** The most items the Federal Register serves for one query; a page reaching past it is a 400. */
+const FR_MAX_ITEMS = 10_000;
+
+/** The fields the open-comment window renders; the Regulations.gov block is added only when keyed. */
+const OPEN_COMMENT_FIELDS = [
+  'document_number',
+  'title',
+  'type',
+  'agencies',
+  'publication_date',
+  'comments_close_on',
+  'docket_ids',
+] as const;
+
+/** Orders document numbers by their numeric parts, so 2026-9999 sorts before 2026-17211. */
+const documentNumberOrder = new Intl.Collator('en', { numeric: true }).compare;
+
+/**
+ * Decode a Cloudflare-obfuscated email address: the first byte of the hex
+ * string is a key XORed into every byte after it.
+ */
+function decodeCfEmail(hex: string): string {
+  const key = Number.parseInt(hex.slice(0, 2), 16);
+  let email = '';
+  for (let i = 2; i + 2 <= hex.length; i += 2) {
+    email += String.fromCharCode(Number.parseInt(hex.slice(i, i + 2), 16) ^ key);
+  }
+  return email;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  apos: "'",
+  gt: '>',
+  lt: '<',
+  quot: '"',
+};
+
+/**
+ * Decode one character reference. A numeric reference naming no Unicode scalar
+ * value (NUL, a surrogate, past U+10FFFF) is left as written rather than turned
+ * into a lone surrogate or thrown on.
+ */
+function decodeEntity(entity: string, dec?: string, hex?: string, name?: string): string {
+  if (name) return NAMED_ENTITIES[name] ?? entity;
+  const codePoint = Number.parseInt(dec ?? hex ?? '', dec ? 10 : 16);
+  const isScalar =
+    codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff);
+  return isScalar ? String.fromCodePoint(codePoint) : entity;
+}
+
 /**
  * The Federal Register `raw_text_url` serves the rule body wrapped in a minimal
  * HTML envelope — `<html><head><title>…</title></head><body><pre>…actual text…
  * </pre></body></html>` — despite a `text/plain` content type. Extract the
- * `<pre>` block and decode its handful of entities so `fullText` is the genuine
- * plain-text body the schema promises, not HTML noise. Falls back to the raw
- * payload if the expected wrapper isn't present.
+ * `<pre>` block and reduce it to the plain-text body the schema promises.
+ *
+ * Inside the `<pre>`, the only markup is links (the GPO header link and URLs in
+ * the text) and, served through Cloudflare, email addresses replaced by an
+ * `[email protected]` placeholder with the address XOR-encoded in a
+ * `data-cfemail` attribute — on a `<span>` inside a link, or on the `<a>`
+ * itself. Obfuscated addresses are decoded, then link tags are dropped so each
+ * link reduces to its text; the GPO locator codes the text itself carries
+ * (`<bullet>`, `<SUP>`) are left alone. Character references decode in one
+ * pass, so an escaped one (`&amp;lt;`) stays literal. No pattern scans past the
+ * next `<`, so a document of millions of characters with a stray unclosed tag
+ * stays linear. Falls back to the raw payload if the expected wrapper isn't
+ * present.
  */
 function unwrapRawText(body: string): string {
   const match = body.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
   const inner = match?.[1] ?? body;
   return inner
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
+    .replace(
+      /<(a|span)\b[^>]*\bdata-cfemail="([0-9a-f]+)"[^>]*>[^<]*<\/\1>/gi,
+      (_, _tag: string, hex: string) => decodeCfEmail(hex),
+    )
+    .replace(/<a\b[^>]*>|<\/a>/gi, '')
+    .replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|apos|gt|lt|quot));/g, decodeEntity)
     .trim();
+}
+
+/**
+ * Cut one window out of the plain-text body. Offsets are string indices; the end
+ * backs off one position rather than split a surrogate pair, so every window is
+ * well-formed text and consecutive windows still meet with no gap or overlap.
+ */
+function windowText(
+  text: string,
+  { offset, maxChars }: FullTextWindow,
+): Pick<FrDocumentDetail, 'fullText' | 'fullTextOffset' | 'fullTextLength' | 'fullTextNextOffset'> {
+  let end = Math.min(offset + maxChars, text.length);
+  if (end < text.length && end > offset + 1 && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) {
+    end -= 1;
+  }
+  return {
+    fullText: offset < text.length ? text.slice(offset, end) : '',
+    fullTextOffset: offset,
+    fullTextLength: text.length,
+    ...(end < text.length && { fullTextNextOffset: end }),
+  };
 }
 
 export class FederalRegisterService {
@@ -90,7 +180,7 @@ export class FederalRegisterService {
     this.baseUrl = getServerConfig().federalRegisterBaseUrl.replace(/\/$/, '');
   }
 
-  /** Search Federal Register documents by query, type, agency, and date window. */
+  /** Search Federal Register documents by query, type, agency, and date window, in the given order. */
   async search(params: FrSearchParams, ctx: Context): Promise<FrSearchResponse> {
     const search = new URLSearchParams();
     if (params.query) search.set('conditions[term]', params.query);
@@ -106,15 +196,30 @@ export class FederalRegisterService {
     }
     search.set('per_page', String(params.perPage));
     search.set('page', String(params.page));
-    search.set('order', 'newest');
+    search.set('order', params.order);
     for (const field of SEARCH_FIELDS) search.append('fields[]', field);
 
     const url = `${this.baseUrl}/documents.json?${search.toString()}`;
+    const dateParams = [
+      ...(params.publishedAfter ? ['published_after'] : []),
+      ...(params.publishedBefore ? ['published_before'] : []),
+    ];
     const raw = await this.fetchJson<RawFrSearchResponse>(
       url,
       ctx,
       'FederalRegisterService.search',
-    );
+      [400],
+    ).catch((err: unknown) => {
+      throw (
+        filterRejection(err, {
+          agencies: ['agencies'],
+          publication_date: dateParams.length
+            ? dateParams
+            : ['published_after', 'published_before'],
+          term: ['query'],
+        }) ?? err
+      );
+    });
 
     return {
       totalCount: raw.count ?? 0,
@@ -122,10 +227,10 @@ export class FederalRegisterService {
     };
   }
 
-  /** Fetch one document by FR number, optionally inlining the plain-text body. */
+  /** Fetch one document by FR number, optionally inlining one window of the plain-text body. */
   async getDocument(
     documentNumber: string,
-    includeFullText: boolean,
+    fullText: FullTextWindow | undefined,
     ctx: Context,
   ): Promise<FrDocumentDetail> {
     const search = new URLSearchParams();
@@ -163,18 +268,27 @@ export class FederalRegisterService {
     }
     const detail = normalizeDocumentDetail(raw);
 
-    if (includeFullText && raw.raw_text_url) {
+    if (fullText && raw.raw_text_url) {
       const body = await this.fetchText(
         raw.raw_text_url,
         ctx,
         'FederalRegisterService.getFullText',
       );
-      detail.fullText = unwrapRawText(body);
+      Object.assign(detail, windowText(unwrapRawText(body), fullText));
     }
     return detail;
   }
 
-  /** List rules currently open for public comment (comment_date window ≥ today). */
+  /**
+   * The whole window of documents open for public comment (comment_date ≥ today),
+   * sorted by close date then document number.
+   *
+   * The Federal Register cannot order by comment date, so the window is fetched
+   * whole — one request at the 2,000-row page maximum covers every window seen so
+   * far — and sorted here. A larger window pages on in 2,000-row requests up to
+   * the API's 10,000-item limit; past that the response is `truncated` and holds
+   * the 10,000 most recently published matches.
+   */
   async listOpenComments(
     params: OpenCommentsParams,
     asOf: string,
@@ -185,28 +299,57 @@ export class FederalRegisterService {
     for (const agency of params.agencies ?? []) {
       search.append('conditions[agencies][]', agency);
     }
-    search.set('conditions[type][]', 'PRORULE');
+    for (const type of params.types) search.append('conditions[type][]', type);
     search.set('conditions[comment_date][gte]', asOf);
     if (params.closingBefore) {
       search.set('conditions[comment_date][lte]', params.closingBefore);
     }
-    search.set('per_page', String(params.perPage));
-    search.set('page', String(params.page));
+    search.set('per_page', String(FR_MAX_PER_PAGE));
     search.set('order', 'newest');
-    for (const field of SEARCH_FIELDS) search.append('fields[]', field);
+    for (const field of OPEN_COMMENT_FIELDS) search.append('fields[]', field);
+    if (params.includeCommentCounts) search.append('fields[]', 'regulations_dot_gov_info');
 
-    const url = `${this.baseUrl}/documents.json?${search.toString()}`;
-    const raw = await this.fetchJson<RawFrSearchResponse>(
-      url,
-      ctx,
-      'FederalRegisterService.listOpenComments',
+    const fetchPage = (page: number): Promise<RawFrSearchResponse> => {
+      const pageSearch = new URLSearchParams(search);
+      pageSearch.set('page', String(page));
+      return this.fetchJson<RawFrSearchResponse>(
+        `${this.baseUrl}/documents.json?${pageSearch.toString()}`,
+        ctx,
+        'FederalRegisterService.listOpenComments',
+        [400],
+      ).catch((err: unknown) => {
+        throw (
+          filterRejection(
+            err,
+            // The window's lower bound is today's date, set here, so a rejected
+            // comment_date is the caller's closing_before.
+            { agencies: ['agencies'], comment_date: ['closing_before'], term: ['query'] },
+          ) ?? err
+        );
+      });
+    };
+
+    const first = await fetchPage(1);
+    const count = first.count ?? 0;
+    const pages = Math.ceil(Math.min(count, FR_MAX_ITEMS) / FR_MAX_PER_PAGE);
+    const rest = await Promise.all(
+      Array.from({ length: Math.max(0, pages - 1) }, (_, i) => fetchPage(i + 2)),
     );
 
-    const results: OpenCommentRule[] = (raw.results ?? [])
-      .filter((doc) => doc.comments_close_on)
-      .map((doc) => normalizeOpenCommentRule(doc));
-
-    return { totalCount: raw.count ?? 0, results };
+    // Keyed by document number: a document published between two page requests
+    // shifts the newest-first pages by one, and would otherwise repeat.
+    const byNumber = new Map<string, OpenCommentRule>();
+    for (const doc of [first, ...rest].flatMap((page) => page.results ?? [])) {
+      if (!doc.comments_close_on) continue;
+      const rule = normalizeOpenCommentRule(doc);
+      byNumber.set(rule.documentNumber, rule);
+    }
+    const results = [...byNumber.values()].sort(
+      (a, b) =>
+        a.commentsCloseOn.localeCompare(b.commentsCloseOn) ||
+        documentNumberOrder(a.documentNumber, b.documentNumber),
+    );
+    return { results, truncated: count >= FR_MAX_ITEMS };
   }
 
   /** Fetch + parse JSON with retry; HTML error pages become transient errors. */
@@ -285,6 +428,94 @@ function rethrowBodyFailure(error: unknown): never {
   throw error;
 }
 
+/** What to do about a rejected Federal Register field, keyed by the FR's own name. */
+const FIELD_RECOVERY: Record<string, string> = {
+  agencies:
+    'Each `agencies` value must be a Federal Register agency slug — lowercase kebab-case such as "environmental-protection-agency", not a name or acronym. Read one off agencies[].slug in any regulations_search_rules or regulations_list_open_comments result (search by query without the agencies filter to find it). One unrecognized slug fails the whole request.',
+  publication_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
+  comment_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
+};
+
+/**
+ * Read a Federal Register 400 into a declared `invalid_filter` failure.
+ *
+ * The body names each rejected condition — `{"errors":{"agencies":"invalid
+ * value"}}` — by the FR's field name, which is not always the parameter the
+ * caller set (`publication_date` is `published_after`/`published_before`,
+ * `comment_date` is `closing_before`), so `params` maps one to the other; a
+ * field it has no entry for is named as the FR spells it. Only the field names
+ * and their messages are carried forward: the thrown error's `data.body` holds
+ * the raw upstream payload and is left behind. Returns null for anything that
+ * is not a 400 with a non-empty `errors` object, so that error propagates as it
+ * was classified.
+ */
+function filterRejection(err: unknown, params: Record<string, string[]>): McpError | null {
+  if (!(err instanceof McpError) || err.data?.status !== 400) return null;
+  const body = err.data.body;
+  if (typeof body !== 'string') return null;
+  let parsed: { errors?: unknown };
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    return null;
+  }
+  const { errors } = parsed;
+  if (typeof errors !== 'object' || errors === null || Array.isArray(errors)) return null;
+  const entries = Object.entries(errors);
+  if (entries.length === 0) return null;
+
+  const rejected = entries.map(([field, value]) => {
+    const parameters = params[field] ?? [field];
+    const detail = (Array.isArray(value) ? value : [value]).map(String).join('; ');
+    return {
+      field,
+      parameters,
+      text: `${parameters.map((p) => `\`${p}\``).join('/')}: ${detail}`,
+    };
+  });
+  const hints = [
+    ...new Set(
+      rejected.map(
+        ({ field }) => FIELD_RECOVERY[field] ?? 'Correct or drop the named parameter and retry.',
+      ),
+    ),
+  ];
+  return validationError(
+    `The Federal Register rejected the request — ${rejected.map((r) => r.text).join('; ')}`,
+    {
+      reason: 'invalid_filter',
+      parameters: rejected.flatMap((r) => r.parameters),
+      // Per-field, so sharper than the tool's declared recovery for the same reason.
+      recovery: { hint: hints.join(' ') },
+    },
+    { cause: err },
+  );
+}
+
+/**
+ * Map raw FR `agencies[]` → one `{ name, slug }` per issuing agency.
+ *
+ * Read from the objects themselves, never zipped against `agency_names`, which
+ * is not index-aligned with them (it repeats parent departments). An entry the
+ * FR carries by `raw_name` alone has no filterable slug, so `slug` is null; an
+ * entry with no name at all is dropped, and an entry repeated verbatim is kept
+ * once.
+ */
+function normalizeAgencies(raw: RawFrDocument['agencies']): FrAgency[] {
+  const agencies: FrAgency[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw ?? []) {
+    const name = entry?.name ?? entry?.raw_name;
+    if (!name) continue;
+    const slug = entry.slug ?? null;
+    const key = `${name}\u0000${slug}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    agencies.push({ name, slug });
+  }
+  return agencies;
+}
+
 /** Map raw FR `cfr_references` (sparse) → domain `CfrReference[]`. */
 function normalizeCfrReferences(raw: RawFrDocument['cfr_references']): CfrReference[] {
   return (raw ?? [])
@@ -302,7 +533,7 @@ function normalizeSearchResult(doc: RawFrDocument): FrSearchResult {
     type: doc.type ?? 'Unknown',
     abstract: doc.abstract ?? null,
     publicationDate: doc.publication_date ?? '',
-    agencies: doc.agency_names ?? [],
+    agencies: normalizeAgencies(doc.agencies),
     docketIds: doc.docket_ids ?? [],
     regulationIdNumbers: doc.regulation_id_numbers ?? [],
     cfrReferences: normalizeCfrReferences(doc.cfr_references),
@@ -331,7 +562,7 @@ function normalizeDocumentDetail(doc: RawFrDocument): FrDocumentDetail {
     publicationDate: doc.publication_date ?? '',
     effectiveOn: doc.effective_on ?? null,
     commentsCloseOn: doc.comments_close_on ?? null,
-    agencies: doc.agency_names ?? [],
+    agencies: normalizeAgencies(doc.agencies),
     regulationIdNumbers: doc.regulation_id_numbers ?? [],
     cfrReferences: normalizeCfrReferences(doc.cfr_references),
     docketId: rdg.docket_id ?? null,
@@ -349,8 +580,8 @@ function normalizeOpenCommentRule(doc: RawFrDocument): OpenCommentRule {
   return {
     documentNumber: doc.document_number ?? '',
     title: doc.title ?? '(untitled)',
-    type: doc.type ?? 'Proposed Rule',
-    agencies: doc.agency_names ?? [],
+    type: doc.type ?? 'Unknown',
+    agencies: normalizeAgencies(doc.agencies),
     publicationDate: doc.publication_date ?? '',
     commentsCloseOn: doc.comments_close_on ?? '',
     docketIds: doc.docket_ids ?? [],

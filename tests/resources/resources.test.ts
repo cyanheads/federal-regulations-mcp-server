@@ -43,7 +43,7 @@ const detail: FrDocumentDetail = {
   publicationDate: '2025-06-01',
   effectiveOn: null,
   commentsCloseOn: null,
-  agencies: ['EPA'],
+  agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
   regulationIdNumbers: [],
   cfrReferences: [{ title: 40, part: '50' }],
   docketId: 'EPA-HQ-OAR-2025-0194',
@@ -66,10 +66,13 @@ describe('documentResource', () => {
     const result = (await documentResource.handler(params, ctx)) as Record<string, unknown>;
     expect(result.documentNumber).toBe('2025-14555');
     expect(result.docketId).toBe('EPA-HQ-OAR-2025-0194');
+    expect(result.agencies).toEqual([
+      { name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' },
+    ]);
     // The resource omits the body by contract.
     expect(result).not.toHaveProperty('fullText');
     // The service was asked NOT to include full text.
-    expect(getDocument).toHaveBeenCalledWith('2025-14555', false, ctx);
+    expect(getDocument).toHaveBeenCalledWith('2025-14555', undefined, ctx);
   });
 
   it('lists an example resource', async () => {
