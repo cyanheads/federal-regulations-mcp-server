@@ -59,7 +59,7 @@ if (status.ready) {
     }),
   );
 
-  const sample = await mirrorSearch('definitions', undefined, undefined, 3);
+  const sample = await mirrorSearch('definitions', undefined, undefined, 3, 0);
   logger.info(
     'eCFR mirror sample query "definitions"',
     logContext({
