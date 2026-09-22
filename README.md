@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.4.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -37,7 +37,7 @@ US federal regulatory law across three official sources: the Federal Register (p
 |:---|:---|
 | `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, and date range, ranked by relevance or date |
 | `regulations_get_document` | Fetch one Federal Register document by number, with the docket ID, CFR parts, and comment count that chain into other tools |
-| `regulations_browse_cfr` | Walk the CFR hierarchy or full-text-search the codified CFR |
+| `regulations_browse_cfr` | List CFR titles, a title's chapters, or every section and appendix in a part, or full-text-search the codified CFR |
 | `regulations_get_cfr_section` | Read codified CFR text for a section, whole part, or appendix, current or as of a past date |
 | `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov (key required) |
 | `regulations_find_comments` | Fetch public comments on a document or docket, or one comment's full body and attachments (key required) |
@@ -77,18 +77,23 @@ All resource data is also reachable via the tool surface — tool-only MCP clien
 
 ### `regulations_browse_cfr` <sub>tool</sub>
 
-- Keyless; `mode: "structure"` walks the CFR tree (all 50 titles, or one title's chapters → parts → sections); `mode: "search"` full-text-searches the codified CFR
+- Keyless; `mode: "structure"` lists all 50 titles, a title's top-level divisions (chapters or subtitles), or — with `title` + `part` — every section and appendix in the part, flattened, each carrying its `subpart` and `subjectGroup`; `mode: "search"` full-text-searches the codified CFR
 - `title` (1–50) and `part` scope both modes; a `part` without `title` is rejected (`title_required_for_part`) since part numbers repeat across titles
-- Search accepts `date` (point-in-time; eCFR indexes 2017-01-03 onward) and `per_page` (1–50, default 20)
+- `date` is point-in-time in both modes and must be a real calendar day; structure mode rejects a date past the title's up-to-date date (`date_out_of_range`), and search indexes 2017-01-03 onward
+- `page` (1-based, default 1) and `per_page` (1–50, default 20) page search results and a part's listing; `page` and `totalCount` come back with a notice naming the next page, and a page past the end returns no rows plus the last page. Labels are plain text (eCFR's inline markup stripped)
+- Search returns one row per section: eCFR's live index answers one hit per section *version*, so repeats are collapsed. `countBasis` says what `totalCount` counts — `sections`, or eCFR's own `section_versions` count until the whole hit list has been read. Live search pages through eCFR's first 10,000 hits only; a page past them fails as `page_out_of_window`
 - Every search result reports `source` (`mirror`/`live`) and `sourceScope` — the mirror only answers a title it holds, never an all-titles query when scoped, so anything it can't answer falls through to the live eCFR API
-- `query_required` when `mode="search"` has no query; `title_not_found` / `date_out_of_range` / `upstream_unavailable` round out the errors
+- `query_required` when `mode="search"` has no query; `title_not_found` / `date_out_of_range` / `page_out_of_window` / `upstream_unavailable` round out the errors
 
 ---
 
 ### `regulations_get_cfr_section` <sub>tool</sub>
 
 - Keyless; reads one section (`title`+`part`+`section`), a whole part (`title`+`part`, `section` omitted), or one appendix (`title`(+`part`)+`appendix`) — `section` and `appendix` are mutually exclusive (`conflicting_target`)
-- `date` for point-in-time text; eCFR retains history back to ~2017-01-03, rejected earlier as `date_out_of_range`
+- `section` accepts the cite the way people write it: `"61"` in part 141, `"§ 141.61"`, `"Sec. 141.61"`, and `"141.61(c)"` (paragraph designators dropped; the whole section comes back) all read 40 CFR 141.61. An identifier that resolves as given is never rewritten (14 CFR 241 `"25"`, 26 CFR `"48.4061(a)"`); a rewrite returns the identifier read in `section` / `cfrCite` plus a `notice`
+- Text is one window of `bodyText`: `offset` (default 0) and `max_chars` (default 64,000, max 200,000) select it, and `bodyTextOffset` / `bodyTextLength` / `bodyTextNextOffset` (present while text remains) page through it — the same contract as `regulations_get_document`'s full text. An offset past the end is an empty window with a `notice`
+- A whole-part fetch adds `sections[]`, a text-free index of the sections in the window (`section`, `heading`, `cfrCite`, and the `offset` each starts at in the part's text — pass it as `offset` to jump there)
+- `date` for point-in-time text, 2017-01-01 through the title's up-to-date date; anything outside that is `date_out_of_range`, checked before any text request, and a date that is not a real calendar day is rejected at input validation
 - `appendix` must be passed verbatim as eCFR / `regulations_browse_cfr` emits it (e.g. `Appendix A-1 to Part 50`), not a short form
 - A whole-part fetch lists its appendices' identifiers and headings without inlining their text — call again with `appendix` to read one
 - `source` (`mirror`/`live`) reports provenance; current single-section reads are mirror-served when ready, everything else (historical dates, whole-part, appendix reads) falls back to the live eCFR versioner
@@ -137,7 +142,8 @@ All resource data is also reachable via the tool surface — tool-only MCP clien
 
 ### `regulations://cfr/{title}/{part}/{section}` <sub>resource</sub>
 
-- Same payload as `regulations_get_cfr_section` at the current date — sections only; read an appendix via the tool's `appendix` input instead
+- Same payload as `regulations_get_cfr_section` at the current date and its default 64,000-character window — sections only; read an appendix via the tool's `appendix` input instead
+- The section resolves as the tool resolves it (`"61"`, `"§ 141.61"`, `"141.61(c)"`), with a `notice` naming the rewrite; a section longer than one window carries `bodyTextNextOffset`, and the rest is read through the tool's `offset`
 - Mirror-backed with a live eCFR fallback; `source` (`mirror`/`live`) reports provenance
 - `not_found` / `upstream_unavailable` mirror the tool's errors
 
@@ -288,7 +294,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `ECFR_BASE_URL` | eCFR API base URL. | `https://www.ecfr.gov/api` |
 | `REGULATIONS_GOV_BASE_URL` | Regulations.gov API v4 base URL. | `https://api.regulations.gov/v4` |
 | `ECFR_MIRROR_PATH` | Filesystem path for the eCFR SQLite mirror database. | `./data/ecfr-mirror.sqlite` |
-| `ECFR_MIRROR_REFRESH_CRON` | Cron expression for the weekly mirror refresh (HTTP transport only). | `0 4 * * 0` |
+| `ECFR_MIRROR_REFRESH_CRON` | Cron expression for an in-process mirror refresh (HTTP transport only), e.g. `0 4 * * 0`. Unset registers no job. Each run re-harvests every configured title in full, and a tick is skipped until `mirror:init` has completed once. | — (no job) |
 | `ECFR_MIRROR_TITLES` | Comma-separated CFR title numbers to scope the mirror to (e.g. `21,40`). Omit to mirror all 50 titles. Cites and searches outside the set fall through to the live eCFR API, as does any all-titles search while this is set. | — (all titles) |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
@@ -319,7 +325,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
   ```sh
   bun run mirror:init      # full build across all 50 titles, resumable (scope with ECFR_MIRROR_TITLES)
-  bun run mirror:refresh   # incremental refresh against the latest eCFR issues
+  bun run mirror:refresh   # re-harvest every configured title against the latest eCFR issues
   bun run mirror:verify    # report row counts and the last-synced issue date
   ```
 
@@ -344,13 +350,13 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 
 | Directory | Purpose |
 |:---|:---|
-| `src/index.ts` | `createApp()` entry point — registers tools/resources, inits the three services, and schedules the mirror refresh on HTTP. |
+| `src/index.ts` | `createApp()` entry point — registers tools/resources, inits the three services, and schedules the mirror refresh on HTTP when `ECFR_MIRROR_REFRESH_CRON` is set. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
 | `src/mcp-server/tools` | Tool definitions (`*.tool.ts`) — the seven `regulations_*` tools. |
 | `src/mcp-server/resources` | Resource definitions (`*.resource.ts`) — the document and CFR-section resources. |
 | `src/services/federal-register` | Federal Register API v1 client (keyless). |
 | `src/services/ecfr` | eCFR API client (keyless) — versioner, structure, search, and section XML parsing. |
-| `src/services/ecfr-mirror` | eCFR codified-text mirror (MirrorService — SQLite + FTS5) and its read path. |
+| `src/services/ecfr-mirror` | eCFR codified-text mirror (MirrorService — SQLite + FTS5), its read path, and the opt-in refresh job. |
 | `src/services/regulations-gov` | Regulations.gov v4 client (`X-Api-Key`) — dockets and comments. |
 | `scripts/ecfr-mirror-*.ts` | Out-of-band mirror lifecycle: `init`, `refresh`, `verify`. |
 | `tests/` | Unit and integration tests mirroring `src/`. |

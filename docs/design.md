@@ -12,8 +12,8 @@ US federal regulatory law as one workflow server over three official sources: th
 |:-----|:------------|:-----------|:--------------|:------------|
 | `regulations_search_rules` | The 80% entry point. Search the Federal Register for proposed rules, final rules, notices, and presidential documents — filter by agency, document type, date range, and topic, ranked by relevance or date. | `query`, `type`, `agencies`, `published_after`, `published_before`, `order`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
 | `regulations_get_document` | Fetch one Federal Register document by FR number: metadata, agencies, RIN, effective/comment dates, the cross-source handles (docket ID, affected CFR parts) that chain into the comment and codified-text tools, and on request a bounded, resumable window of the plain-text body. | `document_number`, `include_full_text`, `offset`, `max_chars` | Federal Register · keyless | `readOnlyHint`, `idempotentHint` |
-| `regulations_browse_cfr` | Navigate the CFR hierarchy (titles → chapters → parts → sections) to discover what exists before fetching section text, or full-text-search the codified CFR for sections matching a phrase. | `mode`, `title`, `part`, `query`, `date` | eCFR · keyless | `readOnlyHint`, `openWorldHint` |
-| `regulations_get_cfr_section` | Read the codified text at a CFR location via eCFR — a section, a whole part, or an appendix — current or as of a past date. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `appendix`, `date` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
+| `regulations_browse_cfr` | List the CFR titles, a title's chapters, or every section and appendix in a part (flattened, paged) to discover what exists before fetching section text, or full-text-search the codified CFR for sections matching a phrase, one row per section. | `mode`, `title`, `part`, `query`, `date`, `page`, `per_page` | eCFR · keyless | `readOnlyHint`, `openWorldHint` |
+| `regulations_get_cfr_section` | Read the codified text at a CFR location via eCFR — a section, a whole part, or an appendix — current or as of a past date, as one bounded, resumable window of text. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `appendix`, `date`, `offset`, `max_chars` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
 | `regulations_get_docket` | Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-2025-0194`): docket metadata plus the documents filed in it (NPRM, final rule, supporting materials). | `docket_id`, `document_types`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `idempotentHint` |
 | `regulations_find_comments` | Fetch public comments on a Federal Register document or a docket from Regulations.gov, resolving comment bodies and flagging when the substance lives in an attachment. The unique corpus — what citizens and organizations actually submitted. | `docket_id`, `document_object_id`, `fr_document_number`, `comment_id`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `openWorldHint` |
 | `regulations_list_open_comments` | Tracking tool: documents currently open for public comment — proposed rules and comment-requesting final rules by default, notices on request — soonest closing first, filterable by agency and topic. "What can I still weigh in on?" Federal Register's open-comment window is the spine; Regulations.gov comment counts enrich each row when the key is present. | `query`, `type`, `agencies`, `closing_before`, `per_page`, `page` | Federal Register (+ Regulations.gov enrich) · key optional | `readOnlyHint`, `openWorldHint` |
@@ -25,7 +25,7 @@ US federal regulatory law as one workflow server over three official sources: th
 | URI Template | Description | Pagination |
 |:-------------|:------------|:-----------|
 | `regulations://document/{documentNumber}` | A single Federal Register document (same payload as `regulations_get_document`, metadata + cross-source handles, full text omitted). Stable-URI context injection. | No |
-| `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section (same payload as `regulations_get_cfr_section` at the current date). | No |
+| `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section (same payload as `regulations_get_cfr_section` at the current date and its default window; the section resolves the same way). | No |
 
 Both resources mirror a tool's `get` output for clients that support injectable context; every datum is reachable through the tool surface, so tool-only clients lose nothing. Each declares the reasons its own path can raise — `not_found` and `upstream_unavailable` — with hints scoped to what a URI template can address (the CFR-section hint names sections and drops the tool's appendix clause, since an appendix identifier is prose and has no path segment). Both share their tool's service call, so declaring nothing would emit the service's reason with no hint behind it. Resource failures arrive at the JSON-RPC level (`error.data.reason`) rather than inside a result envelope.
 
@@ -87,7 +87,7 @@ So the clock belongs to the *request*, not to the attempt or the call. `requestB
 - **45 seconds, as a constant, not an env var.** The number that matters is the client's timeout, which the server cannot see; 45s leaves room under the only value specified anywhere for the transport and the client's own overhead. An env var would add a knob to `server.json` and `manifest.json` for a value no deployment has a better basis to pick.
 - **A deadline is not a cancellation, and the two answer differently.** The attempt signal composes the caller's own, so both abort the same fetch, and they are told apart by identity — the attempt's own abort reason, and `ctx.signal` — never by the rejection's text, which differs per runtime. A deadline is the upstream failing to respond, so it leaves as a `Timeout` that `withUpstreamReason` stamps `upstream_unavailable`. A caller abort has nothing to recover and nothing to advertise, so it passes through with whatever classification the layer that caught it gave it (the table below).
 - **Reading the body is inside the deadline.** `fetchWithTimeout` clears its own timer once headers arrive (cyanheads/mcp-ts-core#341), so a peer that answers and then stalls the stream was unbounded on every leg. The attempt signal covers the fetch and the `.text()`/`.json()` after it, which is also why it keeps working if the framework's own deadline later grows to cover the body.
-- **Ingest is not a request.** The mirror's sync claims its context for `ingestBudget` where the context is built, so the whole run stays unbounded — not only the whole-title read that asks for the 10-minute deadline outright, but the titles list its title loop is built from, which goes through the ordinary JSON helper. It runs from the `mirror:init`/`mirror:refresh` CLI or the refresh cron against ~150 MB payloads, with no client waiting on the answer and nothing to gain from cutting it short.
+- **Ingest is not a request.** The mirror's sync claims its context for `ingestBudget` where the context is built, so the whole run stays unbounded — not only the whole-title read that asks for the 10-minute deadline outright, but the titles list its title loop is built from, which goes through the ordinary JSON helper. It runs from the `mirror:init`/`mirror:refresh` CLI or the opt-in refresh cron against ~150 MB payloads, with no client waiting on the answer and nothing to gain from cutting it short.
 
 Measured the same way afterwards, every tool on all three services answers `upstream_unavailable` at 45s, having made two to four attempts first — each leg's 15–20s attempt deadline fits inside the budget more than once, so a hung peer is still retried, which is what a deadline is for. A slow *success* is untouched: a peer answering in 14s still answers in 14s, and a two-call tool in 28s.
 
@@ -161,7 +161,7 @@ sqliteMirrorStore({
 })
 ```
 
-No `limits` override on the spec: the store's defaults cap a read at 32 filters, 500 bound values, a `limit` of 1,000, and 500 `ids` per `getByIds`, and every query this server issues sits far inside them — search binds at most a title and a part and takes its `limit` from `per_page` (max 50), and a section read fetches exactly one ID. The ceilings bound the reads a client can shape; the ingest path is neither, applying its records and tombstones through `applyBatch`, which is unbounded by design.
+No `limits` override on the spec: the store's defaults cap a read at 32 filters, 500 bound values, a `limit` of 1,000, and 500 `ids` per `getByIds`, and every query this server issues sits far inside them — search binds at most a title and a part and takes its `limit` from `per_page` (max 50) and an unbounded `offset` from `page`, and a section read fetches exactly one ID. The ceilings bound the reads a client can shape; the ingest path is neither, applying its records and tombstones through `applyBatch`, which is unbounded by design.
 
 The `sync` ingester walks the eCFR `/versioner/v1/titles.json` list, then per title pulls `/versioner/v1/full/{date}/title-{n}.xml`, parses each `<DIV8 TYPE="SECTION">` into a row, and resolves hierarchy from the structure/ancestry endpoints. `checkpoint` = the max `issue_date` seen (lexicographically monotonic ISO date); `cursor` = the in-progress title number for resuming an interrupted init.
 
@@ -179,7 +179,7 @@ A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:pa
 
 **Readiness is necessary, not sufficient — coverage decides.** `ECFR_MIRROR_TITLES` makes a *ready* mirror a partial one, and a partial index queried outside its scope returns an empty result set from a corpus that never held the answer. So `browse_cfr` search reads the ingested title set out of `cfr_part_index` and uses the mirror only when that set covers the request: a `title` filter must be in the set, and an all-titles query is served only by an unscoped mirror. Everything else routes live — the contract section reads already follow on a mirror miss. The answering corpus and its coverage come back on every search as `source` + `sourceScope`, so an empty result is legible.
 
-**Scheduling + bootstrap (server-owned).** Refresh is registered on a cron via `schedulerService` in `setup()` (weekly is ample — the CFR is amended in discrete issues), gated to the HTTP transport so stdio operators don't double-run it. Init runs **out-of-band** via a `mirror:init` CLI script (idempotent, resumable from the persisted cursor) — never on startup; a full title sweep can take a long time and must not block the server. The three lifecycle scripts (`mirror:init`, `mirror:refresh`, `mirror:verify`) plus the shared `_mirror-context.ts` shim travel in `package.json` `files[]` and are copied into the Docker runtime stage (Bun image, with the `@/`→`./dist/` tsconfig shim) so `docker exec bun run mirror:init` resolves.
+**Scheduling + bootstrap (server-owned).** The in-process refresh is opt-in: `setup()` registers it on a cron via `schedulerService` only on an HTTP start with `ECFR_MIRROR_REFRESH_CRON` set, and logs why when it registers nothing (unset, stdio, or a cron expression `node-cron` rejects). `node-cron` is a regular dependency, so the job survives the image's `--omit=peer` install. A refresh is a full re-harvest, not an incremental one — the ingester reads every configured title's whole XML each run (title 40 alone: 157 MB of XML, ~1 GB peak RSS, a multi-second event-loop stall while its rows are written) — which is why it is off unless asked for, and why a tick on a mirror that has never completed `mirror:init` is skipped with a log line rather than becoming a full in-process build; a mirror an older ingester wrote still refreshes, since that run re-derives it. Teardown stops the job, aborts and awaits a run in flight, then closes the store. Init runs **out-of-band** via a `mirror:init` CLI script (idempotent, resumable from the persisted cursor) — never on startup; a full title sweep can take a long time and must not block the server. The three lifecycle scripts (`mirror:init`, `mirror:refresh`, `mirror:verify`) plus the shared `_mirror-context.ts` shim travel in `package.json` `files[]` and are copied into the Docker runtime stage (Bun image, with the `@/`→`./dist/` tsconfig shim) so `docker exec bun run mirror:init` resolves.
 
 **Sections only.** The ingester walks `<DIV8 TYPE="SECTION">` and ignores `<DIV9 TYPE="APPENDIX">`. Appendices are addressed by a verbatim identifier and read deliberately rather than searched in bulk, and one read is a single live versioner call — while their bulk is unbounded relative to the sections (40 CFR 50's appendices are ~9× its section XML), so indexing them buys little and costs a lot. The cost is that the mirror cannot match appendix text, which is indistinguishable from "no such appendix" unless said — so `browse_cfr`'s mirror `sourceScope` says it, `get_cfr_section` routes every appendix read live, and mirror search hits report `appendix: null`.
 
@@ -196,7 +196,7 @@ A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:pa
 | `ECFR_BASE_URL` | No | Override the eCFR API base. Default `https://www.ecfr.gov/api`. |
 | `REGULATIONS_GOV_BASE_URL` | No | Override the Regulations.gov API base. Default `https://api.regulations.gov/v4`. |
 | `ECFR_MIRROR_PATH` | No | Filesystem path for the eCFR SQLite mirror DB. Default a data dir under the project (e.g. `./data/ecfr-mirror.sqlite`). |
-| `ECFR_MIRROR_REFRESH_CRON` | No | Cron expression for the mirror refresh. Default weekly. |
+| `ECFR_MIRROR_REFRESH_CRON` | No | Cron expression for an in-process mirror refresh (HTTP only). Unset — the default — registers no job. |
 
 `server-config.ts` lazy-parses these with a Zod schema via `parseEnvConfig`, mapping schema paths → env var names so a config error names the variable. `REGULATIONS_GOV_API_KEY` is `z.string().optional()` — its absence is a valid (keyless-core) deployment, enforced per-tool at call time, not at startup.
 
@@ -341,24 +341,26 @@ A number that fails the `^[0-9]{4}-[0-9]+$` check is rejected by the input schem
 
 ### 3. `regulations_browse_cfr`
 
-Two modes over the eCFR. `structure` walks the CFR hierarchy (titles → chapters → subchapters → parts → sections) to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path. Both feed `regulations_get_cfr_section`.
+Two modes over the eCFR. `structure` lists the 50 titles, a title's top-level divisions (chapters or subtitles), or — with a title and part — every section and appendix in the part, flattened and paged, to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path, one row per section, paged. Both feed `regulations_get_cfr_section`.
 
-**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when its title coverage can answer, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings` and its `hierarchyPath` takes the part's name from the same map; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its scope filters are `hierarchy[title]` and `hierarchy[part]` (a `conditions[…]` parameter is rejected outright; `hierarchy[part]` with no `hierarchy[title]` is refused with `{"title":["must be specified if specifying hierarchy"]}`, and part matching is exact and case-sensitive — `1203a` hits where `1203A` and `058` silently return zero). It indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
+**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when its title coverage can answer, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings` and its `hierarchyPath` takes the part's name from the same map; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its scope filters are `hierarchy[title]` and `hierarchy[part]` (a `conditions[…]` parameter is rejected outright; `hierarchy[part]` with no `hierarchy[title]` is refused with `{"title":["must be specified if specifying hierarchy"]}`, and part matching is exact and case-sensitive — `1203a` hits where `1203A` and `058` silently return zero). It indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Even dated it answers one hit per version: each amendment and cross-reference change is its own hit (`meta.description` reads "Changes to sections matching …"), every one with `ends_on: null` — `lead service line` in title 40 answers 151 hits covering 95 distinct sections and appendices. No parameter restricts it to one hit per section (probed live: `current`, `current_only`, `latest`, `version`, `collapse`, `distinct`, `group_by`, and `change_types[]` are unpermitted; `order` and `paginate_by` change nothing; `/counts/hierarchy` stops at subject groups). Paging is 1-based `page` over `per_page`; `total_count` stops at 10,000 and a page reaching past the 10,000th hit answers 400 `can only paginate through 10,000 results`, while a page past the last answers 200 with no results. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
 
 **Input schema:**
 ```ts
 mode: z.enum(['structure', 'search'])
-  .describe('"structure": browse the CFR tree (titles, or one title\'s chapters/parts/sections) to find a cite. "search": full-text search the codified CFR for sections matching a phrase.'),
+  .describe('"structure": list titles, a title\'s top-level divisions, or a part\'s sections and appendices, to find a cite. "search": full-text search the codified CFR for sections matching a phrase.'),
 title: z.number().int().min(1).max(50).optional()
-  .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles, or provide to expand one title. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.'),
+  .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles; provide it alone to list the title\'s top-level divisions (chapters, or subtitles) — not the parts beneath them — or with part to list that part. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.'),
 part: z.string().optional()
-  .describe('CFR part within the title, in both modes — structure mode narrows the returned tree to that part\'s sections, search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly, so pass the identifier as eCFR writes it — "58", not "Part 58" or "058".'),
+  .describe('CFR part within the title, in both modes — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly, so pass the identifier as eCFR writes it — "58", not "Part 58" or "058".'),
 query: z.union([z.literal(''), z.string().min(2)]).optional()
   .describe('Full-text search phrase (search mode, required in that mode). Ignored in structure mode.'),
-date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional()
-  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode honors it for historical hierarchy; search matches only the text in effect that day and always runs against the live API, since the mirror holds current text alone.'),
+date: z.union([z.literal(''), isoDate()]).optional()   // a real calendar day
+  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode honors it for historical hierarchy and rejects a date past the title\'s up-to-date date; search matches only the text in effect that day and always runs against the live API, since the mirror holds current text alone.'),
+page: z.number().int().min(1).optional().default(1)
+  .describe('1-based page of search results, or of a part\'s listing in structure mode (default 1); ignored by a structure listing above a part. Live eCFR search pages through its first 10,000 hits only, so a page starting past them is refused.'),
 per_page: z.number().int().min(1).max(50).optional().default(20)
-  .describe('Results per page in search mode (1–50, default 20). Ignored in structure mode.'),
+  .describe('Rows per page — search results, or nodes of a part\'s listing in structure mode (1–50, default 20).'),
 ```
 
 **Output (structure mode):**
@@ -366,24 +368,28 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 {
   mode: 'structure',
   date: string,                       // resolved point-in-time date
-  nodes: Array<{
-    type: string,                     // "title" | "chapter" | "subchapter" | "subpart" | "part" | "section" | "appendix" | "subject_group" | "hed1" (live confirmed; treat unknown types as passthrough)
-    identifier: string,               // e.g. "40", "I", "C", "50", "50.1"
-    label: string,                    // e.g. "Part 50—National Primary and Secondary Ambient Air Quality Standards"
-    description: string | null,       // label_description
+  nodes: Array<{                      // the 50 titles; a title's direct children; or one page of a part's leaves
+    type: string,                     // above a part: "title" | "subtitle" | "chapter"; in a part listing: "section" | "appendix"
+    identifier: string,               // e.g. "40", "I", "50.1", "Appendix A-1 to Part 50"
+    label: string,                    // plain text — eCFR's inline <em>/<sub>/<span> and entities reduced to text
+    description: string | null,       // label_description, plain text
     reserved: boolean,
-    cfrCite: string | null,           // → regulations_get_cfr_section: "40 CFR 50.1" (section), "40 CFR 50" (part),
+    cfrCite: string | null,           // → regulations_get_cfr_section: "40 CFR 50.1" (section),
                                       //   "Appendix A-1 to Part 50, Title 40" (appendix); null on a level with no read path
     appendix: string | null,          // on an appendix node, the identifier to pass back as the read tool's `appendix`
+    subpart: string | null,           // part listing: the enclosing subpart's label ("Subpart A—General")
+    subjectGroup: string | null,      // part listing: the enclosing subject group's heading
   }>,
+  // enrichment on a part listing: page, totalCount, shown, truncated, notice
 }
 ```
+
+**A part's listing is its leaves, flattened and paged.** A part's own children are mostly subparts and subject groups — 70% of non-reserved parts across nine sampled titles (2,159 of 3,079) nest their sections that way — and neither has a read path, so listing one level down left most parts unenumerable except by a whole-part text read running to megabytes. The structure document already holds every leaf, so the part listing walks it: sections and appendices in document order, each naming the subpart and subject group around it (within a part eCFR nests no deeper than subpart › subject group › leaf, and a subject group can sit directly under the part). `hed1` headings and childless containers (a reserved subpart) list nothing. A subject group's identifier is minted by eCFR (`generated_id`), so it is named by its heading and never shown as an identifier. The flattened listing runs to 3,120 leaves (~1.4 MB) for 40 CFR 63 and 3,774 for 26 CFR 1, so it pages on the same `page`/`per_page` as search. This is the one outline surface: `regulations_get_cfr_section`'s `sections[]` index covers only the text window it returns.
 
 **Output (search mode):**
 ```ts
 {
   mode: 'search',
-  totalCount: number,
   source: 'mirror' | 'live',          // provenance — mirror (synced index) or the live eCFR search API
   sourceScope: string,                // what that corpus covers — the mirror's titles, or the live index at its date,
                                       // narrowed by whichever of title and part the call supplied
@@ -400,21 +406,25 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
     excerpt: string,                  // full_text_excerpt (matched snippet)
     cfrCite: string,                  // → regulations_get_cfr_section; an appendix hit cites the appendix
                                       //   ("Appendix C to Part 58, Title 40"), not the part around it
-  }>,
-  truncated?: boolean,
-  shown?: number,
+  }>,                                 // one row per section or appendix, however many of its versions matched
+  // enrichment: totalCount, countBasis ('sections' | 'section_versions'), page, shown, truncated, notice
 }
 ```
 
-`format()`: structure mode → an indented markdown tree of nodes with their cites; search mode → a list of hits (cite · heading · excerpt) under a `source` + `sourceScope` provenance line.
+`format()`: structure mode → a markdown list of nodes with their cites, a part listing grouped under subpart › subject group lines; search mode → a list of hits (cite · heading · excerpt) under a `source` + `sourceScope` provenance line. Paging and count context rides the enrichment trailer.
+
+**Search pages by section, not by version.** eCFR's index answers one hit per section version, so passing its pages through repeated a section across rows and pages, and `totalCount` counted versions (151 for 95 sections on `lead service line` / title 40). With no parameter that returns one hit per section, the service reads the hit list in relevance order 1,000 hits at a time — one request for a first page on all but the broadest queries, ~1 s and ~190 KB compressed — and keeps each section once, where its best-scoring version ranked. A page is a slice of that collapsed list, read one row past the page so `truncated` is exact; that keeps paging coherent where collapsing inside each upstream page would not (a page shrinking silently, a section reappearing three pages later). `totalCount` counts sections (`countBasis: "sections"`) once the whole list has been read, and is eCFR's own version count (`countBasis: "section_versions"`, disclosed in the notice) until then — no estimate of the distinct count is fabricated. The mirror holds one row per section and pages by offset with an exact count. One upstream limit survives the collapse: eCFR orders equal-scoring hits differently between identical requests deep in a broad query's list — two reads of `shall`'s 10,000 hits held 9,598 and 9,625 distinct sections, with the first 5,000 hits identical — so pages near the window's end can shift between calls, as eCFR's own paging does.
+
+**The 10,000-hit window is a declared refusal.** eCFR serves the first 10,000 hits of a query. A page whose first row is past the 10,000th cannot exist, so it is refused as `page_out_of_window` before any request; one that the collapsed list cannot reach inside those hits is refused after they are read, naming the last reachable page. When `total_count` reads 10,000 the notice says the true count may be higher and to narrow the query. The truncation notice names the next page and suggests a larger `per_page` only below the 50 maximum. A page past the last returns no rows and a notice naming the last page — not the "No CFR sections matched" notice, which is for a query with no matches.
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `query_required` | `InvalidParams` | `mode='search'` with no `query` | Provide a `query` phrase for search mode, or switch to `mode='structure'` to browse. |
-| `title_not_found` | `NotFound` | Structure mode where eCFR publishes no tree for the title at that date (reserved title, or a date outside coverage — both confirmed live as a versioner 404), or where the part is absent from the tree it does publish | Omit `part` to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all. |
+| `title_not_found` | `NotFound` | Structure mode where eCFR publishes no tree for the title at that date (reserved title, or a date before coverage — both confirmed live as a versioner 404), or where the part is absent from the tree it does publish | Omit `part` to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all. |
 | `title_required_for_part` | `InvalidParams` | `part` given with no `title`, either mode | Add the title the part belongs to (e.g. title 40 with part 58), or drop `part`. |
-| `date_out_of_range` | `InvalidParams` | Search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to search the current text. |
+| `date_out_of_range` | `InvalidParams` | Structure mode, `date` past the title's `up_to_date_as_of`; search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to browse or search the current text. |
+| `page_out_of_window` | `ValidationError` | Live search page that starts past the 10,000 hits eCFR pages through | Request an earlier page (the message names the last reachable one when known), or narrow the search to bring its matches under 10,000. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path) | Retry; eCFR may be momentarily down. |
 
 Zero matches is a successful empty result carrying a `notice`, not an error; the notice names the corpus that was searched so the caller can tell "no such regulation" from "wrong corpus."
@@ -425,7 +435,7 @@ Zero matches is a successful empty result carrying a `notice`, not an error; the
 
 The two provenances build `hierarchyPath` differently and say so in the field description. A live hit pairs the part's label with the name eCFR returns beside it; a mirror hit stays structural, because the ingested columns carry no level names. Only the part is named: chapter and subchapter numbers are not caller-supplied anywhere, and naming every level ran the path past 300 characters and the rendered page 34–59% larger on a 50-hit page, against 13–22% for the part alone.
 
-`date_out_of_range` is raised from eCFR's own 400, but the message is not a passthrough: eCFR names its earliest indexed date when a date is too early and says only "not currently available" when a date is too late, so the service appends the full window (`2017-01-03` through the current index date) either way. Passing today's date is the common way to hit the late end.
+In structure mode `date_out_of_range` is checked against the title's `up_to_date_as_of` (from the cached titles list) before the structure request, because the versioner answers a date past it with a 404 that otherwise reads as `title_not_found`; that 404's body is also classified, for a window that moves between the check and the read. `date` is a real calendar day (`isoDate()`), so `2025-02-30` is refused at input validation. In search mode `date_out_of_range` is raised from eCFR's own 400, but the message is not a passthrough: eCFR names its earliest indexed date when a date is too early and says only "not currently available" when a date is too late, so the service appends the full window (`2017-01-03` through the current index date) either way. Passing today's date is the common way to hit the late end.
 
 ---
 
@@ -454,11 +464,15 @@ title: z.number().int().min(1).max(50)
 part: z.string().optional()
   .describe('CFR part within the title (e.g. "50"). Parts can be alphanumeric. Required unless appendix is given, where it is optional but recommended. Obtain from regulations_browse_cfr or from a Federal Register document\'s cfrReferences.'),
 section: z.union([z.literal(''), z.string()]).optional()
-  .describe('Section identifier within the part (e.g. "50.1"). Omit to fetch the entire part — large parts can be very long; prefer a specific section when you know it. Cannot be combined with appendix.'),
+  .describe('Section within the part, normally part.section ("141.61"); "61", "§ 141.61", "Sec. 141.61", and "141.61(c)" also resolve. Omit to fetch the entire part. Cannot be combined with appendix.'),
 appendix: z.union([z.literal(''), z.string()]).optional()
   .describe('Appendix identifier, verbatim as eCFR writes it (e.g. "Appendix A-1 to Part 50") — from a regulations_browse_cfr appendix node or search hit. Cannot be combined with section.'),
-date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional()
-  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Default current. eCFR retains historical versions back to ~2017; a date before coverage returns the earliest available and notes it.'),
+date: z.union([z.literal(''), isoDate()]).optional()   // a real calendar day
+  .describe("Point-in-time date, ISO 8601 (YYYY-MM-DD). Default current. eCFR serves 2017-01-01 through the title's up-to-date date; a date outside that window is rejected, naming the window."),
+offset: z.number().int().min(0).optional()
+  .describe('Character offset where the window starts (default 0) — bodyTextNextOffset, or a sections[].offset.'),
+max_chars: z.number().int().min(1).max(200_000).optional()
+  .describe('Most characters in this window (default 64,000).'),
 ```
 
 **Output:**
@@ -469,19 +483,24 @@ date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional
                                       //   "14 CFR 241 § 25", never "14 CFR 25"
   title: number,
   part: string | null,                // null only for an appendix hanging off a chapter/subchapter/subtitle
-  section: string | null,             // null when a whole part or an appendix was requested
+  section: string | null,             // the identifier read (resolved form when the input was written
+                                      //   differently); null when a whole part or an appendix was requested
   appendix: string | null,            // null when a section or whole part was requested
   heading: string,                    // "§ 50.1 Definitions."
   hierarchyPath: string,              // "Title 40 › Chapter I › Subchapter C › Part 50"
   date: string,                       // the issue/point-in-time date the text reflects (ISO 8601)
   source: 'mirror' | 'live',          // provenance; an appendix read is always live
-  bodyText: string,                   // text, XML stripped to plain text; paragraphs, HD subheadings, editorial
-                                      //   notes, tables (pipe-delimited rows), the trailing <CITA> source
-                                      //   citation, and figure references kept in document order
-  sections?: Array<{                  // present only when a whole part was fetched
+  bodyText: string,                   // one window of the text, XML stripped to plain text; paragraphs, HD
+                                      //   subheadings, editorial notes, tables (pipe-delimited rows), the trailing
+                                      //   <CITA> source citation, and figure references kept in document order
+  bodyTextOffset: number,             // where the window starts
+  bodyTextLength: number,             // characters in the whole text
+  bodyTextNextOffset?: number,        // present only while text remains past the window
+  sections?: Array<{                  // whole part only: the sections whose text falls in this window
     section: string;
     heading: string;
-    bodyText: string;
+    cfrCite: string;
+    offset: number;                   //   where the section starts in the part's whole text
   }>,
   appendices?: Array<{                // present on a whole-part fetch when the part has appendices
     appendix: string;                 //   → pass back as this tool's `appendix` input
@@ -490,17 +509,25 @@ date: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional
 }
 ```
 
-`format()`: header (cite, heading, hierarchy path, effective date, `source`), then the body text (or, for a part, each section as a markdown subsection followed by the appendix handles).
+Enrichment: `notice` — how a section written another way resolved, and guidance when `offset` is past the end (both composed into one string; `notice` is last-wins).
+
+`format()`: header (cite, heading, hierarchy path, effective date, `source`), the window's span and resume offset, the section index and appendix handles for a part, then the window's text last and untrimmed so consecutive windows rebuild the body from `content[]` as exactly as from `structuredContent`.
+
+**Section cites resolve the way people write them.** The versioner and the mirror match a section identifier exactly, so `"61"`, `"§ 141.61"`, and `"141.61(c)"` in part 141 used to answer `not_found` for a section in force. `readSection` (`src/services/ecfr/read-section.ts`) strips a leading `§` / `§§` / `Sec.` / `Section` first — none of the 227,498 section identifiers in the Code begins with one — then tries the value as given, and only on a miss drops trailing paragraph designators longest-prefix first, then joins a dotless number to its part. Rewriting never runs before the as-given lookup: 1,511 identifiers contain parentheses and 15 end in a group (`26 CFR 48.4061(a)`, `17 CFR 240.11a1-1(T)`, `39 CFR 956.1 (Rule 1)`), and the 48 dotless ones (all 14 CFR 241: `25`, `1-1`) resolve as given. No dotless identifier contains a parenthesis, so a dotless paragraph cite skips straight to its bare number. Extra live lookups are capped at three: the versioner answers in ~0.2 s or ~5 s and every lookup shares the 45 s budget, and past the cap the intermediate forms give way before the bare section. The resolved identifier goes out in `section`, `cfrCite`, and the ancestry lookup, with a `notice` saying how; the resource resolves identically, after decoding its URI segments — the SDK's template match hands them over still percent-encoded, so `§ 141.61` arrives as `%C2%A7%20141.61`.
+
+**Text is one bounded window.** A whole-part read used to return the part's text twice — joined into `bodyText` and again per section in `sections[]` — and `format()` rendered both, so 40 CFR 141 came to 4.8 MB and 40 CFR 52 to 42 MB. The text now travels once, as a window on `regulations_get_document`'s contract (64,000 characters by default, 200,000 at most, resumable by offset), and `sections[]` is a text-free index cut to the window: 40 CFR 52 has 1,106 sections, and a full index would itself run past one window. The window applies to single-section and appendix reads too — 36 sections of 40 CFR 52 exceed 64,000 characters, and § 52.220a alone is 727,255. Listing a part's sections without reading them is `regulations_browse_cfr` structure mode's job.
+
+**The upper date bound is `up_to_date_as_of`.** The versioner serves a title through its `up_to_date_as_of`, not its `latest_issue_date` (Title 1's latest issue was 2026-08-10 while it read at every day to 2026-09-18), and 404s the day after with the same status as a missing location. The tool checks a `date` against that bound — from the titles list, cached 15 minutes, so the check adds no request per call — before any text request, and answers `date_out_of_range` naming the window. The past-date 404's body (`"…is past the title's most recent issue date of …"`) is classified the same way as a fallback, since `{"error":"No matching content found."}` is the only other 404 body and means `not_found`.
 
 **Whole-part reads name appendices, they do not inline them.** A part's appendices routinely outweigh its sections — measured against the live versioner, 40 CFR 50's run to ~9× the section XML (580 KB vs 67 KB) and 12 CFR 1026's to ~3.5× (2.9 MB vs 848 KB), and 40 CFR 60 adds 4.4 MB on top of 9.2 MB. Folding them into every whole-part read would multiply the response for callers who wanted the sections; the identifiers cost nothing and are what a caller needs to read one deliberately.
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
-| `not_found` | `NotFound` | No such title/part/section/appendix at that date | Verify the cite with regulations_browse_cfr (structure mode); the part, section, or appendix may not exist, may be reserved, or — for an appendix — may be named differently than the short form passed. |
+| `not_found` | `NotFound` | No such title/part/section/appendix at that date, under the section as given or any form it resolves to | Verify the cite with regulations_browse_cfr (structure mode) and pass the identifier it lists — a section is normally part.section ("141.61"). The part, section, or appendix may not exist, may be reserved, or — for an appendix — may be named differently than the short form passed. |
 | `location_required` | `InvalidParams` | Neither `part` nor `appendix` given | Add the part to read, or the appendix identifier from regulations_browse_cfr. |
 | `conflicting_target` | `InvalidParams` | Both `section` and `appendix` given | Send one or the other; make two calls to read both. |
-| `date_out_of_range` | `InvalidParams` | `date` precedes eCFR historical coverage | Use a date from ~2017 onward, or omit `date` for the current text. |
+| `date_out_of_range` | `InvalidParams` | `date` precedes eCFR historical coverage (2017-01-01) or is past the title's up-to-date date | Use a date inside the window the error names, or omit `date` for the current text. |
 | `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout / HTML error page (live path) | Retry after a brief wait; the eCFR API may be momentarily unavailable. |
 
 ---
@@ -810,7 +837,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 - **Federal Register caps navigation at 50 pages.** With `per_page=100`, this allows up to 5,000 records per query; with smaller per_page values, fewer records are reachable. The `count` field is itself capped at 10,000 (ElasticSearch default window), so for queries with more than 10,000 matches the true total is unknown. `search_rules` surfaces this via the `truncated` flag and steers the agent to date-windowing to narrow results below the navigable ceiling. `list_open_comments` fetches its window at per_page 2,000 instead and reaches the full 10,000.
 - **Regulations.gov caps a query at 5,000 records** (250/page × 20 pages). For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` surfaces a sample and flags `truncated`; exhaustive retrieval needs the documented `lastModifiedDate`-window workaround (iterate by posting-date slices), noted in the parameter descriptions. v1 surfaces the sample honestly rather than implementing the full windowed crawl.
 - **Comment bodies can be attachment-only.** Confirmed live: the inline `comment` field is null when the substance is a PDF/DOCX attachment. `find_comments` flags `attachmentOnly`/`hasInlineBody` and returns the attachment download URLs, but does **not** fetch and OCR/parse the attachment binaries — the agent gets the URLs and the flag, retrieval of the file content is left to the caller.
-- **eCFR historical coverage starts ~2017.** Point-in-time reads before then return the earliest available text with a note; the server can't synthesize CFR text that eCFR doesn't retain.
+- **eCFR historical coverage starts ~2017.** Point-in-time reads before 2017-01-01 are rejected as `date_out_of_range`; the server can't synthesize CFR text that eCFR doesn't retain.
 - **Regulations.gov coverage is agency-dependent.** Not every FR document has a Regulations.gov docket, and not every docket accepts comments. `commentCount`/`docketId` are null when absent — the server reports the gap rather than fabricating a docket.
 - **Regulations.gov rate limit (1,000 req/hr per shared key).** A heavy comment-retrieval session can hit it; `find_comments`/`get_docket` surface `rate_limited` distinctly from other 5xx so the agent can back off rather than retry-storm.
 
@@ -829,10 +856,10 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 ### eCFR (keyless) — `https://www.ecfr.gov/api`
 - **Titles:** `GET /versioner/v1/titles.json` → the 50 titles with `latest_amended_on`, `latest_issue_date`, `up_to_date_as_of`, `reserved`.
-- **Structure:** `GET /versioner/v1/structure/{date}/title-{n}.json` → the title's tree (`identifier`, `label`, `type`, `children`, `descendant_range`).
+- **Structure:** `GET /versioner/v1/structure/{date}/title-{n}.json` → the title's whole tree down to every section and appendix (`identifier`, `label`, `label_description`, `type`, `reserved`, `generated_id` on subject groups, `children`, `descendant_range`); labels carry inline markup (`<em>`, `<sub>`, `<span>`) and entities (`&amp;`, `&lt;`).
 - **Ancestry:** `GET /versioner/v1/ancestry/{date}/title-{n}.json?part={p}&section={s}` → the full hierarchy path for a cite (used to build `hierarchyPath`).
 - **Full text:** `GET /versioner/v1/full/{date}/title-{n}.xml?part={p}&section={s}` → section/part XML (`<DIV8 TYPE="SECTION">` with `<HEAD>`/`<P>`; carries `hierarchy_metadata` citation). `{date}` is the point-in-time date (YYYY-MM-DD).
-- **Search:** `GET /search/v1/results?query={q}&per_page={n}` → matched sections (`hierarchy`, `hierarchy_headings`, `full_text_excerpt`, `score`); `meta` has `total_count`, `total_pages`. Keyless full-text search — the live fallback for `browse_cfr` search before the mirror is ready.
+- **Search:** `GET /search/v1/results?query={q}&date={d}&per_page={n}&page={p}` → one hit per matching section version (`hierarchy`, `hierarchy_headings`, `headings`, `full_text_excerpt`, `score`, `starts_on`, `ends_on`); `meta` has `total_count` (capped at 10,000), `total_pages`, `current_page`. A page reaching past the 10,000th hit answers 400. Keyless full-text search — the live fallback for `browse_cfr` search before the mirror is ready.
 
 ### Regulations.gov v4 (key required) — `https://api.regulations.gov/v4`, header `X-Api-Key: {key}`
 - **JSON:API shape:** every record is `{ type, id, attributes: {...} }`; lists are `data[]`, `meta` carries `totalElements`, `hasNextPage`, and `aggregations` (facet counts by `documentType`/`agencyId`).

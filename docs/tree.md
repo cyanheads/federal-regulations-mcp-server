@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-09-22 19:44:51
+Generated on: 2026-09-22 20:43:01
 
 ```text
 federal-regulations-mcp-server/
@@ -165,10 +165,12 @@ federal-regulations-mcp-server/
 │   │   ├── ecfr/
 │   │   │   ├── cite.ts
 │   │   │   ├── ecfr-service.ts
+│   │   │   ├── read-section.ts
 │   │   │   ├── types.ts
 │   │   │   └── xml.ts
 │   │   ├── ecfr-mirror/
-│   │   │   └── ecfr-mirror.ts
+│   │   │   ├── ecfr-mirror.ts
+│   │   │   └── refresh-job.ts
 │   │   ├── federal-register/
 │   │   │   ├── federal-register-service.ts
 │   │   │   └── types.ts
@@ -176,10 +178,17 @@ federal-regulations-mcp-server/
 │   │   │   ├── regulations-gov-service.ts
 │   │   │   └── types.ts
 │   │   ├── request-budget.ts
+│   │   ├── text-window.ts
 │   │   └── upstream-failure.ts
 │   └── index.ts
 ├── tests/
 │   ├── fixtures/
+│   │   ├── ecfr-14-241-25.xml
+│   │   ├── ecfr-40-141.61.xml
+│   │   ├── ecfr-search-lead-service-line-t40.json
+│   │   ├── ecfr-structure-40-parts-50-141.json
+│   │   ├── ecfr-structure-42-part-22.json
+│   │   ├── ecfr-structure-7-part-1955.json
 │   │   └── ecfr-title-3-2024-05-17.xml
 │   ├── helpers/
 │   │   └── handler-context.ts
@@ -192,14 +201,18 @@ federal-regulations-mcp-server/
 │   │   ├── ecfr-service.test.ts
 │   │   ├── ecfr-xml.test.ts
 │   │   ├── federal-register-service.test.ts
+│   │   ├── read-section.test.ts
+│   │   ├── refresh-job.test.ts
 │   │   ├── regulations-gov-service.test.ts
 │   │   └── request-budget.test.ts
 │   ├── tools/
+│   │   ├── browse-cfr.contract.test.ts
 │   │   ├── browse-cfr.tool.test.ts
 │   │   ├── error-contracts.test.ts
 │   │   ├── federal-register-contract.test.ts
 │   │   ├── find-comments.tool.test.ts
 │   │   ├── format-utils.test.ts
+│   │   ├── get-cfr-section.contract.test.ts
 │   │   ├── get-cfr-section.tool.test.ts
 │   │   ├── get-docket.tool.test.ts
 │   │   ├── get-document-full-text.test.ts

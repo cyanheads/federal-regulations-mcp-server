@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-09-22 · ⚠️ Breaking
+
+CFR section text is now a bounded, resumable window (breaking), structure mode lists a part's sections and appendices flattened, search collapses per-version repeats, and the mirror refresh cron actually runs.
+
 ## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-09-22 · ⚠️ Breaking
 
 Agencies now expose Federal Register slugs (breaking), full text pages by offset, and the open-comment window covers final rules in true closing-date order.
