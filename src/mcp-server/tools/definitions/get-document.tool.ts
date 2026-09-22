@@ -11,13 +11,8 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
+import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS } from '@/services/text-window.js';
 import { formatAgencies } from './format-utils.js';
-
-/** Characters of body text one call returns unless `max_chars` says otherwise. */
-const DEFAULT_MAX_CHARS = 64_000;
-
-/** Largest window one call may request. */
-const MAX_CHARS_CEILING = 200_000;
 
 export const getDocumentTool = tool('regulations_get_document', {
   title: 'regulations_get_document',
@@ -49,7 +44,7 @@ export const getDocumentTool = tool('regulations_get_document', {
       .number()
       .int()
       .min(1)
-      .max(MAX_CHARS_CEILING)
+      .max(MAX_WINDOW_CHARS)
       .optional()
       .describe(
         'Most body characters to return in this window (1–200,000, default 64,000). Implies include_full_text.',
@@ -188,7 +183,7 @@ export const getDocumentTool = tool('regulations_get_document', {
     }
     const window =
       (input.include_full_text ?? windowed)
-        ? { offset: input.offset ?? 0, maxChars: input.max_chars ?? DEFAULT_MAX_CHARS }
+        ? { offset: input.offset ?? 0, maxChars: input.max_chars ?? DEFAULT_WINDOW_CHARS }
         : undefined;
 
     const detail = await getFederalRegisterService().getDocument(

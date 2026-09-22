@@ -36,6 +36,17 @@ export interface EcfrStructureNode {
   identifier: string;
   label: string;
   reserved: boolean;
+  /**
+   * On a node listed from inside a part, the heading of the subject group it
+   * sits under; null when it sits in none, and on every node listed above a part.
+   */
+  subjectGroup: string | null;
+  /**
+   * On a node listed from inside a part, the label of the subpart it sits under
+   * ("Subpart A—General"); null when the part has no subpart around it, and on
+   * every node listed above a part.
+   */
+  subpart: string | null;
   type: string;
 }
 
@@ -101,16 +112,31 @@ export interface EcfrXmlContent {
   sections: EcfrSection[];
 }
 
+/**
+ * One section of a whole-part read, without its text: where it starts in the
+ * part's body, and the handles that read it on its own.
+ */
+export interface EcfrSectionIndexEntry {
+  cfrCite: string;
+  heading: string;
+  /** Offset in the whole part's body where this section's heading starts. */
+  offset: number;
+  section: string;
+}
+
 /** Result of a codified-text fetch (a section, or a whole part). */
 export interface EcfrSectionResult {
   /** Appendices in the part, named only — present on a whole-part fetch. */
   appendices?: EcfrAppendixSummary[];
+  /** The whole text — one section's, or every section of a part in order. */
   bodyText: string;
   date: string;
   heading: string;
   part: string;
+  /** The identifier the text was read under; null for a whole part. */
   section: string | null;
-  sections?: EcfrSection[];
+  /** Index of the part's sections — present on a whole-part fetch. */
+  sections?: EcfrSectionIndexEntry[];
   title: number;
 }
 
@@ -148,10 +174,32 @@ export interface EcfrSearchHit {
   title: number;
 }
 
-/** Live search response. */
-export interface EcfrSearchResponse {
+/**
+ * One page of search results, one row per section or appendix.
+ *
+ * The live index holds one hit per section *version*, so the live path collapses
+ * repeats and `totalCount` can only count distinct sections once it has read the
+ * whole hit list. Until then it is eCFR's own hit count, which counts versions —
+ * `countBasis` says which one a response carries.
+ */
+export interface EcfrSearchPage {
+  /** What `totalCount` counts: distinct sections, or every indexed version of them. */
+  countBasis: 'sections' | 'section_versions';
+  /** True when at least one more result follows this page. */
+  hasMore: boolean;
   results: EcfrSearchHit[];
   totalCount: number;
+  /**
+   * True when the live index reported its 10,000-hit ceiling — the true count
+   * may be higher, and hits past the 10,000th are unreachable. Always false on
+   * the mirror.
+   */
+  windowCapped: boolean;
+  /**
+   * True when this page reached the last hit the live index serves (its
+   * 10,000th) while more matches exist past it.
+   */
+  windowEnd: boolean;
 }
 
 /**

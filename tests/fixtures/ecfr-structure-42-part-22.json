@@ -1,0 +1,91 @@
+{
+  "identifier": "42",
+  "label": "Title 42—Public Health",
+  "label_level": "Title 42",
+  "label_description": "Public Health",
+  "reserved": false,
+  "type": "title",
+  "size": 23305203,
+  "children": [
+    {
+      "identifier": "I",
+      "label": " Chapter I—Public Health Service, Department of Health and Human Services",
+      "label_level": " Chapter I",
+      "label_description": "Public Health Service, Department of Health and Human Services",
+      "reserved": false,
+      "type": "chapter",
+      "size": 4301556,
+      "children": [
+        {
+          "identifier": "B",
+          "label": "Subchapter B—Personnel",
+          "label_level": "Subchapter B",
+          "label_description": "Personnel",
+          "reserved": false,
+          "type": "subchapter",
+          "size": 84747,
+          "children": [
+            {
+              "identifier": "22",
+              "label": "Part 22—Personnel Other Than Commissioned Officers",
+              "label_level": "Part 22",
+              "label_description": "Personnel Other Than Commissioned Officers",
+              "reserved": false,
+              "type": "part",
+              "volumes": ["1"],
+              "size": 2302,
+              "children": [
+                {
+                  "label": "Hansen's Disease Duty by Personnel Other Than Commissioned Officers",
+                  "label_level": "Hansen's Disease Duty by Personnel Other Than Commissioned Officers",
+                  "label_description": "Hansen's Disease Duty by Personnel Other Than Commissioned Officers",
+                  "reserved": false,
+                  "type": "hed1",
+                  "size": 0
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFRace1fe9d14dc0e4",
+                  "label": "Special Consultants",
+                  "label_level": "Special Consultants",
+                  "label_description": "Special Consultants",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 2302,
+                  "children": [
+                    {
+                      "identifier": "22.3",
+                      "label": "§ 22.3 Appointment of special consultants.",
+                      "label_level": "§ 22.3",
+                      "label_description": "Appointment of special consultants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["1"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1330
+                    },
+                    {
+                      "identifier": "22.5",
+                      "label": "§ 22.5 Leave without pay while on detail.",
+                      "label_level": "§ 22.5",
+                      "label_description": "Leave without pay while on detail.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["1"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 972
+                    }
+                  ],
+                  "descendant_range": "22.3 – 22.5"
+                }
+              ],
+              "descendant_range": "22.3 – 22.5"
+            }
+          ],
+          "descendant_range": "21 – 24"
+        }
+      ],
+      "descendant_range": "2 – 199"
+    }
+  ]
+}

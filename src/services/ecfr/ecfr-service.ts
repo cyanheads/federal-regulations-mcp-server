@@ -32,7 +32,7 @@ import { appendixCite, sectionCite } from './cite.js';
 import type {
   EcfrAppendixResult,
   EcfrSearchHit,
-  EcfrSearchResponse,
+  EcfrSearchPage,
   EcfrSectionResult,
   EcfrStructureNode,
   EcfrTitle,
@@ -48,8 +48,8 @@ const XML_TIMEOUT_MS = 60_000;
 /** Bulk whole-title XML can be ~150 MB (Title 40); allow up to 10 minutes. */
 const FULL_TITLE_TIMEOUT_MS = 600_000;
 const BASE_DELAY_MS = 400;
-/** The eCFR index date advances at most once a day; re-read it at most this often. */
-const CURRENT_DATE_TTL_MS = 15 * 60_000;
+/** The titles document advances at most once a day; re-read it at most this often. */
+const TITLES_TTL_MS = 15 * 60_000;
 
 /** eCFR retains point-in-time versions back to roughly this date. */
 export const ECFR_EARLIEST_DATE = '2017-01-01';
@@ -62,8 +62,65 @@ export const ECFR_EARLIEST_DATE = '2017-01-01';
  */
 const ECFR_SEARCH_EARLIEST_DATE = '2017-01-03';
 
+/**
+ * How many hits the live search pages through for one query. A page reaching
+ * past it answers 400 "can only paginate through 10,000 results", and
+ * `total_count` stops at it, so a reported 10,000 is a floor, not a count.
+ */
+export const ECFR_SEARCH_WINDOW = 10_000;
+
+/**
+ * Hits read per live search request while collapsing versions. Large enough that
+ * a first page is one request for all but the broadest queries (~1 s, ~190 KB
+ * compressed), and a divisor of {@link ECFR_SEARCH_WINDOW}, so the reads end
+ * exactly at the window rather than asking for a page that straddles it.
+ */
+const SEARCH_CHUNK = 1_000;
+
+/** What a whole-part body puts between one section and the next. */
+const PART_BODY_SEPARATOR = '\n\n';
+
+/**
+ * The message for a date outside the versioner's window for a title. Shared by
+ * the read tools' own bound check and the versioner's past-date 404 below, so a
+ * caller reads the same sentence whichever of the two caught it.
+ */
+export function outsideCoverageMessage(title: number, date: string, upToDate: string): string {
+  return `Date ${date} is outside eCFR's coverage for title ${title}, which runs ${ECFR_EARLIEST_DATE} through ${upToDate}.`;
+}
+
+/**
+ * Raise `date_out_of_range` when a versioner 404 is its past-date refusal. The
+ * versioner answers a date past a title's `up_to_date_as_of` and a location that
+ * does not exist with the same status, and only the body tells them apart:
+ * `{"error":"The requested date 2030-01-01 is past the title's most recent issue
+ * date of 2026-09-18, …"}` against `{"error":"No matching content found."}`.
+ * The read tools check the bound before any text request, so this catches the
+ * window moving between that check and the read. Any other 404 returns.
+ */
+function throwIfPastCoverage(err: McpError, title: number, date: string, ctx: Context): void {
+  const body = err.data?.body;
+  const upToDate =
+    typeof body === 'string'
+      ? body.match(/past the title's most recent issue date of (\d{4}-\d{2}-\d{2})/)?.[1]
+      : undefined;
+  if (!upToDate) return;
+  throw validationError(
+    outsideCoverageMessage(title, date, upToDate),
+    { reason: 'date_out_of_range', title, date, ...ctx.recoveryFor('date_out_of_range') },
+    { cause: err },
+  );
+}
+
 function looksLikeHtml(text: string): boolean {
   return /^\s*<(!DOCTYPE\s+html|html[\s>])/i.test(text);
+}
+
+/** The parts of the titles document the service reads. */
+interface TitlesDocument {
+  /** `meta.date` — the day eCFR serves as "now"; null when the document omits it. */
+  indexDate: string | null;
+  titles: EcfrTitle[];
 }
 
 /** Node types that carry a citable identifier into get_cfr_section. */
@@ -71,30 +128,49 @@ const CITABLE_TYPES = new Set(['part', 'section']);
 
 export class EcfrService {
   private readonly baseUrl: string;
-  private currentDateCache: { date: string; expiresAt: number } | undefined;
+  private titlesCache: { doc: TitlesDocument; expiresAt: number } | undefined;
 
   constructor(_config: AppConfig, _storage: StorageService) {
     this.baseUrl = getServerConfig().ecfrBaseUrl.replace(/\/$/, '');
   }
 
+  /**
+   * The titles document (`/versioner/v1/titles.json`), which carries every date
+   * bound the other reads need: each title's latest issue and up-to-date dates,
+   * and the index date in `meta`. It advances at most once a day, so one read
+   * serves every call for a few minutes rather than costing one request each.
+   */
+  private async titlesDocument(ctx: Context): Promise<TitlesDocument> {
+    if (this.titlesCache && Date.now() < this.titlesCache.expiresAt) {
+      return this.titlesCache.doc;
+    }
+    const raw = await this.fetchJson<{ meta?: { date?: string }; titles?: RawEcfrTitle[] }>(
+      `${this.baseUrl}/versioner/v1/titles.json`,
+      ctx,
+      'EcfrService.titles',
+    );
+    const doc: TitlesDocument = {
+      indexDate: raw.meta?.date ?? null,
+      titles: (raw.titles ?? [])
+        .filter((t): t is RawEcfrTitle & { number: number } => typeof t.number === 'number')
+        .map((t) => ({
+          number: t.number,
+          name: t.name ?? `Title ${t.number}`,
+          latestAmendedOn: t.latest_amended_on ?? null,
+          latestIssueDate: t.latest_issue_date ?? null,
+          upToDateAsOf: t.up_to_date_as_of ?? null,
+          reserved: t.reserved ?? false,
+        })),
+    };
+    // A document with no index date is an upstream fault, not a day's answer;
+    // caching it would fail every current-date read until the entry expired.
+    if (doc.indexDate) this.titlesCache = { doc, expiresAt: Date.now() + TITLES_TTL_MS };
+    return doc;
+  }
+
   /** List the CFR titles (`/versioner/v1/titles.json`). */
   async listTitles(ctx: Context): Promise<EcfrTitle[]> {
-    const url = `${this.baseUrl}/versioner/v1/titles.json`;
-    const raw = await this.fetchJson<{ titles?: RawEcfrTitle[] }>(
-      url,
-      ctx,
-      'EcfrService.listTitles',
-    );
-    return (raw.titles ?? [])
-      .filter((t): t is RawEcfrTitle & { number: number } => typeof t.number === 'number')
-      .map((t) => ({
-        number: t.number,
-        name: t.name ?? `Title ${t.number}`,
-        latestAmendedOn: t.latest_amended_on ?? null,
-        latestIssueDate: t.latest_issue_date ?? null,
-        upToDateAsOf: t.up_to_date_as_of ?? null,
-        reserved: t.reserved ?? false,
-      }));
+    return (await this.titlesDocument(ctx)).titles;
   }
 
   /**
@@ -108,40 +184,45 @@ export class EcfrService {
   }
 
   /**
+   * The last date the versioner serves a title at — its `up_to_date_as_of`, not
+   * its `latest_issue_date`. A title whose latest issue is weeks old still reads
+   * at every day up to this one, and 404s the day after it. Null when the titles
+   * list does not name the title, which leaves the read to answer for itself.
+   */
+  async upToDateAsOf(title: number, ctx: Context): Promise<string | null> {
+    const titles = await this.listTitles(ctx);
+    return titles.find((t) => t.number === title)?.upToDateAsOf ?? null;
+  }
+
+  /**
    * The date eCFR currently serves as "now" (`meta.date` on the titles document).
    * The search API rejects any date past it, so a "current" search must pin to
-   * this value rather than to the caller's clock. Cached for a few minutes.
+   * this value rather than to the caller's clock. Cached with the titles list.
    *
    * A titles document that answers 200 without one is an upstream failure like
    * any other, but it is raised here rather than inside the fetch, past the reach
    * of `withUpstreamReason` — so it stamps its own reason and hint.
    */
   async currentDate(ctx: Context): Promise<string> {
-    if (this.currentDateCache && Date.now() < this.currentDateCache.expiresAt) {
-      return this.currentDateCache.date;
-    }
-    const url = `${this.baseUrl}/versioner/v1/titles.json`;
-    const raw = await this.fetchJson<{ meta?: { date?: string } }>(
-      url,
-      ctx,
-      'EcfrService.currentDate',
-    );
-    const date = raw.meta?.date;
-    if (!date) {
+    const { indexDate } = await this.titlesDocument(ctx);
+    if (!indexDate) {
       throw serviceUnavailable('eCFR did not report a current index date.', {
-        url,
+        url: `${this.baseUrl}/versioner/v1/titles.json`,
         reason: 'upstream_unavailable',
         ...ctx.recoveryFor('upstream_unavailable'),
       });
     }
-    this.currentDateCache = { date, expiresAt: Date.now() + CURRENT_DATE_TTL_MS };
-    return date;
+    return indexDate;
   }
 
   /**
    * Browse a title's structure tree. With no `part`, returns the title's direct
-   * children; with a `part`, narrows to that part's subtree (flattened to one
-   * level of nodes for the agent). Each citable node carries an assembled cite.
+   * children. With a `part`, returns every section and appendix in it, in
+   * document order, each naming the subpart and subject group it sits under —
+   * the part's own children are mostly subparts and subject groups, which have
+   * no read path, so one level down would list nothing a caller can open. The
+   * structure document already holds every leaf, so this costs no extra request.
+   * Each citable node carries an assembled cite.
    *
    * Both ways this can name nothing — a title the versioner publishes no tree
    * for, and a part absent from the tree it does publish — carry the browse
@@ -165,8 +246,10 @@ export class EcfrService {
       );
     } catch (err) {
       // The versioner 404s a title it holds no tree for at that date — a
-      // reserved title, or a date outside its coverage.
+      // reserved title, or a date before its coverage. A date past its coverage
+      // 404s too, but says so in the body, and that is a different answer.
       if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
+      throwIfPastCoverage(err, title, date, ctx);
       throw notFound(
         `CFR title ${title} has no published structure as of ${date}.`,
         { title, date, reason: 'title_not_found', ...ctx.recoveryFor('title_not_found') },
@@ -174,7 +257,9 @@ export class EcfrService {
       );
     }
 
-    const partNode = part ? findPartNode(root, part) : root;
+    if (!part) return (root.children ?? []).map((child) => normalizeNode(child, title));
+
+    const partNode = findPartNode(root, part);
     if (!partNode) {
       throw notFound(`Part ${part} not found in CFR title ${title} as of ${date}.`, {
         title,
@@ -184,8 +269,7 @@ export class EcfrService {
         ...ctx.recoveryFor('title_not_found'),
       });
     }
-    const children = partNode.children ?? [];
-    return children.map((child) => normalizeNode(child, title));
+    return partLeaves(partNode, title, { subpart: null, subjectGroup: null });
   }
 
   /** List all titles as structure nodes (the top of the browse tree). */
@@ -199,6 +283,8 @@ export class EcfrService {
       reserved: t.reserved,
       cfrCite: null,
       appendix: null,
+      subpart: null,
+      subjectGroup: null,
     }));
   }
 
@@ -211,7 +297,14 @@ export class EcfrService {
    * same reason: a cite that does not resolve is the expected failure here, and
    * the recovery a caller needs for it (verify the cite through the browse
    * surface) belongs to the read tool, which owns the declared `not_found`.
-   * Transport failures still throw.
+   * A date past the title's coverage is not a missing location and throws
+   * `date_out_of_range`; transport failures still throw.
+   *
+   * A section read reports the identifier the versioner returned, which is the
+   * one a caller can hand back. A whole-part read returns the part's full body
+   * and an index of its sections: each one's identifier, heading, cite, and the
+   * offset its heading starts at in that body. The index carries no text — the
+   * body already does.
    */
   async getSectionText(
     title: number,
@@ -230,29 +323,41 @@ export class EcfrService {
         expectedStatuses: [404],
       });
     } catch (err) {
-      // The versioner 404s for a nonexistent part/section (or a date past the
-      // title's latest issue) — no such location, not a fetch failure.
-      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) return null;
-      throw err;
+      // The versioner 404s for a nonexistent part/section — no such location,
+      // not a fetch failure — and for a date past the title's coverage.
+      if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
+      throwIfPastCoverage(err, title, date, ctx);
+      return null;
     }
     const { sections, appendices } = parseCfrXml(xml);
 
     // A part that exists always has sections; none means the cite named nothing.
-    if (sections.length === 0) return null;
+    const [first] = sections;
+    if (!first) return null;
 
     if (section) {
-      // sections is non-empty (guarded above), so [0] is defined when find misses.
-      const found = sections.find((s) => s.section === section);
-      const match = found ?? sections[0];
+      const match = sections.find((s) => s.section === section) ?? first;
       return {
         title,
         part,
-        section,
-        heading: match?.heading ?? `§ ${section}`,
+        section: match.section,
+        heading: match.heading,
         date,
-        bodyText: match?.bodyText ?? '',
+        bodyText: match.bodyText,
       };
     }
+
+    let offset = 0;
+    const index = sections.map((s) => {
+      const entry = {
+        section: s.section,
+        heading: s.heading,
+        cfrCite: sectionCite(title, part, s.section),
+        offset,
+      };
+      offset += s.heading.length + 1 + s.bodyText.length + PART_BODY_SEPARATOR.length;
+      return entry;
+    });
 
     return {
       title,
@@ -260,8 +365,8 @@ export class EcfrService {
       section: null,
       heading: `Part ${part}`,
       date,
-      bodyText: sections.map((s) => `${s.heading}\n${s.bodyText}`).join('\n\n'),
-      sections,
+      bodyText: sections.map((s) => `${s.heading}\n${s.bodyText}`).join(PART_BODY_SEPARATOR),
+      sections: index,
       // Named, not inlined. A part's appendices routinely outweigh its sections
       // several times over — 40 CFR 50's run to nine times the section text, 12
       // CFR 1026's to three and a half — so folding them into every whole-part
@@ -307,8 +412,9 @@ export class EcfrService {
         expectedStatuses: [404],
       });
     } catch (err) {
-      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) return null;
-      throw err;
+      if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
+      throwIfPastCoverage(err, title, date, ctx);
+      return null;
     }
 
     const found = parseCfrXml(xml).appendices[0];
@@ -383,42 +489,129 @@ export class EcfrService {
   }
 
   /**
-   * Full-text search the live eCFR (`/search/v1/results`).
+   * Full-text search the live eCFR (`/search/v1/results`), one page of distinct
+   * sections and appendices.
    *
    * The index holds every *version* of every section, so an undated query mixes
-   * superseded text with current text and returns the same section repeatedly.
-   * `date` selects the versions in effect on that day — callers pass either the
-   * caller's historical date or {@link EcfrService.currentDate} for "now", never
-   * nothing. Title scope goes through `hierarchy[title]`; `conditions[title]` is
-   * rejected outright by the endpoint.
+   * superseded text with current text. `date` selects the versions in effect on
+   * that day — callers pass either the caller's historical date or {@link
+   * EcfrService.currentDate} for "now", never nothing. Even dated, it answers
+   * one hit per version: every amendment and cross-reference change to a
+   * section is its own hit, all reporting `ends_on: null`, and no parameter
+   * restricts the answer to one hit per section (`meta.description` itself
+   * reads "Changes to sections matching …"). So the hits are read in relevance
+   * order, {@link SEARCH_CHUNK} at a time, and each section is kept once, where
+   * its best-scoring version ranked. A page is a slice of that collapsed list,
+   * which keeps paging coherent: a section repeated three pages apart upstream
+   * appears once, and no page shrinks because repeats were dropped from it.
    *
-   * `part` narrows further via `hierarchy[part]`, which eCFR accepts only
-   * alongside `hierarchy[title]` — without it the endpoint answers 400
-   * `{"title":["must be specified if specifying hierarchy"]}`. Callers are
-   * expected to have required a title already; the rejection is passed through
-   * verbatim if one slips past. Part matching is exact and case-sensitive
-   * ("1203a" hits, "1203A" and "058" silently match nothing).
+   * eCFR pages through its first {@link ECFR_SEARCH_WINDOW} hits and no further
+   * — a page reaching past that answers 400, and `total_count` stops at the
+   * ceiling. A page whose first row lies past what those hits hold is refused as
+   * `page_out_of_window`, before any request when the arithmetic alone rules it
+   * out and after the reachable hits are read otherwise.
+   *
+   * Title scope goes through `hierarchy[title]`; `conditions[title]` is rejected
+   * outright by the endpoint. `part` narrows further via `hierarchy[part]`, which
+   * eCFR accepts only alongside `hierarchy[title]` — without it the endpoint
+   * answers 400 `{"title":["must be specified if specifying hierarchy"]}`.
+   * Callers are expected to have required a title already; the rejection is
+   * passed through verbatim if one slips past. Part matching is exact and
+   * case-sensitive ("1203a" hits, "1203A" and "058" silently match nothing).
    */
   async search(
     query: string,
     title: number | undefined,
     part: string | undefined,
+    page: number,
     perPage: number,
     date: string,
     ctx: Context,
-  ): Promise<EcfrSearchResponse> {
+  ): Promise<EcfrSearchPage> {
+    const start = (page - 1) * perPage;
+    if (start >= ECFR_SEARCH_WINDOW) {
+      throw validationError(
+        `eCFR search pages through its first ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')} hits only, and page ${page} at per_page ${perPage} starts past them.`,
+        { reason: 'page_out_of_window', page, perPage, ...ctx.recoveryFor('page_out_of_window') },
+      );
+    }
+
+    // One row past the page is read too, so whether another page follows is
+    // known rather than guessed.
+    const wanted = start + perPage + 1;
+    const sections = new Map<string, EcfrSearchHit>();
+    let upstreamTotal = 0;
+    let read = 0;
+    let listEnd = false;
+    for (let chunk = 1; chunk <= ECFR_SEARCH_WINDOW / SEARCH_CHUNK; chunk++) {
+      const raw = await this.searchChunk(query, title, part, chunk, date, ctx);
+      const hits = raw.results ?? [];
+      upstreamTotal = raw.meta?.total_count ?? read + hits.length;
+      read += hits.length;
+      for (const hit of hits.map(normalizeSearchHit)) {
+        if (!sections.has(hit.cfrCite)) sections.set(hit.cfrCite, hit);
+      }
+      if (hits.length < SEARCH_CHUNK || read >= upstreamTotal) {
+        listEnd = true;
+        break;
+      }
+      if (sections.size >= wanted) break;
+    }
+
+    const windowCapped = upstreamTotal >= ECFR_SEARCH_WINDOW;
+    // Every hit there is has been read only when the list ended short of the
+    // ceiling; at the ceiling, eCFR simply stops serving.
+    const complete = listEnd && !windowCapped;
+    const distinct = [...sections.values()];
+    const windowEnd = !complete && distinct.length < wanted;
+
+    if (windowEnd && start >= distinct.length && distinct.length > 0) {
+      const lastPage = Math.ceil(distinct.length / perPage);
+      throw validationError(
+        `The ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')} hits eCFR serves for this search hold ${distinct.length} sections — page ${lastPage} is the last at per_page ${perPage}, and page ${page} lies past it.`,
+        {
+          reason: 'page_out_of_window',
+          page,
+          perPage,
+          lastPage,
+          recovery: {
+            hint: `Request page ${lastPage} or earlier, or narrow the search — a title or part filter, or a longer phrase — to bring its matches under ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')}.`,
+          },
+        },
+      );
+    }
+
+    return {
+      results: distinct.slice(start, start + perPage),
+      totalCount: complete ? distinct.length : upstreamTotal,
+      countBasis: complete ? 'sections' : 'section_versions',
+      hasMore: distinct.length > start + perPage,
+      windowCapped,
+      windowEnd,
+    };
+  }
+
+  /** Read one {@link SEARCH_CHUNK}-hit page of the raw live search. */
+  private async searchChunk(
+    query: string,
+    title: number | undefined,
+    part: string | undefined,
+    chunk: number,
+    date: string,
+    ctx: Context,
+  ): Promise<RawEcfrSearchResponse> {
     const search = new URLSearchParams({
       query,
-      per_page: String(perPage),
+      per_page: String(SEARCH_CHUNK),
+      page: String(chunk),
       date,
     });
     if (typeof title === 'number') search.set('hierarchy[title]', String(title));
     if (part) search.set('hierarchy[part]', part);
     const url = `${this.baseUrl}/search/v1/results?${search.toString()}`;
 
-    let raw: RawEcfrSearchResponse;
     try {
-      raw = await this.fetchJson<RawEcfrSearchResponse>(url, ctx, 'EcfrService.search', [400]);
+      return await this.fetchJson<RawEcfrSearchResponse>(url, ctx, 'EcfrService.search', [400]);
     } catch (err) {
       const rejection = err instanceof McpError ? searchRejection(err) : null;
       if (!rejection) throw err;
@@ -436,13 +629,16 @@ export class EcfrService {
           },
         );
       }
+      // The reads stay inside the window by construction, so this is eCFR
+      // moving its ceiling rather than a request this service meant to make.
+      if (/paginate through/i.test(rejection.detail)) {
+        throw validationError(rejection.detail, {
+          reason: 'page_out_of_window',
+          ...ctx.recoveryFor('page_out_of_window'),
+        });
+      }
       throw validationError(rejection.detail, { date, title: title ?? null, part: part ?? null });
     }
-
-    return {
-      totalCount: raw.meta?.total_count ?? (raw.results ?? []).length,
-      results: (raw.results ?? []).map((r) => normalizeSearchHit(r)),
-    };
   }
 
   private fetchJson<T>(
@@ -551,16 +747,70 @@ function buildCite(node: RawEcfrStructureNode, title: number): string | null {
   return CITABLE_TYPES.has(node.type) ? `${title} CFR ${node.identifier}` : null;
 }
 
-function normalizeNode(node: RawEcfrStructureNode, title: number): EcfrStructureNode {
+/** Where a node sits inside its part — the subpart and subject group around it. */
+interface Placement {
+  subjectGroup: string | null;
+  subpart: string | null;
+}
+
+const OUTSIDE_PART: Placement = { subpart: null, subjectGroup: null };
+
+/**
+ * Labels are plain text. eCFR writes inline markup into structure labels
+ * ("Enhanced Treatment for <em>Cryptosporidium</em>", "PM<sub>2.5</sub>"), but
+ * never into identifiers, which stay verbatim — an appendix identifier is the
+ * exact string the versioner's `appendix=` filter takes.
+ */
+function normalizeNode(
+  node: RawEcfrStructureNode,
+  title: number,
+  placement: Placement = OUTSIDE_PART,
+): EcfrStructureNode {
+  const label = plainText(node.label ?? '') || node.identifier || '';
+  const description = node.label_description ? plainText(node.label_description) : null;
   return {
     type: node.type ?? 'unknown',
     identifier: node.identifier ?? '',
-    label: node.label ?? node.identifier ?? '',
-    description: node.label_description ?? null,
+    label,
+    description,
     reserved: node.reserved ?? false,
     cfrCite: buildCite(node, title),
     appendix: node.type === 'appendix' ? (node.identifier ?? null) : null,
+    subpart: placement.subpart,
+    subjectGroup: placement.subjectGroup,
   };
+}
+
+/** Node types a part listing returns — the two levels a read call can open. */
+const LEAF_TYPES = new Set(['section', 'appendix']);
+
+/**
+ * Every section and appendix beneath a part, in document order. Within a part
+ * eCFR nests no deeper than subpart › subject group › leaf, and a subject group
+ * can also sit directly under the part, but the walk descends through any
+ * container rather than assuming that. A subject group has no identifier of its
+ * own — eCFR mints one (`generated_id`) — so it is named by its heading. `hed1`
+ * headings and childless containers (a reserved subpart) hold nothing to list.
+ */
+function partLeaves(
+  node: RawEcfrStructureNode,
+  title: number,
+  placement: Placement,
+): EcfrStructureNode[] {
+  return (node.children ?? []).flatMap((child) => {
+    if (child.type && LEAF_TYPES.has(child.type)) return [normalizeNode(child, title, placement)];
+    if (child.type === 'subpart') {
+      return partLeaves(child, title, {
+        subpart: plainText(child.label ?? '') || null,
+        subjectGroup: null,
+      });
+    }
+    if (child.type === 'subject_group') {
+      const heading = plainText(child.label_description || child.label || '') || null;
+      return partLeaves(child, title, { ...placement, subjectGroup: heading });
+    }
+    return partLeaves(child, title, placement);
+  });
 }
 
 /** Depth-first search for a part node by identifier within a structure tree. */
@@ -587,14 +837,39 @@ function labelForAncestor(node: RawEcfrStructureNode): string | null {
   return `${typeLabel} ${node.identifier}`;
 }
 
+/** The named entities eCFR writes into labels and headings. */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  apos: "'",
+  frasl: '⁄',
+  gt: '>',
+  lt: '<',
+  nbsp: ' ',
+  quot: '"',
+};
+
 /**
- * Strip HTML tags and collapse whitespace. The eCFR search API wraps matched
- * terms in `<strong>` in both `full_text_excerpt` and the `headings.*` values;
- * those tags must not leak into the agent-facing excerpt or heading.
+ * Reduce eCFR's inline markup to plain text: drop the tags, keep their text,
+ * decode entities, collapse whitespace. The search API wraps matched terms in
+ * `<strong>` in `full_text_excerpt` and the `headings.*` values; structure
+ * labels carry `<em>`, `<sub>`, `<sup>`, `<span>` and escaped `&lt;` / `&amp;`.
+ * Tags go before entities are decoded, so an escaped `&lt;10` survives as the
+ * text `<10` rather than being read as the start of a tag. An unknown named
+ * entity is left as written.
  */
-function stripSearchHtml(text: string): string {
+function plainText(text: string): string {
   return text
     .replace(/<[^>]+>/g, '')
+    .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (entity, body: string) => {
+      if (body[0] !== '#') return NAMED_ENTITIES[body.toLowerCase()] ?? entity;
+      const code =
+        body[1] === 'x' || body[1] === 'X'
+          ? Number.parseInt(body.slice(2), 16)
+          : Number(body.slice(1));
+      return Number.isInteger(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : entity;
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -602,7 +877,7 @@ function stripSearchHtml(text: string): string {
 /** First value that survives tag-stripping, or null when every candidate is empty. */
 function firstHeading(...candidates: (string | null | undefined)[]): string | null {
   for (const candidate of candidates) {
-    const cleaned = stripSearchHtml(candidate ?? '');
+    const cleaned = plainText(candidate ?? '');
     if (cleaned) return cleaned;
   }
   return null;
@@ -620,22 +895,22 @@ function normalizeSearchHit(r: RawEcfrSearchResult): EcfrSearchHit {
   const pathSegments: string[] = [];
   if (h.title) pathSegments.push(`Title ${h.title}`);
   for (const level of [labels.chapter, labels.subchapter]) {
-    const label = stripSearchHtml(level ?? '');
+    const label = plainText(level ?? '');
     if (label) pathSegments.push(label);
   }
   // The part is the one level whose number tells a reader nothing and whose name
   // decides whether a hit is worth opening, so it carries both. The other levels
   // stay bare: chapter and subchapter numbers are not caller-supplied anywhere,
   // and naming every level runs the path past 300 characters on a 50-hit page.
-  const partLabel = stripSearchHtml(labels.part ?? '');
+  const partLabel = plainText(labels.part ?? '');
   if (partLabel) {
-    const partName = stripSearchHtml(names.part ?? '');
+    const partName = plainText(names.part ?? '');
     pathSegments.push(partName ? `${partLabel} — ${partName}` : partLabel);
   }
   // An appendix hit carries no section, so the appendix label is what places it
   // inside the part.
   if (section) pathSegments.push(`§ ${section}`);
-  else if (appendix) pathSegments.push(stripSearchHtml(appendix));
+  else if (appendix) pathSegments.push(plainText(appendix));
 
   // `headings` names the node ("Ambient air quality monitoring requirements.");
   // `hierarchy_headings` only labels it ("§ 51.190"), which `cfrCite` already
@@ -657,17 +932,17 @@ function normalizeSearchHit(r: RawEcfrSearchResult): EcfrSearchHit {
   const cfrCite = section
     ? sectionCite(resolvedTitle, part, section)
     : appendix
-      ? appendixCite(stripSearchHtml(appendix), resolvedTitle)
+      ? appendixCite(plainText(appendix), resolvedTitle)
       : `${resolvedTitle} CFR ${part}`;
 
   return {
     title: resolvedTitle,
     part,
     section,
-    appendix: appendix ? stripSearchHtml(appendix) : null,
+    appendix: appendix ? plainText(appendix) : null,
     heading,
     hierarchyPath: pathSegments.join(' › '),
-    excerpt: stripSearchHtml(r.full_text_excerpt ?? ''),
+    excerpt: plainText(r.full_text_excerpt ?? ''),
     cfrCite,
   };
 }

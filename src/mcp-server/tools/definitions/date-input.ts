@@ -1,5 +1,6 @@
 /**
- * @fileoverview Input schema for the Federal Register date filters.
+ * @fileoverview Input schema for date inputs — the Federal Register date filters
+ * and the eCFR tools' point-in-time `date`.
  * @module mcp-server/tools/definitions/date-input
  */
 

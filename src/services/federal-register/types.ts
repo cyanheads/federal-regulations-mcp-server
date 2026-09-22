@@ -168,9 +168,3 @@ export interface OpenCommentsParams {
   query?: string | undefined;
   types: readonly OpenCommentType[];
 }
-
-/** Which slice of a document's plain-text body to return. */
-export interface FullTextWindow {
-  maxChars: number;
-  offset: number;
-}

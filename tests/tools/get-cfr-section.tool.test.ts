@@ -14,11 +14,18 @@ const getAppendixText = vi.hoisted(() => vi.fn());
 const getSectionText = vi.hoisted(() => vi.fn());
 const hierarchyPath = vi.hoisted(() => vi.fn());
 const latestIssueDate = vi.hoisted(() => vi.fn());
+const upToDateAsOf = vi.hoisted(() => vi.fn());
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorGetSection = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/ecfr/ecfr-service.js', () => ({
-  getEcfrService: () => ({ getAppendixText, getSectionText, hierarchyPath, latestIssueDate }),
+  getEcfrService: () => ({
+    getAppendixText,
+    getSectionText,
+    hierarchyPath,
+    latestIssueDate,
+    upToDateAsOf,
+  }),
   ECFR_EARLIEST_DATE: '2017-01-01',
   today: () => '2026-06-13',
 }));
@@ -37,6 +44,8 @@ describe('getCfrSectionTool', () => {
     mirrorReady.mockReset();
     mirrorGetSection.mockReset();
     hierarchyPath.mockResolvedValue('Title 40 › Part 50');
+    upToDateAsOf.mockReset();
+    upToDateAsOf.mockResolvedValue('2026-09-18');
   });
 
   it('reads a current section from the mirror (the headline goal, source: mirror)', async () => {
@@ -186,7 +195,9 @@ describe('getCfrSectionTool', () => {
       heading: 'Part 50',
       date: '2026-08-05',
       bodyText: '§ 50.1 Definitions.\nTerms.',
-      sections: [{ section: '50.1', heading: '§ 50.1 Definitions.', bodyText: 'Terms.' }],
+      sections: [
+        { section: '50.1', heading: '§ 50.1 Definitions.', cfrCite: '40 CFR 50.1', offset: 0 },
+      ],
       appendices: [
         { appendix: 'Appendix A-1 to Part 50', heading: 'Appendix A-1 to Part 50—Reference' },
       ],
@@ -304,6 +315,8 @@ describe('getCfrSectionTool', () => {
       date: '2025-06-01',
       source: 'mirror',
       bodyText: 'Section body.',
+      bodyTextOffset: 0,
+      bodyTextLength: 13,
     });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(text).toContain('40 CFR 50.1');
@@ -324,6 +337,8 @@ describe('getCfrSectionTool', () => {
       date: '2026-08-05',
       source: 'live',
       bodyText: '1.0 Applicability',
+      bodyTextOffset: 0,
+      bodyTextLength: 17,
     });
     const appendixText = appendixBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(appendixText).toContain('Appendix A-1 to Part 50, Title 40');
@@ -341,6 +356,8 @@ describe('getCfrSectionTool', () => {
       date: '2026-08-05',
       source: 'live',
       bodyText: 'Part body.',
+      bodyTextOffset: 0,
+      bodyTextLength: 10,
       appendices: [{ appendix: 'Appendix A-1 to Part 50', heading: 'Reference Method' }],
     });
     const partText = partBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('');

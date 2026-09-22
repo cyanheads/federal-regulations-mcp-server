@@ -26,6 +26,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { requestBudget } from '@/services/request-budget.js';
+import { type TextWindow, windowText } from '@/services/text-window.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
 import type {
   CfrReference,
@@ -34,7 +35,6 @@ import type {
   FrSearchParams,
   FrSearchResponse,
   FrSearchResult,
-  FullTextWindow,
   OpenCommentRule,
   OpenCommentsParams,
   OpenCommentsResponse,
@@ -152,24 +152,17 @@ function unwrapRawText(body: string): string {
     .trim();
 }
 
-/**
- * Cut one window out of the plain-text body. Offsets are string indices; the end
- * backs off one position rather than split a surrogate pair, so every window is
- * well-formed text and consecutive windows still meet with no gap or overlap.
- */
-function windowText(
+/** One window of the plain-text body, under the document's `fullText*` field names. */
+function fullTextWindow(
   text: string,
-  { offset, maxChars }: FullTextWindow,
+  window: TextWindow,
 ): Pick<FrDocumentDetail, 'fullText' | 'fullTextOffset' | 'fullTextLength' | 'fullTextNextOffset'> {
-  let end = Math.min(offset + maxChars, text.length);
-  if (end < text.length && end > offset + 1 && /[\uD800-\uDBFF]/.test(text.charAt(end - 1))) {
-    end -= 1;
-  }
+  const cut = windowText(text, window);
   return {
-    fullText: offset < text.length ? text.slice(offset, end) : '',
-    fullTextOffset: offset,
-    fullTextLength: text.length,
-    ...(end < text.length && { fullTextNextOffset: end }),
+    fullText: cut.text,
+    fullTextOffset: cut.offset,
+    fullTextLength: cut.length,
+    ...(cut.nextOffset !== undefined && { fullTextNextOffset: cut.nextOffset }),
   };
 }
 
@@ -230,7 +223,7 @@ export class FederalRegisterService {
   /** Fetch one document by FR number, optionally inlining one window of the plain-text body. */
   async getDocument(
     documentNumber: string,
-    fullText: FullTextWindow | undefined,
+    fullText: TextWindow | undefined,
     ctx: Context,
   ): Promise<FrDocumentDetail> {
     const search = new URLSearchParams();
@@ -274,7 +267,7 @@ export class FederalRegisterService {
         ctx,
         'FederalRegisterService.getFullText',
       );
-      Object.assign(detail, windowText(unwrapRawText(body), fullText));
+      Object.assign(detail, fullTextWindow(unwrapRawText(body), fullText));
     }
     return detail;
   }

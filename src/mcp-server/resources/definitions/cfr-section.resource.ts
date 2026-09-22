@@ -1,8 +1,11 @@
 /**
  * @fileoverview regulations://cfr/{title}/{part}/{section} — codified text of a
  * current CFR section, the same payload as regulations_get_cfr_section at the
- * current date, for clients that support injectable context. Mirror-backed with a
- * live eCFR fallback. Every datum is also reachable through the tool surface.
+ * current date and its default window, for clients that support injectable
+ * context. Mirror-backed with a live eCFR fallback, and the section resolves the
+ * way the tool resolves it ("61", "§ 141.61", "141.61(c)"). Every datum is also
+ * reachable through the tool surface, which is where a section longer than one
+ * window is paged: a resource read takes no offset.
  *
  * Sections only. An appendix is addressed by a free-form phrase ("Appendix A-1
  * to Part 50"), not by a path segment, so it stays on the tool surface rather
@@ -14,13 +17,14 @@ import { resource, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
-import { mirrorGetSection, mirrorReady } from '@/services/ecfr-mirror/ecfr-mirror.js';
+import { readSection } from '@/services/ecfr/read-section.js';
+import { DEFAULT_WINDOW_CHARS, windowText } from '@/services/text-window.js';
 
 export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{section}', {
   name: 'cfr-section',
   title: 'CFR section (current)',
   description:
-    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date — mirror-backed with a live eCFR fallback. Sections only; read an appendix through regulations_get_cfr_section with its `appendix` input.',
+    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date and its default 64,000-character window — mirror-backed with a live eCFR fallback. The section resolves as the tool resolves it ("61", "§ 141.61", "141.61(c)"); `section` names the identifier read and `notice` says how. When bodyTextNextOffset is present the section runs past the window — read on through regulations_get_cfr_section with that offset. Sections only; read an appendix through regulations_get_cfr_section with its `appendix` input.',
   mimeType: 'application/json',
   params: z.object({
     title: z
@@ -34,9 +38,9 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'No such title/part/section in the current CFR.',
+      when: 'No such title/part/section in the current CFR, under the section as given or any form it resolves to.',
       recovery:
-        'Verify the cite with regulations_browse_cfr (structure mode); the part or section may not exist or may be reserved.',
+        'Verify the cite with regulations_browse_cfr (structure mode) and pass the identifier it lists — a section is normally part.section ("141.61"). The part or section may not exist or may be reserved.',
     },
     {
       reason: 'upstream_unavailable',
@@ -49,64 +53,46 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
 
   async handler(params, ctx) {
     const titleNum = Number.parseInt(params.title, 10);
-    const service = getEcfrService();
-
-    if (await mirrorReady()) {
-      const hit = await mirrorGetSection(titleNum, params.part, params.section);
-      if (hit) {
-        const hierarchyPath = await service.hierarchyPath(
-          titleNum,
-          { part: params.part, section: params.section },
-          hit.date,
-          ctx,
-        );
-        return {
-          cfrCite: sectionCite(titleNum, params.part, params.section),
-          title: titleNum,
-          part: params.part,
-          section: params.section,
-          appendix: null,
-          heading: hit.heading,
-          hierarchyPath,
-          date: hit.date,
-          source: 'mirror' as const,
-          bodyText: hit.bodyText,
-        };
-      }
-    }
-
-    const date = await service.latestIssueDate(titleNum, ctx);
-    const result = await service.getSectionText(titleNum, params.part, params.section, date, ctx);
-    if (!result?.bodyText) {
+    const part = decodeSegment(params.part);
+    const section = decodeSegment(params.section);
+    const read = await readSection(titleNum, part, section, undefined, ctx);
+    if (!read.found) {
+      const tried = read.alsoTried.length > 0 ? ` (also tried ${read.alsoTried.join(', ')})` : '';
       throw ctx.fail(
         'not_found',
-        `No codified text found for ${sectionCite(titleNum, params.part, params.section)} as of ${date}.`,
+        `No codified text found for ${sectionCite(titleNum, part, read.section)} as of ${read.date}${tried}.`,
         {
           ...ctx.recoveryFor('not_found'),
           title: titleNum,
-          part: params.part,
-          section: params.section,
-          date,
+          part,
+          section,
+          date: read.date,
         },
       );
     }
-    const hierarchyPath = await service.hierarchyPath(
+    const resolved = read.result.section ?? section;
+    const hierarchyPath = await getEcfrService().hierarchyPath(
       titleNum,
-      { part: params.part, section: params.section },
-      result.date,
+      { part, section: resolved },
+      read.result.date,
       ctx,
     );
+    const cut = windowText(read.result.bodyText, { offset: 0, maxChars: DEFAULT_WINDOW_CHARS });
     return {
-      cfrCite: sectionCite(titleNum, params.part, params.section),
+      cfrCite: sectionCite(titleNum, part, resolved),
       title: titleNum,
-      part: params.part,
-      section: params.section,
+      part,
+      section: resolved,
       appendix: null,
-      heading: result.heading,
+      heading: read.result.heading,
       hierarchyPath,
-      date: result.date,
-      source: 'live' as const,
-      bodyText: result.bodyText,
+      date: read.result.date,
+      source: read.source,
+      bodyText: cut.text,
+      bodyTextOffset: cut.offset,
+      bodyTextLength: cut.length,
+      ...(cut.nextOffset !== undefined && { bodyTextNextOffset: cut.nextOffset }),
+      ...(read.rewrite && { notice: read.rewrite }),
     };
   },
 
@@ -120,3 +106,17 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
     ],
   }),
 });
+
+/**
+ * A URI path segment as the caller wrote it. RFC 6570 expansion percent-encodes
+ * a variable ("§ 141.61" travels as "%C2%A7%20141.61"), and the SDK's template
+ * match hands the segment back without decoding it. A malformed escape is kept
+ * as given, where it resolves to nothing and answers not_found.
+ */
+function decodeSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}

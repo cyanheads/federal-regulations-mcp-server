@@ -1,0 +1,3306 @@
+{
+  "identifier": "40",
+  "label": "Title 40—Protection of Environment",
+  "label_level": "Title 40",
+  "label_description": "Protection of Environment",
+  "reserved": false,
+  "type": "title",
+  "size": 160091139,
+  "children": [
+    {
+      "identifier": "I",
+      "label": " Chapter I—Environmental Protection Agency",
+      "label_level": " Chapter I",
+      "label_description": "Environmental Protection Agency",
+      "reserved": false,
+      "type": "chapter",
+      "size": 159652576,
+      "children": [
+        {
+          "identifier": "C",
+          "label": "Subchapter C—Air Programs",
+          "label_level": "Subchapter C",
+          "label_description": "Air Programs",
+          "reserved": false,
+          "type": "subchapter",
+          "size": 95638022,
+          "children": [
+            {
+              "identifier": "50",
+              "label": "Part 50—National Primary and Secondary Ambient Air Quality Standards",
+              "label_level": "Part 50",
+              "label_description": "National Primary and Secondary Ambient Air Quality Standards",
+              "reserved": false,
+              "type": "part",
+              "volumes": ["2"],
+              "size": 668995,
+              "children": [
+                {
+                  "identifier": "50.1",
+                  "label": "§ 50.1 Definitions.",
+                  "label_level": "§ 50.1",
+                  "label_description": "Definitions.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-07-14T01:00:00-0400",
+                  "size": 5280
+                },
+                {
+                  "identifier": "50.2",
+                  "label": "§ 50.2 Scope.",
+                  "label_level": "§ 50.2",
+                  "label_description": "Scope.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1597
+                },
+                {
+                  "identifier": "50.3",
+                  "label": "§ 50.3 Reference conditions.",
+                  "label_level": "§ 50.3",
+                  "label_description": "Reference conditions.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2024-12-20T20:02:29-0500",
+                  "size": 1061
+                },
+                {
+                  "identifier": "50.4",
+                  "label": "§ 50.4 National primary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "label_level": "§ 50.4",
+                  "label_description": "National primary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 3165
+                },
+                {
+                  "identifier": "50.5",
+                  "label": "§ 50.5 National secondary ambient air quality standard for sulfur oxides (sulfur dioxide).",
+                  "label_level": "§ 50.5",
+                  "label_description": "National secondary ambient air quality standard for sulfur oxides (sulfur dioxide).",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1598
+                },
+                {
+                  "identifier": "50.6",
+                  "label": "§ 50.6 National primary and secondary ambient air quality standards for PM<sub>10</sub>.",
+                  "label_level": "§ 50.6",
+                  "label_description": "National primary and secondary ambient air quality standards for PM<sub>10</sub>.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2019-10-01T08:00:16-0400",
+                  "size": 1357
+                },
+                {
+                  "identifier": "50.7",
+                  "label": "§ 50.7 National primary and secondary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "label_level": "§ 50.7",
+                  "label_description": "National primary and secondary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2019-10-01T08:00:16-0400",
+                  "size": 1492
+                },
+                {
+                  "identifier": "50.8",
+                  "label": "§ 50.8 National primary ambient air quality standards for carbon monoxide.",
+                  "label_level": "§ 50.8",
+                  "label_description": "National primary ambient air quality standards for carbon monoxide.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1576
+                },
+                {
+                  "identifier": "50.9",
+                  "label": "§ 50.9 National 1-hour primary and secondary ambient air quality standards for ozone.",
+                  "label_level": "§ 50.9",
+                  "label_description": "National 1-hour primary and secondary ambient air quality standards for ozone.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1484
+                },
+                {
+                  "identifier": "50.10",
+                  "label": "§ 50.10 National 8-hour primary and secondary ambient air quality standards for ozone.",
+                  "label_level": "§ 50.10",
+                  "label_description": "National 8-hour primary and secondary ambient air quality standards for ozone.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1758
+                },
+                {
+                  "identifier": "50.11",
+                  "label": "§ 50.11 National primary and secondary ambient air quality standards for oxides of nitrogen (with nitrogen dioxide as the indicator).",
+                  "label_level": "§ 50.11",
+                  "label_description": "National primary and secondary ambient air quality standards for oxides of nitrogen (with nitrogen dioxide as the indicator).",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 2241
+                },
+                {
+                  "identifier": "50.12",
+                  "label": "§ 50.12 National primary and secondary ambient air quality standards for lead.",
+                  "label_level": "§ 50.12",
+                  "label_description": "National primary and secondary ambient air quality standards for lead.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1570
+                },
+                {
+                  "identifier": "50.13",
+                  "label": "§ 50.13 National primary and secondary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "label_level": "§ 50.13",
+                  "label_description": "National primary and secondary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2019-10-01T08:00:16-0400",
+                  "size": 3190
+                },
+                {
+                  "identifier": "50.14",
+                  "label": "§ 50.14 Treatment of air quality monitoring data influenced by exceptional events.",
+                  "label_level": "§ 50.14",
+                  "label_description": "Treatment of air quality monitoring data influenced by exceptional events.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 36283
+                },
+                {
+                  "identifier": "50.15",
+                  "label": "§ 50.15 National primary and secondary ambient air quality standards for ozone.",
+                  "label_level": "§ 50.15",
+                  "label_description": "National primary and secondary ambient air quality standards for ozone.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1067
+                },
+                {
+                  "identifier": "50.16",
+                  "label": "§ 50.16 National primary and secondary ambient air quality standards for lead.",
+                  "label_level": "§ 50.16",
+                  "label_description": "National primary and secondary ambient air quality standards for lead.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1066
+                },
+                {
+                  "identifier": "50.17",
+                  "label": "§ 50.17 National primary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "label_level": "§ 50.17",
+                  "label_description": "National primary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1084
+                },
+                {
+                  "identifier": "50.18",
+                  "label": "§ 50.18 National primary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "label_level": "§ 50.18",
+                  "label_description": "National primary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2019-10-01T08:00:16-0400",
+                  "size": 1363
+                },
+                {
+                  "identifier": "50.19",
+                  "label": "§ 50.19 National primary and secondary ambient air quality standards for ozone.",
+                  "label_level": "§ 50.19",
+                  "label_description": "National primary and secondary ambient air quality standards for ozone.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 1712
+                },
+                {
+                  "identifier": "50.20",
+                  "label": "§ 50.20 National primary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "label_level": "§ 50.20",
+                  "label_description": "National primary ambient air quality standards for PM<sub>2.5</sub>.",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2024-05-07T19:20:25-0400",
+                  "size": 1361
+                },
+                {
+                  "identifier": "50.21",
+                  "label": "§ 50.21 National secondary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "label_level": "§ 50.21",
+                  "label_description": "National secondary ambient air quality standards for sulfur oxides (sulfur dioxide).",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["2"],
+                  "received_on": "2025-01-28T19:10:26-0500",
+                  "size": 923
+                },
+                {
+                  "identifier": "Appendix A-1 to Part 50",
+                  "label": "Appendix A-1 to Part 50—Reference Measurement Principle and Calibration Procedure for the Measurement of Sulfur Dioxide in the Atmosphere (Ultraviolet Fluorescence Method)\n",
+                  "label_level": "Appendix A-1 to Part 50",
+                  "label_description": "Reference Measurement Principle and Calibration Procedure for the Measurement of Sulfur Dioxide in the Atmosphere (Ultraviolet Fluorescence Method)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 12436
+                },
+                {
+                  "identifier": "Appendix A-2 to Part 50",
+                  "label": "Appendix A-2 to Part 50—Reference Method for the Determination of Sulfur Dioxide in the Atmosphere (Pararosaniline Method)\n",
+                  "label_level": "Appendix A-2 to Part 50",
+                  "label_description": "Reference Method for the Determination of Sulfur Dioxide in the Atmosphere (Pararosaniline Method)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 64773
+                },
+                {
+                  "identifier": "Appendix B to Part 50",
+                  "label": "Appendix B to Part 50—Reference Method for the Determination of Suspended Particulate Matter in the Atmosphere (High-Volume Method)\n",
+                  "label_level": "Appendix B to Part 50",
+                  "label_description": "Reference Method for the Determination of Suspended Particulate Matter in the Atmosphere (High-Volume Method)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 40549
+                },
+                {
+                  "identifier": "Appendix C to Part 50",
+                  "label": "Appendix C to Part 50—Measurement Principle and Calibration Procedure for the Measurement of Carbon Monoxide in the Atmosphere (Non-Dispersive Infrared Photometry)\n",
+                  "label_level": "Appendix C to Part 50",
+                  "label_description": "Measurement Principle and Calibration Procedure for the Measurement of Carbon Monoxide in the Atmosphere (Non-Dispersive Infrared Photometry)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 13681
+                },
+                {
+                  "identifier": "Appendix D to Part 50",
+                  "label": "Appendix D to Part 50—Reference Measurement Principle and Calibration Procedure for the Measurement of Ozone in the Atmosphere (Chemiluminescence Method)\n",
+                  "label_level": "Appendix D to Part 50",
+                  "label_description": "Reference Measurement Principle and Calibration Procedure for the Measurement of Ozone in the Atmosphere (Chemiluminescence Method)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2025-01-17T21:20:40-0500",
+                  "size": 26812
+                },
+                {
+                  "identifier": "Appendix E to Part 50",
+                  "label": "Appendix E to Part 50 [Reserved]\n",
+                  "label_level": "Appendix E to Part 50",
+                  "label_description": "Appendix E to Part 50 [Reserved]\n",
+                  "reserved": true,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 291
+                },
+                {
+                  "identifier": "Appendix F to Part 50",
+                  "label": "Appendix F to Part 50—Measurement Principle and Calibration Procedure for the Measurement of Nitrogen Dioxide in the Atmosphere (Gas Phase Chemiluminescence)\n",
+                  "label_level": "Appendix F to Part 50",
+                  "label_description": "Measurement Principle and Calibration Procedure for the Measurement of Nitrogen Dioxide in the Atmosphere (Gas Phase Chemiluminescence)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 47585
+                },
+                {
+                  "identifier": "Appendix G to Part 50",
+                  "label": "Appendix G to Part 50—Reference Method for the Determination of Lead in Total Suspended Particulate Matter\n",
+                  "label_level": "Appendix G to Part 50",
+                  "label_description": "Reference Method for the Determination of Lead in Total Suspended Particulate Matter\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 58436
+                },
+                {
+                  "identifier": "Appendix H to Part 50",
+                  "label": "Appendix H to Part 50—Interpretation of the 1-Hour Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "label_level": "Appendix H to Part 50",
+                  "label_description": "Interpretation of the 1-Hour Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 6429
+                },
+                {
+                  "identifier": "Appendix I to Part 50",
+                  "label": "Appendix I to Part 50—Interpretation of the 8-Hour Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "label_level": "Appendix I to Part 50",
+                  "label_description": "Interpretation of the 8-Hour Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 14411
+                },
+                {
+                  "identifier": "Appendix J to Part 50",
+                  "label": "Appendix J to Part 50—Reference Method for the Determination of Particulate Matter as PM<sub>10</sub> in the Atmosphere\n",
+                  "label_level": "Appendix J to Part 50",
+                  "label_description": "Reference Method for the Determination of Particulate Matter as PM<sub>10</sub> in the Atmosphere\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 27491
+                },
+                {
+                  "identifier": "Appendix K to Part 50",
+                  "label": "Appendix K to Part 50—Interpretation of the National Ambient Air Quality Standards for Particulate Matter\n",
+                  "label_level": "Appendix K to Part 50",
+                  "label_description": "Interpretation of the National Ambient Air Quality Standards for Particulate Matter\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-05-07T19:20:25-0400",
+                  "size": 19055
+                },
+                {
+                  "identifier": "Appendix L to Part 50",
+                  "label": "Appendix L to Part 50—Reference Method for the Determination of Fine Particulate Matter as PM<sub>2.5</sub> in the Atmosphere\n",
+                  "label_level": "Appendix L to Part 50",
+                  "label_description": "Reference Method for the Determination of Fine Particulate Matter as PM<sub>2.5</sub> in the Atmosphere\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 80652
+                },
+                {
+                  "identifier": "Appendix M to Part 50",
+                  "label": "Appendix M to Part 50 [Reserved]\n",
+                  "label_level": "Appendix M to Part 50",
+                  "label_description": "Appendix M to Part 50 [Reserved]\n",
+                  "reserved": true,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 291
+                },
+                {
+                  "identifier": "Appendix N to Part 50",
+                  "label": "Appendix N to Part 50—Interpretation of the National Ambient Air Quality Standards for PM<sub>2.5</sub>\n",
+                  "label_level": "Appendix N to Part 50",
+                  "label_description": "Interpretation of the National Ambient Air Quality Standards for PM<sub>2.5</sub>\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 31918
+                },
+                {
+                  "identifier": "Appendix O to Part 50",
+                  "label": "Appendix O to Part 50—Reference Method for the Determination of Coarse Particulate Matter as PM<sub>10-2.5</sub> in the Atmosphere\n",
+                  "label_level": "Appendix O to Part 50",
+                  "label_description": "Reference Method for the Determination of Coarse Particulate Matter as PM<sub>10-2.5</sub> in the Atmosphere\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 18253
+                },
+                {
+                  "identifier": "Appendix P to Part 50",
+                  "label": "Appendix P to Part 50—Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "label_level": "Appendix P to Part 50",
+                  "label_description": "Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 14929
+                },
+                {
+                  "identifier": "Appendix Q to Part 50",
+                  "label": "Appendix Q to Part 50—Reference Method for the Determination of Lead in Particulate Matter as PM<sub>10</sub> Collected From Ambient Air\n",
+                  "label_level": "Appendix Q to Part 50",
+                  "label_description": "Reference Method for the Determination of Lead in Particulate Matter as PM<sub>10</sub> Collected From Ambient Air\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 24466
+                },
+                {
+                  "identifier": "Appendix R to Part 50",
+                  "label": "Appendix R to Part 50—Interpretation of the National Ambient Air Quality Standards for Lead\n",
+                  "label_level": "Appendix R to Part 50",
+                  "label_description": "Interpretation of the National Ambient Air Quality Standards for Lead\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2023-03-30T22:20:25-0400",
+                  "size": 28125
+                },
+                {
+                  "identifier": "Appendix S to Part 50",
+                  "label": "Appendix S to Part 50—Interpretation of the Primary National Ambient Air Quality Standards for Oxides of Nitrogen (Nitrogen Dioxide)\n",
+                  "label_level": "Appendix S to Part 50",
+                  "label_description": "Interpretation of the Primary National Ambient Air Quality Standards for Oxides of Nitrogen (Nitrogen Dioxide)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 20374
+                },
+                {
+                  "identifier": "Appendix T to Part 50",
+                  "label": "Appendix T to Part 50—Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Oxides of Sulfur (Sulfur Dioxide)\n",
+                  "label_level": "Appendix T to Part 50",
+                  "label_description": "Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Oxides of Sulfur (Sulfur Dioxide)\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2025-01-28T19:10:26-0500",
+                  "size": 29540
+                },
+                {
+                  "identifier": "Appendix U to Part 50",
+                  "label": "Appendix U to Part 50—Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "label_level": "Appendix U to Part 50",
+                  "label_description": "Interpretation of the Primary and Secondary National Ambient Air Quality Standards for Ozone\n",
+                  "reserved": false,
+                  "type": "appendix",
+                  "volumes": ["2"],
+                  "received_on": "2024-06-04T19:10:31-0400",
+                  "size": 16270
+                }
+              ],
+              "descendant_range": "50.1 – 50.21"
+            }
+          ],
+          "descendant_range": "50 – 99"
+        },
+        {
+          "identifier": "D",
+          "label": "Subchapter D—Water Programs",
+          "label_level": "Subchapter D",
+          "label_description": "Water Programs",
+          "reserved": false,
+          "type": "subchapter",
+          "size": 9791782,
+          "children": [
+            {
+              "identifier": "141",
+              "label": "Part 141—National Primary Drinking Water Regulations",
+              "label_level": "Part 141",
+              "label_description": "National Primary Drinking Water Regulations",
+              "reserved": false,
+              "type": "part",
+              "volumes": ["25"],
+              "size": 1915266,
+              "children": [
+                {
+                  "identifier": "A",
+                  "label": "Subpart A—General",
+                  "label_level": "Subpart A",
+                  "label_description": "General",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 51230,
+                  "children": [
+                    {
+                      "identifier": "141.1",
+                      "label": "§ 141.1 Applicability.",
+                      "label_level": "§ 141.1",
+                      "label_description": "Applicability.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 463
+                    },
+                    {
+                      "identifier": "141.2",
+                      "label": "§ 141.2 Definitions.",
+                      "label_level": "§ 141.2",
+                      "label_description": "Definitions.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 42628
+                    },
+                    {
+                      "identifier": "141.3",
+                      "label": "§ 141.3 Coverage.",
+                      "label_level": "§ 141.3",
+                      "label_description": "Coverage.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 725
+                    },
+                    {
+                      "identifier": "141.4",
+                      "label": "§ 141.4 Variances and exemptions.",
+                      "label_level": "§ 141.4",
+                      "label_description": "Variances and exemptions.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1523
+                    },
+                    {
+                      "identifier": "141.5",
+                      "label": "§ 141.5 Siting requirements.",
+                      "label_level": "§ 141.5",
+                      "label_description": "Siting requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1056
+                    },
+                    {
+                      "identifier": "141.6",
+                      "label": "§ 141.6 Effective dates.",
+                      "label_level": "§ 141.6",
+                      "label_description": "Effective dates.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 4835
+                    }
+                  ],
+                  "descendant_range": "141.1 – 141.6"
+                },
+                {
+                  "identifier": "B",
+                  "label": "Subpart B—Maximum Contaminant Levels",
+                  "label_level": "Subpart B",
+                  "label_description": "Maximum Contaminant Levels",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 3109,
+                  "children": [
+                    {
+                      "identifier": "141.11",
+                      "label": "§ 141.11 Maximum contaminant levels for inorganic chemicals.",
+                      "label_level": "§ 141.11",
+                      "label_description": "Maximum contaminant levels for inorganic chemicals.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1697
+                    },
+                    {
+                      "identifier": "141.12",
+                      "label": "§ 141.12 [Reserved]",
+                      "label_level": "§ 141.12",
+                      "label_description": "§ 141.12 [Reserved]",
+                      "reserved": true,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 220
+                    },
+                    {
+                      "identifier": "141.13",
+                      "label": "§ 141.13 Maximum contaminant levels for turbidity.",
+                      "label_level": "§ 141.13",
+                      "label_description": "Maximum contaminant levels for turbidity.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2023-09-01T20:30:26-0400",
+                      "size": 1192
+                    }
+                  ],
+                  "descendant_range": "141.11 – 141.13"
+                },
+                {
+                  "identifier": "C",
+                  "label": "Subpart C—Monitoring and Analytical Requirements",
+                  "label_level": "Subpart C",
+                  "label_description": "Monitoring and Analytical Requirements",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 406023,
+                  "children": [
+                    {
+                      "identifier": "141.21",
+                      "label": "§ 141.21 Coliform sampling.",
+                      "label_level": "§ 141.21",
+                      "label_description": "Coliform sampling.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 40430
+                    },
+                    {
+                      "identifier": "141.22",
+                      "label": "§ 141.22 Turbidity sampling and analytical requirements.",
+                      "label_level": "§ 141.22",
+                      "label_description": "Turbidity sampling and analytical requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 3114
+                    },
+                    {
+                      "identifier": "141.23",
+                      "label": "§ 141.23 Inorganic chemical sampling and analytical requirements.",
+                      "label_level": "§ 141.23",
+                      "label_description": "Inorganic chemical sampling and analytical requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 92665
+                    },
+                    {
+                      "identifier": "141.24",
+                      "label": "§ 141.24 Organic chemicals, sampling and analytical requirements.",
+                      "label_level": "§ 141.24",
+                      "label_description": "Organic chemicals, sampling and analytical requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2026-02-05T17:50:10-0500",
+                      "size": 56484
+                    },
+                    {
+                      "identifier": "141.25",
+                      "label": "§ 141.25 Analytical methods for radioactivity.",
+                      "label_level": "§ 141.25",
+                      "label_description": "Analytical methods for radioactivity.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-03-10T19:11:09-0400",
+                      "size": 24980
+                    },
+                    {
+                      "identifier": "141.26",
+                      "label": "§ 141.26 Monitoring frequency and compliance requirements for radionuclides in community water systems.",
+                      "label_level": "§ 141.26",
+                      "label_description": "Monitoring frequency and compliance requirements for radionuclides in community water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 17052
+                    },
+                    {
+                      "identifier": "141.27",
+                      "label": "§ 141.27 Alternate analytical techniques.",
+                      "label_level": "§ 141.27",
+                      "label_description": "Alternate analytical techniques.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 762
+                    },
+                    {
+                      "identifier": "141.28",
+                      "label": "§ 141.28 Certified laboratories.",
+                      "label_level": "§ 141.28",
+                      "label_description": "Certified laboratories.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 1164
+                    },
+                    {
+                      "identifier": "141.29",
+                      "label": "§ 141.29 Monitoring of consecutive public water systems.",
+                      "label_level": "§ 141.29",
+                      "label_description": "Monitoring of consecutive public water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 713
+                    },
+                    {
+                      "identifier": "Appendix A to Subpart C of Part 141",
+                      "label": "Appendix A to Subpart C of Part 141—Alternative Testing Methods Approved for Analyses Under the Safe Drinking Water Act\n",
+                      "label_level": "Appendix A to Subpart C of Part 141",
+                      "label_description": "Alternative Testing Methods Approved for Analyses Under the Safe Drinking Water Act\n",
+                      "reserved": false,
+                      "type": "appendix",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 168659
+                    }
+                  ],
+                  "descendant_range": "141.21 – 141.29"
+                },
+                {
+                  "identifier": "D",
+                  "label": "Subpart D—Reporting and Recordkeeping",
+                  "label_level": "Subpart D",
+                  "label_description": "Reporting and Recordkeeping",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 44173,
+                  "children": [
+                    {
+                      "identifier": "141.31",
+                      "label": "§ 141.31 Reporting requirements.",
+                      "label_level": "§ 141.31",
+                      "label_description": "Reporting requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 2589
+                    },
+                    {
+                      "identifier": "141.32",
+                      "label": "§ 141.32 [Reserved]",
+                      "label_level": "§ 141.32",
+                      "label_description": "§ 141.32 [Reserved]",
+                      "reserved": true,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 220
+                    },
+                    {
+                      "identifier": "141.33",
+                      "label": "§ 141.33 Record maintenance.",
+                      "label_level": "§ 141.33",
+                      "label_description": "Record maintenance.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2576
+                    },
+                    {
+                      "identifier": "141.34",
+                      "label": "§ 141.34 [Reserved]",
+                      "label_level": "§ 141.34",
+                      "label_description": "§ 141.34 [Reserved]",
+                      "reserved": true,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 220
+                    },
+                    {
+                      "identifier": "141.35",
+                      "label": "§ 141.35 Reporting for unregulated contaminant monitoring results.",
+                      "label_level": "§ 141.35",
+                      "label_description": "Reporting for unregulated contaminant monitoring results.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 38568
+                    }
+                  ],
+                  "descendant_range": "141.31 – 141.35"
+                },
+                {
+                  "identifier": "E",
+                  "label": "Subpart E—Special Regulations, Including Monitoring",
+                  "label_level": "Subpart E",
+                  "label_description": "Special Regulations, Including Monitoring",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 52156,
+                  "children": [
+                    {
+                      "identifier": "141.40",
+                      "label": "§ 141.40 Monitoring requirements for unregulated contaminants.",
+                      "label_level": "§ 141.40",
+                      "label_description": "Monitoring requirements for unregulated contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 48252
+                    },
+                    {
+                      "identifier": "141.41",
+                      "label": "§ 141.41 Special monitoring for sodium.",
+                      "label_level": "§ 141.41",
+                      "label_description": "Special monitoring for sodium.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2628
+                    },
+                    {
+                      "identifier": "141.42",
+                      "label": "§ 141.42 Special monitoring for corrosivity characteristics.",
+                      "label_level": "§ 141.42",
+                      "label_description": "Special monitoring for corrosivity characteristics.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1276
+                    }
+                  ],
+                  "descendant_range": "141.40 – 141.42"
+                },
+                {
+                  "identifier": "F",
+                  "label": "Subpart F—Maximum Contaminant Level Goals and Maximum Residual Disinfectant Level Goals",
+                  "label_level": "Subpart F",
+                  "label_description": "Maximum Contaminant Level Goals and Maximum Residual Disinfectant Level Goals",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 14534,
+                  "children": [
+                    {
+                      "identifier": "141.50",
+                      "label": "§ 141.50 Maximum contaminant level goals for organic contaminants.",
+                      "label_level": "§ 141.50",
+                      "label_description": "Maximum contaminant level goals for organic contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 5757
+                    },
+                    {
+                      "identifier": "141.51",
+                      "label": "§ 141.51 Maximum contaminant level goals for inorganic contaminants.",
+                      "label_level": "§ 141.51",
+                      "label_description": "Maximum contaminant level goals for inorganic contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 2811
+                    },
+                    {
+                      "identifier": "141.52",
+                      "label": "§ 141.52 Maximum contaminant level goals for microbiological contaminants.",
+                      "label_level": "§ 141.52",
+                      "label_description": "Maximum contaminant level goals for microbiological contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 1794
+                    },
+                    {
+                      "identifier": "141.53",
+                      "label": "§ 141.53 Maximum contaminant level goals for disinfection byproducts.",
+                      "label_level": "§ 141.53",
+                      "label_description": "Maximum contaminant level goals for disinfection byproducts.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 1768
+                    },
+                    {
+                      "identifier": "141.54",
+                      "label": "§ 141.54 Maximum residual disinfectant level goals for disinfectants.",
+                      "label_level": "§ 141.54",
+                      "label_description": "Maximum residual disinfectant level goals for disinfectants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 1133
+                    },
+                    {
+                      "identifier": "141.55",
+                      "label": "§ 141.55 Maximum contaminant level goals for radionuclides.",
+                      "label_level": "§ 141.55",
+                      "label_description": "Maximum contaminant level goals for radionuclides.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 1271
+                    }
+                  ],
+                  "descendant_range": "141.50 – 141.55"
+                },
+                {
+                  "identifier": "G",
+                  "label": "Subpart G—National Primary Drinking Water Regulations: Maximum Contaminant Levels and Maximum Residual Disinfectant Levels",
+                  "label_level": "Subpart G",
+                  "label_description": "National Primary Drinking Water Regulations: Maximum Contaminant Levels and Maximum Residual Disinfectant Levels",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 72004,
+                  "children": [
+                    {
+                      "identifier": "141.60",
+                      "label": "§ 141.60 Effective dates.",
+                      "label_level": "§ 141.60",
+                      "label_description": "Effective dates.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 1447
+                    },
+                    {
+                      "identifier": "141.61",
+                      "label": "§ 141.61 Maximum contaminant levels for organic contaminants.",
+                      "label_level": "§ 141.61",
+                      "label_description": "Maximum contaminant levels for organic contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 31549
+                    },
+                    {
+                      "identifier": "141.62",
+                      "label": "§ 141.62 Maximum contaminant levels for inorganic contaminants.",
+                      "label_level": "§ 141.62",
+                      "label_description": "Maximum contaminant levels for inorganic contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 10227
+                    },
+                    {
+                      "identifier": "141.63",
+                      "label": "§ 141.63 Maximum contaminant levels (MCLs) for microbiological contaminants.",
+                      "label_level": "§ 141.63",
+                      "label_description": "Maximum contaminant levels (MCLs) for microbiological contaminants.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 4572
+                    },
+                    {
+                      "identifier": "141.64",
+                      "label": "§ 141.64 Maximum contaminant levels for disinfection byproducts.",
+                      "label_level": "§ 141.64",
+                      "label_description": "Maximum contaminant levels for disinfection byproducts.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 7952
+                    },
+                    {
+                      "identifier": "141.65",
+                      "label": "§ 141.65 Maximum residual disinfectant levels.",
+                      "label_level": "§ 141.65",
+                      "label_description": "Maximum residual disinfectant levels.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 2490
+                    },
+                    {
+                      "identifier": "141.66",
+                      "label": "§ 141.66 Maximum contaminant levels for radionuclides.",
+                      "label_level": "§ 141.66",
+                      "label_description": "Maximum contaminant levels for radionuclides.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 13767
+                    }
+                  ],
+                  "descendant_range": "141.60 – 141.66"
+                },
+                {
+                  "identifier": "H",
+                  "label": "Subpart H—Filtration and Disinfection",
+                  "label_level": "Subpart H",
+                  "label_description": "Filtration and Disinfection",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 121115,
+                  "children": [
+                    {
+                      "identifier": "141.70",
+                      "label": "§ 141.70 General requirements.",
+                      "label_level": "§ 141.70",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2999
+                    },
+                    {
+                      "identifier": "141.71",
+                      "label": "§ 141.71 Criteria for avoiding filtration.",
+                      "label_level": "§ 141.71",
+                      "label_description": "Criteria for avoiding filtration.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 9749
+                    },
+                    {
+                      "identifier": "141.72",
+                      "label": "§ 141.72 Disinfection.",
+                      "label_level": "§ 141.72",
+                      "label_description": "Disinfection.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 8911
+                    },
+                    {
+                      "identifier": "141.73",
+                      "label": "§ 141.73 Filtration.",
+                      "label_level": "§ 141.73",
+                      "label_description": "Filtration.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 4563
+                    },
+                    {
+                      "identifier": "141.74",
+                      "label": "§ 141.74 Analytical and monitoring requirements.",
+                      "label_level": "§ 141.74",
+                      "label_description": "Analytical and monitoring requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 78073
+                    },
+                    {
+                      "identifier": "141.75",
+                      "label": "§ 141.75 Reporting and recordkeeping requirements.",
+                      "label_level": "§ 141.75",
+                      "label_description": "Reporting and recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 13778
+                    },
+                    {
+                      "identifier": "141.76",
+                      "label": "§ 141.76 Recycle provisions.",
+                      "label_level": "§ 141.76",
+                      "label_description": "Recycle provisions.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-09-16T19:10:31-0400",
+                      "size": 3042
+                    }
+                  ],
+                  "descendant_range": "141.70 – 141.76"
+                },
+                {
+                  "identifier": "I",
+                  "label": "Subpart I—Control of Lead and Copper",
+                  "label_level": "Subpart I",
+                  "label_description": "Control of Lead and Copper",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 297543,
+                  "children": [
+                    {
+                      "identifier": "141.80",
+                      "label": "§ 141.80 General requirements and action level.",
+                      "label_level": "§ 141.80",
+                      "label_description": "General requirements and action level.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 10829
+                    },
+                    {
+                      "identifier": "141.81",
+                      "label": "§ 141.81 Applicability of corrosion control treatment steps to small, medium, and large water systems.",
+                      "label_level": "§ 141.81",
+                      "label_description": "Applicability of corrosion control treatment steps to small, medium, and large water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 29247
+                    },
+                    {
+                      "identifier": "141.82",
+                      "label": "§ 141.82 Description of corrosion control treatment requirements.",
+                      "label_level": "§ 141.82",
+                      "label_description": "Description of corrosion control treatment requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 22866
+                    },
+                    {
+                      "identifier": "141.83",
+                      "label": "§ 141.83 Source water treatment requirements.",
+                      "label_level": "§ 141.83",
+                      "label_description": "Source water treatment requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 6612
+                    },
+                    {
+                      "identifier": "141.84",
+                      "label": "§ 141.84 Service line inventory and replacement requirements.",
+                      "label_level": "§ 141.84",
+                      "label_description": "Service line inventory and replacement requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 58262
+                    },
+                    {
+                      "identifier": "141.85",
+                      "label": "§ 141.85 Public education and supplemental monitoring and mitigation requirements.",
+                      "label_level": "§ 141.85",
+                      "label_description": "Public education and supplemental monitoring and mitigation requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 41142
+                    },
+                    {
+                      "identifier": "141.86",
+                      "label": "§ 141.86 Monitoring requirements for lead and copper in tap water.",
+                      "label_level": "§ 141.86",
+                      "label_description": "Monitoring requirements for lead and copper in tap water.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 38864
+                    },
+                    {
+                      "identifier": "141.87",
+                      "label": "§ 141.87 Monitoring requirements for water quality parameters.",
+                      "label_level": "§ 141.87",
+                      "label_description": "Monitoring requirements for water quality parameters.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 17685
+                    },
+                    {
+                      "identifier": "141.88",
+                      "label": "§ 141.88 Monitoring requirements for lead and copper in source water.",
+                      "label_level": "§ 141.88",
+                      "label_description": "Monitoring requirements for lead and copper in source water.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2021-12-20T13:50:13-0500",
+                      "size": 9039
+                    },
+                    {
+                      "identifier": "141.89",
+                      "label": "§ 141.89 Analytical methods.",
+                      "label_level": "§ 141.89",
+                      "label_description": "Analytical methods.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2021-12-20T13:50:13-0500",
+                      "size": 2750
+                    },
+                    {
+                      "identifier": "141.90",
+                      "label": "§ 141.90 Reporting requirements.",
+                      "label_level": "§ 141.90",
+                      "label_description": "Reporting requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 37572
+                    },
+                    {
+                      "identifier": "141.91",
+                      "label": "§ 141.91 Recordkeeping requirements.",
+                      "label_level": "§ 141.91",
+                      "label_description": "Recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2021-12-20T13:50:13-0500",
+                      "size": 694
+                    },
+                    {
+                      "identifier": "141.92",
+                      "label": "§ 141.92 Monitoring for lead in schools and child care facilities.",
+                      "label_level": "§ 141.92",
+                      "label_description": "Monitoring for lead in schools and child care facilities.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 13880
+                    },
+                    {
+                      "identifier": "141.93",
+                      "label": "§ 141.93 Small water system compliance flexibility.",
+                      "label_level": "§ 141.93",
+                      "label_description": "Small water system compliance flexibility.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 8101
+                    }
+                  ],
+                  "descendant_range": "141.80 – 141.93"
+                },
+                {
+                  "identifier": "J",
+                  "label": "Subpart J—Use of Non-Centralized Treatment Devices",
+                  "label_level": "Subpart J",
+                  "label_description": "Use of Non-Centralized Treatment Devices",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 2898,
+                  "children": [
+                    {
+                      "identifier": "141.100",
+                      "label": "§ 141.100 Criteria and procedures for public water systems using point-of-entry devices.",
+                      "label_level": "§ 141.100",
+                      "label_description": "Criteria and procedures for public water systems using point-of-entry devices.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2435
+                    },
+                    {
+                      "identifier": "141.101",
+                      "label": "§ 141.101 Use of bottled water.",
+                      "label_level": "§ 141.101",
+                      "label_description": "Use of bottled water.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 463
+                    }
+                  ],
+                  "descendant_range": "141.100 – 141.101"
+                },
+                {
+                  "identifier": "K",
+                  "label": "Subpart K—Treatment Techniques",
+                  "label_level": "Subpart K",
+                  "label_description": "Treatment Techniques",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 1285,
+                  "children": [
+                    {
+                      "identifier": "141.110",
+                      "label": "§ 141.110 General requirements.",
+                      "label_level": "§ 141.110",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 456
+                    },
+                    {
+                      "identifier": "141.111",
+                      "label": "§ 141.111 Treatment techniques for acrylamide and epichlorohydrin.",
+                      "label_level": "§ 141.111",
+                      "label_description": "Treatment techniques for acrylamide and epichlorohydrin.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 829
+                    }
+                  ],
+                  "descendant_range": "141.110 – 141.111"
+                },
+                {
+                  "identifier": "L",
+                  "label": "Subpart L—Disinfectant Residuals, Disinfection Byproducts, and Disinfection Byproduct Precursors",
+                  "label_level": "Subpart L",
+                  "label_description": "Disinfectant Residuals, Disinfection Byproducts, and Disinfection Byproduct Precursors",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 90549,
+                  "children": [
+                    {
+                      "identifier": "141.130",
+                      "label": "§ 141.130 General requirements.",
+                      "label_level": "§ 141.130",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2023-03-30T22:20:25-0400",
+                      "size": 3278
+                    },
+                    {
+                      "identifier": "141.131",
+                      "label": "§ 141.131 Analytical requirements.",
+                      "label_level": "§ 141.131",
+                      "label_description": "Analytical requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 32088
+                    },
+                    {
+                      "identifier": "141.132",
+                      "label": "§ 141.132 Monitoring requirements.",
+                      "label_level": "§ 141.132",
+                      "label_description": "Monitoring requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 21720
+                    },
+                    {
+                      "identifier": "141.133",
+                      "label": "§ 141.133 Compliance requirements.",
+                      "label_level": "§ 141.133",
+                      "label_description": "Compliance requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2023-03-30T22:20:25-0400",
+                      "size": 8593
+                    },
+                    {
+                      "identifier": "141.134",
+                      "label": "§ 141.134 Reporting and recordkeeping requirements.",
+                      "label_level": "§ 141.134",
+                      "label_description": "Reporting and recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 9848
+                    },
+                    {
+                      "identifier": "141.135",
+                      "label": "§ 141.135 Treatment technique for control of disinfection byproduct (DBP) precursors.",
+                      "label_level": "§ 141.135",
+                      "label_description": "Treatment technique for control of disinfection byproduct (DBP) precursors.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-09-16T19:10:31-0400",
+                      "size": 15022
+                    }
+                  ],
+                  "descendant_range": "141.130 – 141.135"
+                },
+                {
+                  "identifier": "M-N",
+                  "label": "Subparts M-N [Reserved]",
+                  "label_level": "Subparts M-N",
+                  "label_description": "Subparts M-N [Reserved]",
+                  "reserved": true,
+                  "type": "subpart",
+                  "volumes": [],
+                  "size": 0,
+                  "children": []
+                },
+                {
+                  "identifier": "O",
+                  "label": "Subpart O—Consumer Confidence Reports",
+                  "label_level": "Subpart O",
+                  "label_description": "Consumer Confidence Reports",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 115000,
+                  "children": [
+                    {
+                      "identifier": "141.151",
+                      "label": "§ 141.151 Purpose and applicability of this subpart.",
+                      "label_level": "§ 141.151",
+                      "label_description": "Purpose and applicability of this subpart.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 2984
+                    },
+                    {
+                      "identifier": "141.152",
+                      "label": "§ 141.152 Compliance dates.",
+                      "label_level": "§ 141.152",
+                      "label_description": "Compliance dates.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 2017
+                    },
+                    {
+                      "identifier": "141.153",
+                      "label": "§ 141.153 Content of the reports.",
+                      "label_level": "§ 141.153",
+                      "label_description": "Content of the reports.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 31739
+                    },
+                    {
+                      "identifier": "141.154",
+                      "label": "§ 141.154 Required additional health information.",
+                      "label_level": "§ 141.154",
+                      "label_description": "Required additional health information.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 5551
+                    },
+                    {
+                      "identifier": "141.155",
+                      "label": "§ 141.155 Report delivery, reporting, and recordkeeping.",
+                      "label_level": "§ 141.155",
+                      "label_description": "Report delivery, reporting, and recordkeeping.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-03-10T19:11:09-0400",
+                      "size": 8657
+                    },
+                    {
+                      "identifier": "141.156",
+                      "label": "§ 141.156 Summary of report contents.",
+                      "label_level": "§ 141.156",
+                      "label_description": "Summary of report contents.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-25T20:20:40-0400",
+                      "size": 2696
+                    },
+                    {
+                      "identifier": "Appendix A to Subpart O of Part 141",
+                      "label": "Appendix A to Subpart O of Part 141—Regulated Contaminants\n",
+                      "label_level": "Appendix A to Subpart O of Part 141",
+                      "label_description": "Regulated Contaminants\n",
+                      "reserved": false,
+                      "type": "appendix",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 61356
+                    }
+                  ],
+                  "descendant_range": "141.151 – 141.156"
+                },
+                {
+                  "identifier": "P",
+                  "label": "Subpart P—Enhanced Filtration and Disinfection—Systems Serving 10,000 or More People",
+                  "label_level": "Subpart P",
+                  "label_description": "Enhanced Filtration and Disinfection—Systems Serving 10,000 or More People",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 28011,
+                  "children": [
+                    {
+                      "identifier": "141.170",
+                      "label": "§ 141.170 General requirements.",
+                      "label_level": "§ 141.170",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 3084
+                    },
+                    {
+                      "identifier": "141.171",
+                      "label": "§ 141.171 Criteria for avoiding filtration.",
+                      "label_level": "§ 141.171",
+                      "label_description": "Criteria for avoiding filtration.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1636
+                    },
+                    {
+                      "identifier": "141.172",
+                      "label": "§ 141.172 Disinfection profiling and benchmarking.",
+                      "label_level": "§ 141.172",
+                      "label_description": "Disinfection profiling and benchmarking.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 13523
+                    },
+                    {
+                      "identifier": "141.173",
+                      "label": "§ 141.173 Filtration.",
+                      "label_level": "§ 141.173",
+                      "label_description": "Filtration.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2591
+                    },
+                    {
+                      "identifier": "141.174",
+                      "label": "§ 141.174 Filtration sampling requirements.",
+                      "label_level": "§ 141.174",
+                      "label_description": "Filtration sampling requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1039
+                    },
+                    {
+                      "identifier": "141.175",
+                      "label": "§ 141.175 Reporting and recordkeeping requirements.",
+                      "label_level": "§ 141.175",
+                      "label_description": "Reporting and recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 6138
+                    }
+                  ],
+                  "descendant_range": "141.170 – 141.175"
+                },
+                {
+                  "identifier": "Q",
+                  "label": "Subpart Q—Public Notification of Drinking Water Violations",
+                  "label_level": "Subpart Q",
+                  "label_description": "Public Notification of Drinking Water Violations",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 147760,
+                  "children": [
+                    {
+                      "identifier": "141.201",
+                      "label": "§ 141.201 General public notification requirements.",
+                      "label_level": "§ 141.201",
+                      "label_description": "General public notification requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 6769
+                    },
+                    {
+                      "identifier": "141.202",
+                      "label": "§ 141.202 <em>Tier 1 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "label_level": "§ 141.202",
+                      "label_description": "<em>Tier 1 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-12-31T20:00:42-0500",
+                      "size": 6086
+                    },
+                    {
+                      "identifier": "141.203",
+                      "label": "§ 141.203 <em>Tier 2 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "label_level": "§ 141.203",
+                      "label_description": "<em>Tier 2 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 7165
+                    },
+                    {
+                      "identifier": "141.204",
+                      "label": "§ 141.204 <em>Tier 3 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "label_level": "§ 141.204",
+                      "label_description": "<em>Tier 3 Public Notice</em>—Form, manner, and frequency of notice.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 6026
+                    },
+                    {
+                      "identifier": "141.205",
+                      "label": "§ 141.205 Content of the public notice.",
+                      "label_level": "§ 141.205",
+                      "label_description": "Content of the public notice.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 5980
+                    },
+                    {
+                      "identifier": "141.206",
+                      "label": "§ 141.206 Notice to new billing units or new customers.",
+                      "label_level": "§ 141.206",
+                      "label_description": "Notice to new billing units or new customers.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 991
+                    },
+                    {
+                      "identifier": "141.207",
+                      "label": "§ 141.207 Special notice of the availability of unregulated contaminant monitoring results.",
+                      "label_level": "§ 141.207",
+                      "label_description": "Special notice of the availability of unregulated contaminant monitoring results.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 984
+                    },
+                    {
+                      "identifier": "141.208",
+                      "label": "§ 141.208 Special notice for exceedance of the SMCL for fluoride.",
+                      "label_level": "§ 141.208",
+                      "label_description": "Special notice for exceedance of the SMCL for fluoride.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 3670
+                    },
+                    {
+                      "identifier": "141.209",
+                      "label": "§ 141.209 Special notice for nitrate exceedances above MCL by non-community water systems (NCWS), where granted permission by the primacy agency under § 141.11(d).",
+                      "label_level": "§ 141.209",
+                      "label_description": "Special notice for nitrate exceedances above MCL by non-community water systems (NCWS), where granted permission by the primacy agency under § 141.11(d).",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1115
+                    },
+                    {
+                      "identifier": "141.210",
+                      "label": "§ 141.210 Notice by primacy agency on behalf of the public water system.",
+                      "label_level": "§ 141.210",
+                      "label_description": "Notice by primacy agency on behalf of the public water system.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 813
+                    },
+                    {
+                      "identifier": "141.211",
+                      "label": "§ 141.211 Special notice for repeated failure to conduct monitoring of the source water for <em>Cryptosporidium</em> and for failure to determine bin classification or mean <em>Cryptosporidium</em> level.",
+                      "label_level": "§ 141.211",
+                      "label_description": "Special notice for repeated failure to conduct monitoring of the source water for <em>Cryptosporidium</em> and for failure to determine bin classification or mean <em>Cryptosporidium</em> level.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 4169
+                    },
+                    {
+                      "identifier": "Appendix A to Subpart Q of Part 141",
+                      "label": "Appendix A to Subpart Q of Part 141—NPDWR Violations and Other Situations Requiring Public Notice\n<sup>1</sup>\n",
+                      "label_level": "Appendix A to Subpart Q of Part 141",
+                      "label_description": "NPDWR Violations and Other Situations Requiring Public Notice\n<sup>1</sup>\n",
+                      "reserved": false,
+                      "type": "appendix",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 46569
+                    },
+                    {
+                      "identifier": "Appendix B to Subpart Q of Part 141",
+                      "label": "Appendix B to Subpart Q of Part 141—Standard Health Effects Language for Public Notification\n",
+                      "label_level": "Appendix B to Subpart Q of Part 141",
+                      "label_description": "Standard Health Effects Language for Public Notification\n",
+                      "reserved": false,
+                      "type": "appendix",
+                      "volumes": ["25"],
+                      "received_on": "2026-01-06T18:20:07-0500",
+                      "size": 55461
+                    },
+                    {
+                      "identifier": "Appendix C to Subpart Q of Part 141",
+                      "label": "Appendix C to Subpart Q of Part 141—List of Acronyms Used in Public Notification Regulation\n",
+                      "label_level": "Appendix C to Subpart Q of Part 141",
+                      "label_description": "List of Acronyms Used in Public Notification Regulation\n",
+                      "reserved": false,
+                      "type": "appendix",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 1962
+                    }
+                  ],
+                  "descendant_range": "141.201 – 141.211"
+                },
+                {
+                  "identifier": "R",
+                  "label": "Subpart R [Reserved]",
+                  "label_level": "Subpart R",
+                  "label_description": "Subpart R [Reserved]",
+                  "reserved": true,
+                  "type": "subpart",
+                  "volumes": [],
+                  "size": 0,
+                  "children": []
+                },
+                {
+                  "identifier": "S",
+                  "label": "Subpart S—Ground Water Rule",
+                  "label_level": "Subpart S",
+                  "label_description": "Ground Water Rule",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 43851,
+                  "children": [
+                    {
+                      "identifier": "141.400",
+                      "label": "§ 141.400 General requirements and applicability.",
+                      "label_level": "§ 141.400",
+                      "label_description": "General requirements and applicability.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 3244
+                    },
+                    {
+                      "identifier": "141.401",
+                      "label": "§ 141.401 Sanitary surveys for ground water systems.",
+                      "label_level": "§ 141.401",
+                      "label_description": "Sanitary surveys for ground water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2021-12-20T13:50:13-0500",
+                      "size": 1563
+                    },
+                    {
+                      "identifier": "141.402",
+                      "label": "§ 141.402 Ground water source microbial monitoring and analytical methods.",
+                      "label_level": "§ 141.402",
+                      "label_description": "Ground water source microbial monitoring and analytical methods.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 19435
+                    },
+                    {
+                      "identifier": "141.403",
+                      "label": "§ 141.403 Treatment technique requirements for ground water systems.",
+                      "label_level": "§ 141.403",
+                      "label_description": "Treatment technique requirements for ground water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2023-03-30T22:20:25-0400",
+                      "size": 13903
+                    },
+                    {
+                      "identifier": "141.404",
+                      "label": "§ 141.404 Treatment technique violations for ground water systems.",
+                      "label_level": "§ 141.404",
+                      "label_description": "Treatment technique violations for ground water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2140
+                    },
+                    {
+                      "identifier": "141.405",
+                      "label": "§ 141.405 Reporting and recordkeeping for ground water systems.",
+                      "label_level": "§ 141.405",
+                      "label_description": "Reporting and recordkeeping for ground water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 3566
+                    }
+                  ],
+                  "descendant_range": "141.400 – 141.405"
+                },
+                {
+                  "identifier": "T",
+                  "label": "Subpart T—Enhanced Filtration and Disinfection—Systems Serving Fewer Than 10,000 People",
+                  "label_level": "Subpart T",
+                  "label_description": "Enhanced Filtration and Disinfection—Systems Serving Fewer Than 10,000 People",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 37599,
+                  "children": [
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR5f9ffde07f6bb61",
+                      "label": "General Requirements",
+                      "label_level": "General Requirements",
+                      "label_description": "General Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 3840,
+                      "children": [
+                        {
+                          "identifier": "141.500",
+                          "label": "§ 141.500 General requirements.",
+                          "label_level": "§ 141.500",
+                          "label_description": "General requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1366
+                        },
+                        {
+                          "identifier": "141.501",
+                          "label": "§ 141.501 Who is subject to the requirements of subpart T?",
+                          "label_level": "§ 141.501",
+                          "label_description": "Who is subject to the requirements of subpart T?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 461
+                        },
+                        {
+                          "identifier": "141.502",
+                          "label": "§ 141.502 When must my system comply with these requirements?",
+                          "label_level": "§ 141.502",
+                          "label_description": "When must my system comply with these requirements?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 437
+                        },
+                        {
+                          "identifier": "141.503",
+                          "label": "§ 141.503 What does subpart T require?",
+                          "label_level": "§ 141.503",
+                          "label_description": "What does subpart T require?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1576
+                        }
+                      ],
+                      "descendant_range": "141.500 – 141.503"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRe5a0df466804869",
+                      "label": "Finished Water Reservoirs",
+                      "label_level": "Finished Water Reservoirs",
+                      "label_description": "Finished Water Reservoirs",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 898,
+                      "children": [
+                        {
+                          "identifier": "141.510",
+                          "label": "§ 141.510 Is my system subject to the new finished water reservoir requirements?",
+                          "label_level": "§ 141.510",
+                          "label_description": "Is my system subject to the new finished water reservoir requirements?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 376
+                        },
+                        {
+                          "identifier": "141.511",
+                          "label": "§ 141.511 What is required of new finished water reservoirs?",
+                          "label_level": "§ 141.511",
+                          "label_description": "What is required of new finished water reservoirs?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 522
+                        }
+                      ],
+                      "descendant_range": "141.510 – 141.511"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR47209ba392fa6f9",
+                      "label": "Additional Watershed Control Requirements for Unfiltered Systems",
+                      "label_level": "Additional Watershed Control Requirements for Unfiltered Systems",
+                      "label_description": "Additional Watershed Control Requirements for Unfiltered Systems",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 2186,
+                      "children": [
+                        {
+                          "identifier": "141.520",
+                          "label": "§ 141.520 Is my system subject to the updated watershed control requirements?",
+                          "label_level": "§ 141.520",
+                          "label_description": "Is my system subject to the updated watershed control requirements?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 547
+                        },
+                        {
+                          "identifier": "141.521",
+                          "label": "§ 141.521 What updated watershed control requirements must my unfiltered system implement to continue to avoid filtration?",
+                          "label_level": "§ 141.521",
+                          "label_description": "What updated watershed control requirements must my unfiltered system implement to continue to avoid filtration?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 788
+                        },
+                        {
+                          "identifier": "141.522",
+                          "label": "§ 141.522 How does the State determine whether my system's watershed control requirements are adequate?",
+                          "label_level": "§ 141.522",
+                          "label_description": "How does the State determine whether my system's watershed control requirements are adequate?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 851
+                        }
+                      ],
+                      "descendant_range": "141.520 – 141.522"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR3d6ee106c1924c6",
+                      "label": "Disinfection Profile",
+                      "label_level": "Disinfection Profile",
+                      "label_description": "Disinfection Profile",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 7532,
+                      "children": [
+                        {
+                          "identifier": "141.530",
+                          "label": "§ 141.530 What is a disinfection profile and who must develop one?",
+                          "label_level": "§ 141.530",
+                          "label_description": "What is a disinfection profile and who must develop one?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 916
+                        },
+                        {
+                          "identifier": "141.531",
+                          "label": "§ 141.531 What criteria must a State use to determine that a profile is unnecessary?",
+                          "label_level": "§ 141.531",
+                          "label_description": "What criteria must a State use to determine that a profile is unnecessary?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 849
+                        },
+                        {
+                          "identifier": "141.532",
+                          "label": "§ 141.532 How does my system develop a disinfection profile and when must it begin?",
+                          "label_level": "§ 141.532",
+                          "label_description": "How does my system develop a disinfection profile and when must it begin?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 968
+                        },
+                        {
+                          "identifier": "141.533",
+                          "label": "§ 141.533 What data must my system collect to calculate a disinfection profile?",
+                          "label_level": "§ 141.533",
+                          "label_description": "What data must my system collect to calculate a disinfection profile?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1056
+                        },
+                        {
+                          "identifier": "141.534",
+                          "label": "§ 141.534 How does my system use this data to calculate an inactivation ratio?",
+                          "label_level": "§ 141.534",
+                          "label_description": "How does my system use this data to calculate an inactivation ratio?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 2266
+                        },
+                        {
+                          "identifier": "141.535",
+                          "label": "§ 141.535 What if my system uses chloramines, ozone, or chlorine dioxide for primary disinfection?",
+                          "label_level": "§ 141.535",
+                          "label_description": "What if my system uses chloramines, ozone, or chlorine dioxide for primary disinfection?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 552
+                        },
+                        {
+                          "identifier": "141.536",
+                          "label": "§ 141.536 My system has developed an inactivation ratio; what must we do now?",
+                          "label_level": "§ 141.536",
+                          "label_description": "My system has developed an inactivation ratio; what must we do now?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 925
+                        }
+                      ],
+                      "descendant_range": "141.530 – 141.536"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR1dda18d3660bcc8",
+                      "label": "Disinfection Benchmark",
+                      "label_level": "Disinfection Benchmark",
+                      "label_description": "Disinfection Benchmark",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 4350,
+                      "children": [
+                        {
+                          "identifier": "141.540",
+                          "label": "§ 141.540 Who has to develop a disinfection benchmark?",
+                          "label_level": "§ 141.540",
+                          "label_description": "Who has to develop a disinfection benchmark?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 620
+                        },
+                        {
+                          "identifier": "141.541",
+                          "label": "§ 141.541 What are significant changes to disinfection practice?",
+                          "label_level": "§ 141.541",
+                          "label_description": "What are significant changes to disinfection practice?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 559
+                        },
+                        {
+                          "identifier": "141.542",
+                          "label": "§ 141.542 What must my system do if we are considering a significant change to disinfection practices?",
+                          "label_level": "§ 141.542",
+                          "label_description": "What must my system do if we are considering a significant change to disinfection practices?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1095
+                        },
+                        {
+                          "identifier": "141.543",
+                          "label": "§ 141.543 How is the disinfection benchmark calculated?",
+                          "label_level": "§ 141.543",
+                          "label_description": "How is the disinfection benchmark calculated?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 1309
+                        },
+                        {
+                          "identifier": "141.544",
+                          "label": "§ 141.544 What if my system uses chloramines, ozone, or chlorine dioxide for primary disinfection?",
+                          "label_level": "§ 141.544",
+                          "label_description": "What if my system uses chloramines, ozone, or chlorine dioxide for primary disinfection?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 767
+                        }
+                      ],
+                      "descendant_range": "141.540 – 141.544"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRc8fe83e72b1b221",
+                      "label": "Combined Filter Effluent Requirements",
+                      "label_level": "Combined Filter Effluent Requirements",
+                      "label_description": "Combined Filter Effluent Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 5319,
+                      "children": [
+                        {
+                          "identifier": "141.550",
+                          "label": "§ 141.550 Is my system required to meet subpart T combined filter effluent turbidity limits?",
+                          "label_level": "§ 141.550",
+                          "label_description": "Is my system required to meet subpart T combined filter effluent turbidity limits?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2025-12-31T17:40:07-0500",
+                          "size": 809
+                        },
+                        {
+                          "identifier": "141.551",
+                          "label": "§ 141.551 What strengthened combined filter effluent turbidity limits must my system meet?",
+                          "label_level": "§ 141.551",
+                          "label_description": "What strengthened combined filter effluent turbidity limits must my system meet?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 2938
+                        },
+                        {
+                          "identifier": "141.552",
+                          "label": "§ 141.552 My system consists of “alternative filtration” and is required to conduct a demonstration—what is required of my system and how does the State establish my turbidity limits?",
+                          "label_level": "§ 141.552",
+                          "label_description": "My system consists of “alternative filtration” and is required to conduct a demonstration—what is required of my system and how does the State establish my turbidity limits?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2023-03-30T22:20:25-0400",
+                          "size": 1072
+                        },
+                        {
+                          "identifier": "141.553",
+                          "label": "§ 141.553 My system practices lime softening—is there any special provision regarding my combined filter effluent?",
+                          "label_level": "§ 141.553",
+                          "label_description": "My system practices lime softening—is there any special provision regarding my combined filter effluent?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2023-03-30T22:20:25-0400",
+                          "size": 500
+                        }
+                      ],
+                      "descendant_range": "141.550 – 141.553"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR2f2f892a0949638",
+                      "label": "Individual Filter Turbidity Requirements",
+                      "label_level": "Individual Filter Turbidity Requirements",
+                      "label_description": "Individual Filter Turbidity Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 6688,
+                      "children": [
+                        {
+                          "identifier": "141.560",
+                          "label": "§ 141.560 Is my system subject to individual filter turbidity requirements?",
+                          "label_level": "§ 141.560",
+                          "label_description": "Is my system subject to individual filter turbidity requirements?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 994
+                        },
+                        {
+                          "identifier": "141.561",
+                          "label": "§ 141.561 What happens if my system's turbidity monitoring equipment fails?",
+                          "label_level": "§ 141.561",
+                          "label_description": "What happens if my system's turbidity monitoring equipment fails?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 575
+                        },
+                        {
+                          "identifier": "141.562",
+                          "label": "§ 141.562 My system only has two or fewer filters—is there any special provision regarding individual filter turbidity monitoring?",
+                          "label_level": "§ 141.562",
+                          "label_description": "My system only has two or fewer filters—is there any special provision regarding individual filter turbidity monitoring?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2023-03-30T22:20:25-0400",
+                          "size": 647
+                        },
+                        {
+                          "identifier": "141.563",
+                          "label": "§ 141.563 What follow-up action is my system required to take based on continuous turbidity monitoring?",
+                          "label_level": "§ 141.563",
+                          "label_description": "What follow-up action is my system required to take based on continuous turbidity monitoring?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 3817
+                        },
+                        {
+                          "identifier": "141.564",
+                          "label": "§ 141.564 My system practices lime softening—is there any special provision regarding my individual filter turbidity monitoring?",
+                          "label_level": "§ 141.564",
+                          "label_description": "My system practices lime softening—is there any special provision regarding my individual filter turbidity monitoring?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2023-03-30T22:20:25-0400",
+                          "size": 655
+                        }
+                      ],
+                      "descendant_range": "141.560 – 141.564"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRa01a86aeff15a1d",
+                      "label": "Reporting and Recordkeeping Requirements",
+                      "label_level": "Reporting and Recordkeeping Requirements",
+                      "label_description": "Reporting and Recordkeeping Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 6786,
+                      "children": [
+                        {
+                          "identifier": "141.570",
+                          "label": "§ 141.570 What does subpart T require that my system report to the State?",
+                          "label_level": "§ 141.570",
+                          "label_description": "What does subpart T require that my system report to the State?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 4754
+                        },
+                        {
+                          "identifier": "141.571",
+                          "label": "§ 141.571 What records does subpart T require my system to keep?",
+                          "label_level": "§ 141.571",
+                          "label_description": "What records does subpart T require my system to keep?",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 2032
+                        }
+                      ],
+                      "descendant_range": "141.570 – 141.571"
+                    }
+                  ],
+                  "descendant_range": "141.500 – 141.571"
+                },
+                {
+                  "identifier": "U",
+                  "label": "Subpart U—Initial Distribution System Evaluations",
+                  "label_level": "Subpart U",
+                  "label_description": "Initial Distribution System Evaluations",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 49026,
+                  "children": [
+                    {
+                      "identifier": "141.600",
+                      "label": "§ 141.600 General requirements.",
+                      "label_level": "§ 141.600",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 7684
+                    },
+                    {
+                      "identifier": "141.601",
+                      "label": "§ 141.601 Standard monitoring.",
+                      "label_level": "§ 141.601",
+                      "label_description": "Standard monitoring.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 12856
+                    },
+                    {
+                      "identifier": "141.602",
+                      "label": "§ 141.602 System specific studies.",
+                      "label_level": "§ 141.602",
+                      "label_description": "System specific studies.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 14026
+                    },
+                    {
+                      "identifier": "141.603",
+                      "label": "§ 141.603 40/30 certification.",
+                      "label_level": "§ 141.603",
+                      "label_description": "40/30 certification.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 3222
+                    },
+                    {
+                      "identifier": "141.604",
+                      "label": "§ 141.604 Very small system waivers.",
+                      "label_level": "§ 141.604",
+                      "label_description": "Very small system waivers.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 792
+                    },
+                    {
+                      "identifier": "141.605",
+                      "label": "§ 141.605 Subpart V compliance monitoring location recommendations.",
+                      "label_level": "§ 141.605",
+                      "label_description": "Subpart V compliance monitoring location recommendations.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 10446
+                    }
+                  ],
+                  "descendant_range": "141.600 – 141.605"
+                },
+                {
+                  "identifier": "V",
+                  "label": "Subpart V—Stage 2 Disinfection Byproducts Requirements",
+                  "label_level": "Subpart V",
+                  "label_description": "Stage 2 Disinfection Byproducts Requirements",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 31951,
+                  "children": [
+                    {
+                      "identifier": "141.620",
+                      "label": "§ 141.620 General requirements.",
+                      "label_level": "§ 141.620",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 6559
+                    },
+                    {
+                      "identifier": "141.621",
+                      "label": "§ 141.621 Routine monitoring.",
+                      "label_level": "§ 141.621",
+                      "label_description": "Routine monitoring.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 6175
+                    },
+                    {
+                      "identifier": "141.622",
+                      "label": "§ 141.622 Subpart V monitoring plan.",
+                      "label_level": "§ 141.622",
+                      "label_description": "Subpart V monitoring plan.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2969
+                    },
+                    {
+                      "identifier": "141.623",
+                      "label": "§ 141.623 Reduced monitoring.",
+                      "label_level": "§ 141.623",
+                      "label_description": "Reduced monitoring.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 7709
+                    },
+                    {
+                      "identifier": "141.624",
+                      "label": "§ 141.624 Additional requirements for consecutive systems.",
+                      "label_level": "§ 141.624",
+                      "label_description": "Additional requirements for consecutive systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 738
+                    },
+                    {
+                      "identifier": "141.625",
+                      "label": "§ 141.625 Conditions requiring increased monitoring.",
+                      "label_level": "§ 141.625",
+                      "label_description": "Conditions requiring increased monitoring.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1294
+                    },
+                    {
+                      "identifier": "141.626",
+                      "label": "§ 141.626 Operational evaluation levels.",
+                      "label_level": "§ 141.626",
+                      "label_description": "Operational evaluation levels.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-09-16T19:10:31-0400",
+                      "size": 1896
+                    },
+                    {
+                      "identifier": "141.627",
+                      "label": "§ 141.627 Requirements for remaining on reduced TTHM and HAA5 monitoring based on subpart L results.",
+                      "label_level": "§ 141.627",
+                      "label_description": "Requirements for remaining on reduced TTHM and HAA5 monitoring based on subpart L results.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 971
+                    },
+                    {
+                      "identifier": "141.628",
+                      "label": "§ 141.628 Requirements for remaining on increased TTHM and HAA5 monitoring based on subpart L results.",
+                      "label_level": "§ 141.628",
+                      "label_description": "Requirements for remaining on increased TTHM and HAA5 monitoring based on subpart L results.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 812
+                    },
+                    {
+                      "identifier": "141.629",
+                      "label": "§ 141.629 Reporting and recordkeeping requirements.",
+                      "label_level": "§ 141.629",
+                      "label_description": "Reporting and recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2828
+                    }
+                  ],
+                  "descendant_range": "141.620 – 141.629"
+                },
+                {
+                  "identifier": "W",
+                  "label": "Subpart W—Enhanced Treatment for <em>Cryptosporidium</em>",
+                  "label_level": "Subpart W",
+                  "label_description": "Enhanced Treatment for <em>Cryptosporidium</em>",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 136851,
+                  "children": [
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR6fe6d499c2c7cee",
+                      "label": "General Requirements",
+                      "label_level": "General Requirements",
+                      "label_description": "General Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 3340,
+                      "children": [
+                        {
+                          "identifier": "141.700",
+                          "label": "§ 141.700 General requirements.",
+                          "label_level": "§ 141.700",
+                          "label_description": "General requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3340
+                        }
+                      ],
+                      "descendant_range": "141.700"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRf47dbe84298fc2c",
+                      "label": "Source Water Monitoring Requirements",
+                      "label_level": "Source Water Monitoring Requirements",
+                      "label_description": "Source Water Monitoring Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 34189,
+                      "children": [
+                        {
+                          "identifier": "141.701",
+                          "label": "§ 141.701 Source water monitoring.",
+                          "label_level": "§ 141.701",
+                          "label_description": "Source water monitoring.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 9868
+                        },
+                        {
+                          "identifier": "141.702",
+                          "label": "§ 141.702 Sampling schedules.",
+                          "label_level": "§ 141.702",
+                          "label_description": "Sampling schedules.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3406
+                        },
+                        {
+                          "identifier": "141.703",
+                          "label": "§ 141.703 Sampling locations.",
+                          "label_level": "§ 141.703",
+                          "label_description": "Sampling locations.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3865
+                        },
+                        {
+                          "identifier": "141.704",
+                          "label": "§ 141.704 Analytical methods.",
+                          "label_level": "§ 141.704",
+                          "label_description": "Analytical methods.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3766
+                        },
+                        {
+                          "identifier": "141.705",
+                          "label": "§ 141.705 Approved laboratories.",
+                          "label_level": "§ 141.705",
+                          "label_description": "Approved laboratories.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1069
+                        },
+                        {
+                          "identifier": "141.706",
+                          "label": "§ 141.706 Reporting source water monitoring results.",
+                          "label_level": "§ 141.706",
+                          "label_description": "Reporting source water monitoring results.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2025-03-10T19:11:09-0400",
+                          "size": 3755
+                        },
+                        {
+                          "identifier": "141.707",
+                          "label": "§ 141.707 Grandfathering previously collected data.",
+                          "label_level": "§ 141.707",
+                          "label_description": "Grandfathering previously collected data.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 8460
+                        }
+                      ],
+                      "descendant_range": "141.701 – 141.707"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR37bac9ad0eb6030",
+                      "label": "Disinfection Profiling and Benchmarking Requirements",
+                      "label_level": "Disinfection Profiling and Benchmarking Requirements",
+                      "label_description": "Disinfection Profiling and Benchmarking Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 7605,
+                      "children": [
+                        {
+                          "identifier": "141.708",
+                          "label": "§ 141.708 Requirements when making a significant change in disinfection practice.",
+                          "label_level": "§ 141.708",
+                          "label_description": "Requirements when making a significant change in disinfection practice.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1485
+                        },
+                        {
+                          "identifier": "141.709",
+                          "label": "§ 141.709 Developing the disinfection profile and benchmark.",
+                          "label_level": "§ 141.709",
+                          "label_description": "Developing the disinfection profile and benchmark.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 6120
+                        }
+                      ],
+                      "descendant_range": "141.708 – 141.709"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFR18644be6f27bf28",
+                      "label": "Treatment Technique Requirements",
+                      "label_level": "Treatment Technique Requirements",
+                      "label_description": "Treatment Technique Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 18076,
+                      "children": [
+                        {
+                          "identifier": "141.710",
+                          "label": "§ 141.710 Bin classification for filtered systems.",
+                          "label_level": "§ 141.710",
+                          "label_description": "Bin classification for filtered systems.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 5454
+                        },
+                        {
+                          "identifier": "141.711",
+                          "label": "§ 141.711 Filtered system additional <em>Cryptosporidium</em> treatment requirements.",
+                          "label_level": "§ 141.711",
+                          "label_description": "Filtered system additional <em>Cryptosporidium</em> treatment requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 4781
+                        },
+                        {
+                          "identifier": "141.712",
+                          "label": "§ 141.712 Unfiltered system <em>Cryptosporidium</em> treatment requirements.",
+                          "label_level": "§ 141.712",
+                          "label_description": "Unfiltered system <em>Cryptosporidium</em> treatment requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3762
+                        },
+                        {
+                          "identifier": "141.713",
+                          "label": "§ 141.713 Schedule for compliance with <em>Cryptosporidium</em> treatment requirements.",
+                          "label_level": "§ 141.713",
+                          "label_description": "Schedule for compliance with <em>Cryptosporidium</em> treatment requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 2824
+                        },
+                        {
+                          "identifier": "141.714",
+                          "label": "§ 141.714 Requirements for uncovered finished water storage facilities.",
+                          "label_level": "§ 141.714",
+                          "label_description": "Requirements for uncovered finished water storage facilities.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1255
+                        }
+                      ],
+                      "descendant_range": "141.710 – 141.714"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRab1f1d1909bbf32",
+                      "label": "Requirements for Microbial Toolbox Components",
+                      "label_level": "Requirements for Microbial Toolbox Components",
+                      "label_description": "Requirements for Microbial Toolbox Components",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 59767,
+                      "children": [
+                        {
+                          "identifier": "141.715",
+                          "label": "§ 141.715 Microbial toolbox options for meeting <em>Cryptosporidium</em> treatment requirements.",
+                          "label_level": "§ 141.715",
+                          "label_description": "Microbial toolbox options for meeting <em>Cryptosporidium</em> treatment requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2025-12-31T17:40:07-0500",
+                          "size": 7369
+                        },
+                        {
+                          "identifier": "141.716",
+                          "label": "§ 141.716 Source toolbox components.",
+                          "label_level": "§ 141.716",
+                          "label_description": "Source toolbox components.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 7054
+                        },
+                        {
+                          "identifier": "141.717",
+                          "label": "§ 141.717 Pre-filtration treatment toolbox components.",
+                          "label_level": "§ 141.717",
+                          "label_description": "Pre-filtration treatment toolbox components.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 5122
+                        },
+                        {
+                          "identifier": "141.718",
+                          "label": "§ 141.718 Treatment performance toolbox components.",
+                          "label_level": "§ 141.718",
+                          "label_description": "Treatment performance toolbox components.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 3466
+                        },
+                        {
+                          "identifier": "141.719",
+                          "label": "§ 141.719 Additional filtration toolbox components.",
+                          "label_level": "§ 141.719",
+                          "label_description": "Additional filtration toolbox components.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2018-12-18T00:00:00-0500",
+                          "size": 18227
+                        },
+                        {
+                          "identifier": "141.720",
+                          "label": "§ 141.720 Inactivation toolbox components.",
+                          "label_level": "§ 141.720",
+                          "label_description": "Inactivation toolbox components.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2024-06-04T19:10:31-0400",
+                          "size": 18529
+                        }
+                      ],
+                      "descendant_range": "141.715 – 141.720"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRf87ea10d7d51c02",
+                      "label": "Reporting and Recordkeeping Requirements",
+                      "label_level": "Reporting and Recordkeeping Requirements",
+                      "label_description": "Reporting and Recordkeeping Requirements",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 12234,
+                      "children": [
+                        {
+                          "identifier": "141.721",
+                          "label": "§ 141.721 Reporting requirements.",
+                          "label_level": "§ 141.721",
+                          "label_description": "Reporting requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2025-12-31T17:40:07-0500",
+                          "size": 11202
+                        },
+                        {
+                          "identifier": "141.722",
+                          "label": "§ 141.722 Recordkeeping requirements.",
+                          "label_level": "§ 141.722",
+                          "label_description": "Recordkeeping requirements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1032
+                        }
+                      ],
+                      "descendant_range": "141.721 – 141.722"
+                    },
+                    {
+                      "generated_id": true,
+                      "identifier": "ECFRe30a2af579d6466",
+                      "label": "Requirements for Sanitary Surveys Performed by EPA",
+                      "label_level": "Requirements for Sanitary Surveys Performed by EPA",
+                      "label_description": "Requirements for Sanitary Surveys Performed by EPA",
+                      "reserved": false,
+                      "type": "subject_group",
+                      "size": 1640,
+                      "children": [
+                        {
+                          "identifier": "141.723",
+                          "label": "§ 141.723 Requirements to respond to significant deficiencies identified in sanitary surveys performed by EPA.",
+                          "label_level": "§ 141.723",
+                          "label_description": "Requirements to respond to significant deficiencies identified in sanitary surveys performed by EPA.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["25"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1640
+                        }
+                      ],
+                      "descendant_range": "141.723"
+                    }
+                  ],
+                  "descendant_range": "141.700 – 141.723"
+                },
+                {
+                  "identifier": "X",
+                  "label": "Subpart X—Aircraft Drinking Water Rule",
+                  "label_level": "Subpart X",
+                  "label_description": "Aircraft Drinking Water Rule",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 53582,
+                  "children": [
+                    {
+                      "identifier": "141.800",
+                      "label": "§ 141.800 Applicability and compliance date.",
+                      "label_level": "§ 141.800",
+                      "label_description": "Applicability and compliance date.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1012
+                    },
+                    {
+                      "identifier": "141.801",
+                      "label": "§ 141.801 Definitions.",
+                      "label_level": "§ 141.801",
+                      "label_description": "Definitions.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2846
+                    },
+                    {
+                      "identifier": "141.802",
+                      "label": "§ 141.802 Coliform sampling plan.",
+                      "label_level": "§ 141.802",
+                      "label_description": "Coliform sampling plan.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1608
+                    },
+                    {
+                      "identifier": "141.803",
+                      "label": "§ 141.803 Coliform sampling.",
+                      "label_level": "§ 141.803",
+                      "label_description": "Coliform sampling.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 16791
+                    },
+                    {
+                      "identifier": "141.804",
+                      "label": "§ 141.804 Aircraft water system operations and maintenance plan.",
+                      "label_level": "§ 141.804",
+                      "label_description": "Aircraft water system operations and maintenance plan.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 4775
+                    },
+                    {
+                      "identifier": "141.805",
+                      "label": "§ 141.805 Notification to passengers and crew.",
+                      "label_level": "§ 141.805",
+                      "label_description": "Notification to passengers and crew.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 15405
+                    },
+                    {
+                      "identifier": "141.806",
+                      "label": "§ 141.806 Reporting requirements.",
+                      "label_level": "§ 141.806",
+                      "label_description": "Reporting requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 5671
+                    },
+                    {
+                      "identifier": "141.807",
+                      "label": "§ 141.807 Recordkeeping requirements.",
+                      "label_level": "§ 141.807",
+                      "label_description": "Recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1956
+                    },
+                    {
+                      "identifier": "141.808",
+                      "label": "§ 141.808 Audits and inspections.",
+                      "label_level": "§ 141.808",
+                      "label_description": "Audits and inspections.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1750
+                    },
+                    {
+                      "identifier": "141.809",
+                      "label": "§ 141.809 Supplemental treatment.",
+                      "label_level": "§ 141.809",
+                      "label_description": "Supplemental treatment.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 641
+                    },
+                    {
+                      "identifier": "141.810",
+                      "label": "§ 141.810 Violations.",
+                      "label_level": "§ 141.810",
+                      "label_description": "Violations.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1127
+                    }
+                  ],
+                  "descendant_range": "141.800 – 141.810"
+                },
+                {
+                  "identifier": "Y",
+                  "label": "Subpart Y—Revised Total Coliform Rule",
+                  "label_level": "Subpart Y",
+                  "label_description": "Revised Total Coliform Rule",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 78098,
+                  "children": [
+                    {
+                      "identifier": "141.851",
+                      "label": "§ 141.851 General.",
+                      "label_level": "§ 141.851",
+                      "label_description": "General.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1239
+                    },
+                    {
+                      "identifier": "141.852",
+                      "label": "§ 141.852 Analytical methods and laboratory certification.",
+                      "label_level": "§ 141.852",
+                      "label_description": "Analytical methods and laboratory certification.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 19528
+                    },
+                    {
+                      "identifier": "141.853",
+                      "label": "§ 141.853 General monitoring requirements for all public water systems.",
+                      "label_level": "§ 141.853",
+                      "label_description": "General monitoring requirements for all public water systems.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 10269
+                    },
+                    {
+                      "identifier": "141.854",
+                      "label": "§ 141.854 Routine monitoring requirements for non-community water systems serving 1,000 or fewer people using only ground water.",
+                      "label_level": "§ 141.854",
+                      "label_description": "Routine monitoring requirements for non-community water systems serving 1,000 or fewer people using only ground water.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 13565
+                    },
+                    {
+                      "identifier": "141.855",
+                      "label": "§ 141.855 Routine monitoring requirements for community water systems serving 1,000 or fewer people using only ground water.",
+                      "label_level": "§ 141.855",
+                      "label_description": "Routine monitoring requirements for community water systems serving 1,000 or fewer people using only ground water.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 7608
+                    },
+                    {
+                      "identifier": "141.856",
+                      "label": "§ 141.856 Routine monitoring requirements for subpart H public water systems serving 1,000 or fewer people.",
+                      "label_level": "§ 141.856",
+                      "label_description": "Routine monitoring requirements for subpart H public water systems serving 1,000 or fewer people.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2524
+                    },
+                    {
+                      "identifier": "141.857",
+                      "label": "§ 141.857 Routine monitoring requirements for public water systems serving more than 1,000 people.",
+                      "label_level": "§ 141.857",
+                      "label_description": "Routine monitoring requirements for public water systems serving more than 1,000 people.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-04T19:10:31-0400",
+                      "size": 6980
+                    },
+                    {
+                      "identifier": "141.858",
+                      "label": "§ 141.858 Repeat monitoring and <em>E. coli</em> requirements.",
+                      "label_level": "§ 141.858",
+                      "label_description": "Repeat monitoring and <em>E. coli</em> requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 4185
+                    },
+                    {
+                      "identifier": "141.859",
+                      "label": "§ 141.859 Coliform treatment technique triggers and assessment requirements for protection against potential fecal contamination.",
+                      "label_level": "§ 141.859",
+                      "label_description": "Coliform treatment technique triggers and assessment requirements for protection against potential fecal contamination.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 7078
+                    },
+                    {
+                      "identifier": "141.860",
+                      "label": "§ 141.860 Violations.",
+                      "label_level": "§ 141.860",
+                      "label_description": "Violations.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2156
+                    },
+                    {
+                      "identifier": "141.861",
+                      "label": "§ 141.861 Reporting and recordkeeping.",
+                      "label_level": "§ 141.861",
+                      "label_description": "Reporting and recordkeeping.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2023-03-30T22:20:25-0400",
+                      "size": 2966
+                    }
+                  ],
+                  "descendant_range": "141.851 – 141.861"
+                },
+                {
+                  "identifier": "Z",
+                  "label": "Subpart Z—Control of Per- and Polyfluoroalkyl Substances (PFAS)",
+                  "label_level": "Subpart Z",
+                  "label_description": "Control of Per- and Polyfluoroalkyl Substances (PFAS)",
+                  "reserved": false,
+                  "type": "subpart",
+                  "volumes": ["25"],
+                  "size": 36918,
+                  "children": [
+                    {
+                      "identifier": "141.900",
+                      "label": "§ 141.900 General requirements.",
+                      "label_level": "§ 141.900",
+                      "label_description": "General requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 1457
+                    },
+                    {
+                      "identifier": "141.901",
+                      "label": "§ 141.901 Analytical requirements.",
+                      "label_level": "§ 141.901",
+                      "label_description": "Analytical requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 5919
+                    },
+                    {
+                      "identifier": "141.902",
+                      "label": "§ 141.902 Monitoring requirements.",
+                      "label_level": "§ 141.902",
+                      "label_description": "Monitoring requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2025-12-31T17:40:07-0500",
+                      "size": 16267
+                    },
+                    {
+                      "identifier": "141.903",
+                      "label": "§ 141.903 Compliance requirements.",
+                      "label_level": "§ 141.903",
+                      "label_description": "Compliance requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 7228
+                    },
+                    {
+                      "identifier": "141.904",
+                      "label": "§ 141.904 Reporting and recordkeeping requirements.",
+                      "label_level": "§ 141.904",
+                      "label_description": "Reporting and recordkeeping requirements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 3940
+                    },
+                    {
+                      "identifier": "141.905",
+                      "label": "§ 141.905 Violations.",
+                      "label_level": "§ 141.905",
+                      "label_description": "Violations.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["25"],
+                      "received_on": "2024-06-26T21:00:41-0400",
+                      "size": 2107
+                    }
+                  ],
+                  "descendant_range": "141.900 – 141.905"
+                }
+              ],
+              "descendant_range": "141.1 – 141.905"
+            }
+          ],
+          "descendant_range": "100 – 149"
+        }
+      ],
+      "descendant_range": "1 – 1099"
+    }
+  ]
+}

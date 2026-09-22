@@ -506,6 +506,49 @@ describe('a request budget reaches the caller', () => {
     expect(http.calls.length).toBeLessThan(5);
   });
 
+  it('answers a section cite that resolves nowhere inside the budget, at the slow versioner speed', async () => {
+    // Resolving "141.61(c)(1)(ii)" can cost four /full/ lookups. The versioner
+    // answers each in ~0.2 s or ~5 s; at the slow speed every time, the whole
+    // ladder plus the titles read still has to land inside one budget.
+    http.route(
+      {
+        match: /versioner\/v1\/titles\.json/,
+        respond: () =>
+          Response.json({
+            meta: { date: '2026-09-18' },
+            titles: [
+              { number: 40, latest_issue_date: '2026-09-17', up_to_date_as_of: '2026-09-18' },
+            ],
+          }),
+      },
+      {
+        match: /versioner\/v1\/full\//,
+        respond: (request) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(
+              () =>
+                resolve(new Response('{"error":"No matching content found."}', { status: 404 })),
+              5_000,
+            );
+            onAbort(request.signal, (reason) => {
+              clearTimeout(timer);
+              reject(reason);
+            });
+          }),
+      },
+    );
+
+    const { result, elapsedMs } = await withoutWaiting(() =>
+      runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61(c)(1)(ii)' }),
+    );
+    const { error } = surfaces(result);
+    const lookups = http.calls.filter((c) => c.request.url.includes('/full/'));
+
+    expect(error.data?.reason).toBe('not_found');
+    expect(lookups).toHaveLength(4);
+    expect(elapsedMs).toBeLessThanOrEqual(REQUEST_BUDGET_MS);
+  });
+
   const perAttemptDeadline = [
     { name: 'regulations_search_rules', tool: searchRulesTool, input: { query: 'ozone' } },
     {

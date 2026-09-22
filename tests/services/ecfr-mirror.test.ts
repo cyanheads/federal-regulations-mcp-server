@@ -154,7 +154,7 @@ describe('mirrorSearch', () => {
 
   it('returns only the requested part when one is given', async () => {
     const mirrorSearch = await seedSections();
-    const scoped = await mirrorSearch('oxygen', 14, '25', 20);
+    const scoped = await mirrorSearch('oxygen', 14, '25', 20, 0);
 
     expect(scoped.results.map((r) => r.cfrCite).sort()).toEqual([
       '14 CFR 25.1043',
@@ -165,7 +165,7 @@ describe('mirrorSearch', () => {
 
   it('returns the whole title when no part is given', async () => {
     const mirrorSearch = await seedSections();
-    const unscoped = await mirrorSearch('oxygen', 14, undefined, 20);
+    const unscoped = await mirrorSearch('oxygen', 14, undefined, 20, 0);
 
     expect(unscoped.totalCount).toBe(3);
     expect(unscoped.results.map((r) => r.part).sort()).toEqual(['121', '25', '25']);
@@ -175,23 +175,54 @@ describe('mirrorSearch', () => {
     // Part numbers repeat across the Code, so a part filter alone would be
     // ambiguous — the title has to bound it.
     const mirrorSearch = await seedSections();
-    const other = await mirrorSearch('oxygen', 40, '58', 20);
+    const other = await mirrorSearch('oxygen', 40, '58', 20, 0);
 
     expect(other.results.map((r) => r.cfrCite)).toEqual(['40 CFR 58.30']);
   });
 
   it('leaves a mirror hit path structural — the index stores no level names', async () => {
     const mirrorSearch = await seedSections();
-    const { results } = await mirrorSearch('oxygen', 14, '121', 20);
+    const { results } = await mirrorSearch('oxygen', 14, '121', 20, 0);
 
     expect(results[0]!.hierarchyPath).toBe('Title 14 › Part 121 › § 121.333');
   });
 
   it('reports no appendix on a mirror hit — the index holds section text only', async () => {
     const mirrorSearch = await seedSections();
-    const { results } = await mirrorSearch('oxygen', 14, '121', 20);
+    const { results } = await mirrorSearch('oxygen', 14, '121', 20, 0);
 
     expect(results[0]!.appendix).toBeNull();
+  });
+
+  it('pages by offset in one relevance order, with no row on two pages', async () => {
+    // Twenty-five sections share one body, so every bm25 score ties — the case
+    // where an unstable order would hand one row to two pages and skip another.
+    const mod = await seedMirror({ held: [14] });
+    await mod.ecfrMirror.store.applyBatch(
+      Array.from({ length: 25 }, (_, i) =>
+        section(14, '25', `25.${1000 + i}`, 'Each airplane must carry supplemental oxygen.'),
+      ),
+      [],
+    );
+
+    const whole = await mod.mirrorSearch('oxygen', 14, '25', 25, 0);
+    const pages = await Promise.all(
+      [0, 10, 20].map((offset) => mod.mirrorSearch('oxygen', 14, '25', 10, offset)),
+    );
+    const paged = pages.flatMap((p) => p.results.map((r) => r.cfrCite));
+
+    expect(pages.map((p) => p.results.length)).toEqual([10, 10, 5]);
+    expect(paged).toEqual(whole.results.map((r) => r.cfrCite));
+    expect(new Set(paged).size).toBe(25);
+    expect(pages.map((p) => p.hasMore)).toEqual([true, true, false]);
+    expect(pages.every((p) => p.totalCount === 25 && p.countBasis === 'sections')).toBe(true);
+  });
+
+  it('answers an offset past the last row with no rows and the true total', async () => {
+    const mirrorSearch = await seedSections();
+    const past = await mirrorSearch('oxygen', 14, undefined, 20, 40);
+
+    expect(past).toMatchObject({ results: [], totalCount: 3, hasMore: false });
   });
 });
 
@@ -259,11 +290,11 @@ describe('eCFR mirror ingest', () => {
     const mod = await seedMirror({ held: [], corpus: [14] });
     await ingestTitle14(mod, 'init');
 
-    const airworthiness = await mod.mirrorSearch('applicability', 14, '25', 20);
+    const airworthiness = await mod.mirrorSearch('applicability', 14, '25', 20, 0);
     expect(airworthiness.results.map((r) => r.cfrCite)).toEqual(['14 CFR 25.1']);
     expect(airworthiness.results[0]!.excerpt).toContain('airworthiness standards');
 
-    const traffic = await mod.mirrorSearch('traffic', 14, '241', 20);
+    const traffic = await mod.mirrorSearch('traffic', 14, '241', 20, 0);
     expect(traffic.results.map((r) => r.section)).toEqual(['25']);
     expect(traffic.results[0]!.hierarchyPath).toBe('Title 14 › Part 241 › § 25');
     // A section number that does not embed its part cannot cite itself: plain
@@ -294,7 +325,7 @@ describe('eCFR mirror ingest', () => {
     await ingestTitle14(mod, 'refresh');
 
     expect(await mod.ecfrMirror.getByIds(['14:25:25'])).toHaveLength(0);
-    const scoped = await mod.mirrorSearch('traffic', 14, '25', 20);
+    const scoped = await mod.mirrorSearch('traffic', 14, '25', 20, 0);
     expect(scoped.results).toEqual([]);
   });
 
@@ -361,7 +392,9 @@ describe('eCFR mirror ingest', () => {
     await mod.ecfrMirror.runSync({ mode: 'refresh', signal: new AbortController().signal });
 
     expect((await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows).toHaveLength(before);
-    expect(await mod.mirrorSearch('airworthiness', 14, '25', 20)).toMatchObject({ totalCount: 1 });
+    expect(await mod.mirrorSearch('airworthiness', 14, '25', 20, 0)).toMatchObject({
+      totalCount: 1,
+    });
   });
 
   it('leaves a title alone when its document arrives cut short mid-parse', async () => {
@@ -383,7 +416,7 @@ describe('eCFR mirror ingest', () => {
     // Every section past the cut is still readable.
     expect((await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows).toHaveLength(before);
     expect(await mod.ecfrMirror.getByIds(['14:241:25', '14:241:1-1'])).toHaveLength(2);
-    expect(await mod.mirrorSearch('traffic', 14, '241', 20)).toMatchObject({ totalCount: 1 });
+    expect(await mod.mirrorSearch('traffic', 14, '241', 20, 0)).toMatchObject({ totalCount: 1 });
   });
 
   it('tombstones only inside the title being synced', async () => {

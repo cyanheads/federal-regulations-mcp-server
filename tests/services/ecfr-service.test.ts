@@ -444,7 +444,7 @@ describe('EcfrService', () => {
     // the filter goes out as `hierarchy[title]`.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx);
+    const result = await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx);
 
     expect(result.totalCount).toBe(1);
     expect(result.results[0]!.title).toBe(40);
@@ -462,7 +462,7 @@ describe('EcfrService', () => {
     // already says, so every hit rendered as its own citation twice.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.heading).toBe('Ambient air quality monitoring requirements.');
@@ -476,7 +476,7 @@ describe('EcfrService', () => {
     // reached the wire.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT, APPENDIX_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', 40, '51', 20, FAKE_INDEX_DATE, ctx);
+    const result = await service.search('ambient', 40, '51', 1, 20, FAKE_INDEX_DATE, ctx);
 
     expect(result.totalCount).toBe(1);
     expect(result.results.map((r) => r.cfrCite)).toEqual(['40 CFR 51.190']);
@@ -488,7 +488,7 @@ describe('EcfrService', () => {
   it('sends no part filter when none was asked for', async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT, APPENDIX_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx);
+    const result = await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx);
 
     expect(result.results).toHaveLength(2);
     expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.has('hierarchy[part]')).toBe(
@@ -503,7 +503,7 @@ describe('EcfrService', () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
     const err = await service
-      .search('ambient', undefined, '58', 20, FAKE_INDEX_DATE, ctx)
+      .search('ambient', undefined, '58', 1, 20, FAKE_INDEX_DATE, ctx)
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
@@ -517,7 +517,7 @@ describe('EcfrService', () => {
     // already had, so a hit gave no hint of what Part 51 is about.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.hierarchyPath).toBe(
@@ -530,7 +530,7 @@ describe('EcfrService', () => {
     // hits a page. Chapter and subchapter keep their labels only.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.hierarchyPath).toContain('Chapter I ›');
@@ -545,7 +545,7 @@ describe('EcfrService', () => {
     // — which named it "Part 58" and lost which appendix it was.
     fetchMock.mockImplementation(ecfrEndpoints(APPENDIX_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.section).toBeNull();
@@ -563,7 +563,7 @@ describe('EcfrService', () => {
   it('leaves appendix null on a section hit', async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.appendix).toBeNull();
@@ -575,7 +575,7 @@ describe('EcfrService', () => {
     // not — ran against the whole version history.
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const result = await service.search('ambient', undefined, undefined, 5, '2018-01-01', ctx);
+    const result = await service.search('ambient', undefined, undefined, 1, 5, '2018-01-01', ctx);
 
     expect(result.results).toHaveLength(1);
     expect(new URL(fetchMock.mock.calls[0]![0] as string).searchParams.get('date')).toBe(
@@ -587,7 +587,7 @@ describe('EcfrService', () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
     const err = await service
-      .search('ambient', 40, undefined, 5, '2015-06-01', ctx)
+      .search('ambient', 40, undefined, 1, 5, '2015-06-01', ctx)
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
@@ -605,7 +605,7 @@ describe('EcfrService', () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
     const err = await service
-      .search('ambient', 40, undefined, 5, '2026-12-31', ctx)
+      .search('ambient', 40, undefined, 1, 5, '2026-12-31', ctx)
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(McpError);
@@ -624,11 +624,121 @@ describe('EcfrService', () => {
     );
     const ctx = createMockContext();
     const err = await service
-      .search('ambient', 40, undefined, 5, FAKE_INDEX_DATE, ctx)
+      .search('ambient', 40, undefined, 1, 5, FAKE_INDEX_DATE, ctx)
       .catch((e: unknown) => e);
 
     expect((err as McpError).message).toContain('Found unpermitted parameter');
     expect((err as McpError).data?.reason).toBeUndefined();
+  });
+
+  it("reads eCFR's paging-window refusal as page_out_of_window", async () => {
+    fetchMock.mockRejectedValue(
+      new McpError(JsonRpcErrorCode.InvalidParams, 'Fetch failed. Status: 400', {
+        status: 400,
+        body: JSON.stringify({
+          errors: {
+            error: [
+              'can only paginate through 10,000 results. Try using filters to limit results.',
+            ],
+          },
+        }),
+      }),
+    );
+    const ctx = createMockContext();
+    await expect(
+      service.search('shall', undefined, undefined, 1, 20, FAKE_INDEX_DATE, ctx),
+    ).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'page_out_of_window' },
+    });
+  });
+
+  it('reads the hit list in 1,000-hit pages, and only as far as the page needs', async () => {
+    // 2,500 hits of distinct sections: page 1 needs the first read alone.
+    const hits = Array.from({ length: 2500 }, (_, i) => ({
+      ...SECTION_HIT,
+      hierarchy: { ...SECTION_HIT.hierarchy, section: `51.${i + 1}` },
+    }));
+    fetchMock.mockImplementation((url: string) => {
+      const params = new URL(url).searchParams;
+      const page = Number(params.get('page'));
+      const perPage = Number(params.get('per_page'));
+      return Promise.resolve(
+        jsonResponse({
+          meta: { total_count: hits.length },
+          results: hits.slice((page - 1) * perPage, page * perPage),
+        }),
+      );
+    });
+    const ctx = createMockContext();
+
+    const first = await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+    expect(requested.get('per_page')).toBe('1000');
+    expect(requested.get('page')).toBe('1');
+    expect(first).toMatchObject({
+      totalCount: 2500,
+      countBasis: 'section_versions',
+      hasMore: true,
+    });
+
+    fetchMock.mockClear();
+    const last = await service.search('ambient', 40, undefined, 125, 20, FAKE_INDEX_DATE, ctx);
+    expect(
+      fetchMock.mock.calls.map((c) => new URL(c[0] as string).searchParams.get('page')),
+    ).toEqual(['1', '2', '3']);
+    expect(last.results.map((r) => r.section)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `51.${2481 + i}`),
+    );
+    expect(last).toMatchObject({ totalCount: 2500, countBasis: 'sections', hasMore: false });
+  });
+
+  it('writes structure labels as plain text, keeping escaped characters as text', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        type: 'title',
+        identifier: '40',
+        children: [
+          {
+            type: 'part',
+            identifier: '60',
+            children: [
+              {
+                type: 'subpart',
+                identifier: 'JJJJ',
+                label:
+                  'Subpart JJJJ—Standards of Performance for Stationary Spark Ignition Internal Combustion Engines',
+                children: [
+                  {
+                    type: 'section',
+                    identifier: '60.4239',
+                    label:
+                      '§ 60.4239 What are my compliance requirements if I am a manufacturer of stationary SI internal combustion engines <strong>&gt;</strong>19 KW (25 HP) that use gasoline?',
+                  },
+                  {
+                    type: 'appendix',
+                    identifier: 'Table 1 to Subpart JJJJ of Part 60',
+                    label:
+                      'Table 1 to Subpart JJJJ of Part 60—NO<sub>X</sub>, CO, and VOC Emission Standards for Engines &lt;10 Liters &amp; &gt;25 HP',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const ctx = createMockContext();
+    const [section, table] = await service.browseStructure(40, '60', '2026-09-17', ctx);
+
+    expect(section?.label).toBe(
+      '§ 60.4239 What are my compliance requirements if I am a manufacturer of stationary SI internal combustion engines >19 KW (25 HP) that use gasoline?',
+    );
+    expect(table?.label).toBe(
+      'Table 1 to Subpart JJJJ of Part 60—NOX, CO, and VOC Emission Standards for Engines <10 Liters & >25 HP',
+    );
+    expect(table?.appendix).toBe('Table 1 to Subpart JJJJ of Part 60');
   });
 
   it("reads eCFR's current index date and reuses it across calls", async () => {
@@ -641,10 +751,135 @@ describe('EcfrService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('serves every date bound from one titles read', async () => {
+    // The up-to-date check runs on every dated read; it must not add a request
+    // per call on top of the latest-issue-date lookup the undated reads make.
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        meta: { date: '2026-09-18' },
+        titles: [{ number: 1, latest_issue_date: '2026-08-10', up_to_date_as_of: '2026-09-18' }],
+      }),
+    );
+    const ctx = createMockContext();
+
+    expect(await service.upToDateAsOf(1, ctx)).toBe('2026-09-18');
+    expect(await service.latestIssueDate(1, ctx)).toBe('2026-08-10');
+    expect(await service.currentDate(ctx)).toBe('2026-09-18');
+    expect(await service.listTitles(ctx)).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the up-to-date date, not the latest issue date, as the bound', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        meta: { date: '2026-09-18' },
+        titles: [{ number: 40, latest_issue_date: '2026-09-17', up_to_date_as_of: '2026-09-18' }],
+      }),
+    );
+    const ctx = createMockContext();
+    expect(await service.upToDateAsOf(40, ctx)).toBe('2026-09-18');
+    expect(await service.upToDateAsOf(35, ctx)).toBeNull();
+  });
+
+  it('does not cache a titles document that names no index date', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ titles: [] }));
+    fetchMock.mockResolvedValueOnce(jsonResponse({ meta: { date: '2026-09-18' }, titles: [] }));
+    const ctx = createMockContext();
+
+    await expect(service.currentDate(ctx)).rejects.toMatchObject({
+      data: { reason: 'upstream_unavailable' },
+    });
+    expect(await service.currentDate(ctx)).toBe('2026-09-18');
+  });
+
+  describe("the versioner's past-date 404", () => {
+    /** A 404 exactly as fetchWithTimeout raises it, with the body it captured. */
+    function notFoundWith(body: string): McpError {
+      return new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404', {
+        status: 404,
+        body,
+      });
+    }
+    const PAST =
+      '{"error":"The requested date 2030-01-01 is past the title\'s most recent issue date of 2026-09-18, see https://www.ecfr.gov/api/versioner/v1/titles for details"}';
+    const NO_MATCH = '{"error":"No matching content found."}';
+
+    it('reads as date_out_of_range on a section or part read', async () => {
+      fetchMock.mockRejectedValue(notFoundWith(PAST));
+      const ctx = createMockContext();
+      const err = await service
+        .getSectionText(40, '141', '141.61', '2030-01-01', ctx)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(McpError);
+      expect((err as McpError).code).toBe(JsonRpcErrorCode.ValidationError);
+      expect((err as McpError).data?.reason).toBe('date_out_of_range');
+      expect((err as McpError).message).toBe(
+        "Date 2030-01-01 is outside eCFR's coverage for title 40, which runs 2017-01-01 through 2026-09-18.",
+      );
+    });
+
+    it('reads as date_out_of_range on an appendix read', async () => {
+      fetchMock.mockRejectedValue(notFoundWith(PAST));
+      const ctx = createMockContext();
+      await expect(
+        service.getAppendixText(40, '50', 'Appendix A-1 to Part 50', '2030-01-01', ctx),
+      ).rejects.toMatchObject({ data: { reason: 'date_out_of_range' } });
+    });
+
+    it('reads as date_out_of_range on a structure read, not title_not_found', async () => {
+      fetchMock.mockRejectedValue(notFoundWith(PAST));
+      const ctx = createMockContext();
+      await expect(service.browseStructure(40, undefined, '2030-01-01', ctx)).rejects.toMatchObject(
+        { data: { reason: 'date_out_of_range' } },
+      );
+    });
+
+    it('leaves the no-match 404 as no such location', async () => {
+      fetchMock.mockRejectedValue(notFoundWith(NO_MATCH));
+      const ctx = createMockContext();
+      expect(await service.getSectionText(40, '141', '141.9999', '2026-09-17', ctx)).toBeNull();
+      expect(
+        await service.getAppendixText(40, '50', 'Appendix Z to Part 50', '2026-09-17', ctx),
+      ).toBeNull();
+      await expect(service.browseStructure(35, undefined, '2026-09-17', ctx)).rejects.toMatchObject(
+        { data: { reason: 'title_not_found' } },
+      );
+    });
+  });
+
+  it('indexes a whole part’s sections at the offsets their text starts in the body', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(PART_XML));
+    const ctx = createMockContext();
+    const result = await service.getSectionText(40, '50', undefined, '2026-08-06', ctx);
+    if (!result) throw new Error('expected part text, got null');
+
+    expect(result.bodyText).toBe('§ 50.1 Definitions.\nTerms.\n\n§ 50.2 Scope.\nScope text.');
+    expect(result.sections).toEqual([
+      { section: '50.1', heading: '§ 50.1 Definitions.', cfrCite: '40 CFR 50.1', offset: 0 },
+      { section: '50.2', heading: '§ 50.2 Scope.', cfrCite: '40 CFR 50.2', offset: 28 },
+    ]);
+    for (const s of result.sections ?? []) {
+      expect(result.bodyText.startsWith(s.heading, s.offset)).toBe(true);
+    }
+  });
+
+  it('reports the identifier the versioner returned on a section read', async () => {
+    fetchMock.mockResolvedValueOnce(
+      xmlResponse(
+        '<?xml version="1.0"?>\n<DIV8 N="25" TYPE="SECTION"><HEAD>Section 25 Traffic.</HEAD><P>Text.</P></DIV8>',
+      ),
+    );
+    const ctx = createMockContext();
+    const result = await service.getSectionText(14, '241', '25', '2026-09-15', ctx);
+    expect(result?.section).toBe('25');
+    expect(result?.heading).toBe('Section 25 Traffic.');
+  });
+
   it('strips <strong> tags the search API wraps around matched terms', async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
-    const hit = (await service.search('ambient', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('ambient', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.excerpt).toBe(
@@ -664,7 +899,7 @@ describe('EcfrService', () => {
       }),
     );
     const ctx = createMockContext();
-    const hit = (await service.search('air quality', 40, undefined, 20, FAKE_INDEX_DATE, ctx))
+    const hit = (await service.search('air quality', 40, undefined, 1, 20, FAKE_INDEX_DATE, ctx))
       .results[0]!;
 
     expect(hit.heading).toBe('§ 50.1');

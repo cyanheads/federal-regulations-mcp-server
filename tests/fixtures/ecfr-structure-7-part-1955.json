@@ -1,0 +1,1231 @@
+{
+  "identifier": "7",
+  "label": "Title 7—Agriculture",
+  "label_level": "Title 7",
+  "label_description": "Agriculture",
+  "reserved": false,
+  "type": "title",
+  "size": 42240021,
+  "children": [
+    {
+      "identifier": "B",
+      "label": "Subtitle B—Regulations of the Department of Agriculture",
+      "label_level": "Subtitle B",
+      "label_description": "Regulations of the Department of Agriculture",
+      "reserved": false,
+      "type": "subtitle",
+      "size": 39350209,
+      "children": [
+        {
+          "identifier": "XVIII",
+          "label": " Chapter XVIII—Rural Housing Service, Rural Business-Cooperative Service, and Rural Utilities Service, Department of Agriculture",
+          "label_level": " Chapter XVIII",
+          "label_description": "Rural Housing Service, Rural Business-Cooperative Service, and Rural Utilities Service, Department of Agriculture",
+          "reserved": false,
+          "type": "chapter",
+          "size": 3232925,
+          "children": [
+            {
+              "identifier": "H",
+              "label": "Subchapter H—Program Regulations",
+              "label_level": "Subchapter H",
+              "label_description": "Program Regulations",
+              "reserved": false,
+              "type": "subchapter",
+              "size": 3021253,
+              "children": [
+                {
+                  "identifier": "1955",
+                  "label": "Part 1955—Property Management",
+                  "label_level": "Part 1955",
+                  "label_description": "Property Management",
+                  "reserved": false,
+                  "type": "part",
+                  "volumes": ["14"],
+                  "size": 331891,
+                  "children": [
+                    {
+                      "identifier": "A",
+                      "label": "Subpart A—Liquidation of Loans Secured by Real Estate and Acquisition of Real and Chattel Property",
+                      "label_level": "Subpart A",
+                      "label_description": "Liquidation of Loans Secured by Real Estate and Acquisition of Real and Chattel Property",
+                      "reserved": false,
+                      "type": "subpart",
+                      "volumes": ["14"],
+                      "size": 92908,
+                      "children": [
+                        {
+                          "identifier": "1955.1",
+                          "label": "§ 1955.1 Purpose.",
+                          "label_level": "§ 1955.1",
+                          "label_description": "Purpose.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1412
+                        },
+                        {
+                          "identifier": "1955.2",
+                          "label": "§ 1955.2 Policy.",
+                          "label_level": "§ 1955.2",
+                          "label_description": "Policy.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1201
+                        },
+                        {
+                          "identifier": "1955.3",
+                          "label": "§ 1955.3 Definitions.",
+                          "label_level": "§ 1955.3",
+                          "label_description": "Definitions.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 5889
+                        },
+                        {
+                          "identifier": "1955.4",
+                          "label": "§ 1955.4 Redelegation of authority.",
+                          "label_level": "§ 1955.4",
+                          "label_description": "Redelegation of authority.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 2520
+                        },
+                        {
+                          "identifier": "1955.5",
+                          "label": "§ 1955.5 General actions.",
+                          "label_level": "§ 1955.5",
+                          "label_description": "General actions.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 2399
+                        },
+                        {
+                          "identifier": "1955.6-1955.8",
+                          "label": "§§ 1955.6-1955.8 [Reserved]",
+                          "label_level": "§§ 1955.6-1955.8",
+                          "label_description": "§§ 1955.6-1955.8 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 248
+                        },
+                        {
+                          "identifier": "1955.9",
+                          "label": "§ 1955.9 Requirements for voluntary conveyance of real property located within a federally recognized Indian reservation owned by a Native American borrower-owner.",
+                          "label_level": "§ 1955.9",
+                          "label_description": "Requirements for voluntary conveyance of real property located within a federally recognized Indian reservation owned by a Native American borrower-owner.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 5450
+                        },
+                        {
+                          "identifier": "1955.10",
+                          "label": "§ 1955.10 Voluntary conveyance of real property by the borrower to the Government.",
+                          "label_level": "§ 1955.10",
+                          "label_description": "Voluntary conveyance of real property by the borrower to the Government.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 22375
+                        },
+                        {
+                          "identifier": "1955.11",
+                          "label": "§ 1955.11 Conveyance of property to Rural Development by trustee in bankruptcy.",
+                          "label_level": "§ 1955.11",
+                          "label_description": "Conveyance of property to Rural Development by trustee in bankruptcy.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 2049
+                        },
+                        {
+                          "identifier": "1955.12",
+                          "label": "§ 1955.12 Acquisition of property which served as security for a loan guarantee by Rural Development or at sale by another lienholder, bankruptcy trustee, or taxing authority.",
+                          "label_level": "§ 1955.12",
+                          "label_description": "Acquisition of property which served as security for a loan guarantee by Rural Development or at sale by another lienholder, bankruptcy trustee, or taxing authority.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 601
+                        },
+                        {
+                          "identifier": "1955.13",
+                          "label": "§ 1955.13 Acquisition of property by exercise of Government redemption rights.",
+                          "label_level": "§ 1955.13",
+                          "label_description": "Acquisition of property by exercise of Government redemption rights.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1543
+                        },
+                        {
+                          "identifier": "1955.14",
+                          "label": "§ 1955.14 [Reserved]",
+                          "label_level": "§ 1955.14",
+                          "label_description": "§ 1955.14 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 222
+                        },
+                        {
+                          "identifier": "1955.15",
+                          "label": "§ 1955.15 Foreclosure by the Government of loans secured by real estate.",
+                          "label_level": "§ 1955.15",
+                          "label_description": "Foreclosure by the Government of loans secured by real estate.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 32019
+                        },
+                        {
+                          "identifier": "1955.16-1955.17",
+                          "label": "§§ 1955.16-1955.17 [Reserved]",
+                          "label_level": "§§ 1955.16-1955.17",
+                          "label_description": "§§ 1955.16-1955.17 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.18",
+                          "label": "§ 1955.18 Actions required after acquisition of property.",
+                          "label_level": "§ 1955.18",
+                          "label_description": "Actions required after acquisition of property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 3457
+                        },
+                        {
+                          "identifier": "1955.19",
+                          "label": "§ 1955.19 [Reserved]",
+                          "label_level": "§ 1955.19",
+                          "label_description": "§ 1955.19 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 222
+                        },
+                        {
+                          "identifier": "1955.20",
+                          "label": "§ 1955.20 Acquisition of chattel property.",
+                          "label_level": "§ 1955.20",
+                          "label_description": "Acquisition of chattel property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 7475
+                        },
+                        {
+                          "identifier": "1955.21",
+                          "label": "§ 1955.21 Exception authority.",
+                          "label_level": "§ 1955.21",
+                          "label_description": "Exception authority.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1180
+                        },
+                        {
+                          "identifier": "1955.22",
+                          "label": "§ 1955.22 State supplements.",
+                          "label_level": "§ 1955.22",
+                          "label_description": "State supplements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 607
+                        },
+                        {
+                          "identifier": "1955.23-1955.49",
+                          "label": "§§ 1955.23-1955.49 [Reserved]",
+                          "label_level": "§§ 1955.23-1955.49",
+                          "label_description": "§§ 1955.23-1955.49 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.50",
+                          "label": "§ 1955.50 OMB control number.",
+                          "label_level": "§ 1955.50",
+                          "label_description": "OMB control number.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1168
+                        },
+                        {
+                          "identifier": "Exhibits A-F to Subpart A of Part 1955",
+                          "label": "Exhibits A-F to Subpart A of Part 1955 [Reserved]\n",
+                          "label_level": "Exhibits A-F to Subpart A of Part 1955",
+                          "label_description": "Exhibits A-F to Subpart A of Part 1955 [Reserved]\n",
+                          "reserved": true,
+                          "type": "appendix",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 359
+                        }
+                      ],
+                      "descendant_range": "1955.1 – 1955.50"
+                    },
+                    {
+                      "identifier": "B",
+                      "label": "Subpart B—Management of Property",
+                      "label_level": "Subpart B",
+                      "label_description": "Management of Property",
+                      "reserved": false,
+                      "type": "subpart",
+                      "volumes": ["14"],
+                      "size": 70159,
+                      "children": [
+                        {
+                          "identifier": "1955.51",
+                          "label": "§ 1955.51 Purpose.",
+                          "label_level": "§ 1955.51",
+                          "label_description": "Purpose.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1637
+                        },
+                        {
+                          "identifier": "1955.52",
+                          "label": "§ 1955.52 Policy.",
+                          "label_level": "§ 1955.52",
+                          "label_description": "Policy.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 869
+                        },
+                        {
+                          "identifier": "1955.53",
+                          "label": "§ 1955.53 Definitions.",
+                          "label_level": "§ 1955.53",
+                          "label_description": "Definitions.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 6528
+                        },
+                        {
+                          "identifier": "1955.54",
+                          "label": "§ 1955.54 Redelegation of authority.",
+                          "label_level": "§ 1955.54",
+                          "label_description": "Redelegation of authority.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1704
+                        },
+                        {
+                          "identifier": "1955.55",
+                          "label": "§ 1955.55 Taking abandoned real or chattel property into custody and related actions.",
+                          "label_level": "§ 1955.55",
+                          "label_description": "Taking abandoned real or chattel property into custody and related actions.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 11363
+                        },
+                        {
+                          "identifier": "1955.56",
+                          "label": "§ 1955.56 Real property located in Coastal Barrier Resources System (CBRS).",
+                          "label_level": "§ 1955.56",
+                          "label_description": "Real property located in Coastal Barrier Resources System (CBRS).",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 2442
+                        },
+                        {
+                          "identifier": "1955.57",
+                          "label": "§ 1955.57 Real property containing underground storage tanks.",
+                          "label_level": "§ 1955.57",
+                          "label_description": "Real property containing underground storage tanks.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 4038
+                        },
+                        {
+                          "identifier": "1955.58-1955.59",
+                          "label": "§§ 1955.58-1955.59 [Reserved]",
+                          "label_level": "§§ 1955.58-1955.59",
+                          "label_description": "§§ 1955.58-1955.59 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.60",
+                          "label": "§ 1955.60 Inventory property subject to redemption by the borrower.",
+                          "label_level": "§ 1955.60",
+                          "label_description": "Inventory property subject to redemption by the borrower.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1430
+                        },
+                        {
+                          "identifier": "1955.61",
+                          "label": "§ 1955.61 Eviction of persons occupying inventory real property or dispossession of persons in possession of chattel property.",
+                          "label_level": "§ 1955.61",
+                          "label_description": "Eviction of persons occupying inventory real property or dispossession of persons in possession of chattel property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1152
+                        },
+                        {
+                          "identifier": "1955.62",
+                          "label": "§ 1955.62 Removal and disposition of nonsecurity personal property from inventory real property.",
+                          "label_level": "§ 1955.62",
+                          "label_description": "Removal and disposition of nonsecurity personal property from inventory real property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 4637
+                        },
+                        {
+                          "identifier": "1955.63",
+                          "label": "§ 1955.63 Suitability determination.",
+                          "label_level": "§ 1955.63",
+                          "label_description": "Suitability determination.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-04-29T01:00:00-0400",
+                          "size": 3646
+                        },
+                        {
+                          "identifier": "1955.64",
+                          "label": "§ 1955.64 [Reserved]",
+                          "label_level": "§ 1955.64",
+                          "label_description": "§ 1955.64 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 222
+                        },
+                        {
+                          "identifier": "1955.65",
+                          "label": "§ 1955.65 Management of inventory and/or custodial real property.",
+                          "label_level": "§ 1955.65",
+                          "label_description": "Management of inventory and/or custodial real property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 8585
+                        },
+                        {
+                          "identifier": "1955.66",
+                          "label": "§ 1955.66 Lease of real property.",
+                          "label_level": "§ 1955.66",
+                          "label_description": "Lease of real property.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 12187
+                        },
+                        {
+                          "identifier": "1955.67-1955.71",
+                          "label": "§§ 1955.67-1955.71 [Reserved]",
+                          "label_level": "§§ 1955.67-1955.71",
+                          "label_description": "§§ 1955.67-1955.71 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.72",
+                          "label": "§ 1955.72 Utilization of inventory housing by Federal Emergency Management Agency (FEMA) or under a Memorandum of Understanding between the Agency and the Department of Health and Human Services (HHS) for transitional housing for the homeless.",
+                          "label_level": "§ 1955.72",
+                          "label_description": "Utilization of inventory housing by Federal Emergency Management Agency (FEMA) or under a Memorandum of Understanding between the Agency and the Department of Health and Human Services (HHS) for transitional housing for the homeless.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1731
+                        },
+                        {
+                          "identifier": "1955.73-1955.80",
+                          "label": "§§ 1955.73-1955.80 [Reserved]",
+                          "label_level": "§§ 1955.73-1955.80",
+                          "label_description": "§§ 1955.73-1955.80 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.81",
+                          "label": "§ 1955.81 Exception authority.",
+                          "label_level": "§ 1955.81",
+                          "label_description": "Exception authority.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1277
+                        },
+                        {
+                          "identifier": "1955.82",
+                          "label": "§ 1955.82 State supplements.",
+                          "label_level": "§ 1955.82",
+                          "label_description": "State supplements.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 695
+                        },
+                        {
+                          "identifier": "1955.83-1955.99",
+                          "label": "§§ 1955.83-1955.99 [Reserved]",
+                          "label_level": "§§ 1955.83-1955.99",
+                          "label_description": "§§ 1955.83-1955.99 [Reserved]",
+                          "reserved": true,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 256
+                        },
+                        {
+                          "identifier": "1955.100",
+                          "label": "§ 1955.100 OMB control number.",
+                          "label_level": "§ 1955.100",
+                          "label_description": "OMB control number.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 405
+                        },
+                        {
+                          "identifier": "Exhibit A to Subpart B of Part 1955",
+                          "label": "Exhibit A to Subpart B of Part 1955—Memorandum of Understanding Between the Federal Emergency Management Agency and Rural Development\n",
+                          "label_level": "Exhibit A to Subpart B of Part 1955",
+                          "label_description": "Memorandum of Understanding Between the Federal Emergency Management Agency and Rural Development\n",
+                          "reserved": false,
+                          "type": "appendix",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 710
+                        },
+                        {
+                          "identifier": "Exhibit B to Subpart B of Part 1955",
+                          "label": "Exhibit B to Subpart B of Part 1955—Notification of Tribe of Availability of Farm Property for Purchase\n",
+                          "label_level": "Exhibit B to Subpart B of Part 1955",
+                          "label_description": "Notification of Tribe of Availability of Farm Property for Purchase\n",
+                          "reserved": false,
+                          "type": "appendix",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 2724
+                        },
+                        {
+                          "identifier": "Exhibit C to Subpart B of Part 1955",
+                          "label": "Exhibit C to Subpart B of Part 1955—Cooperative Agreement (Example)\n",
+                          "label_level": "Exhibit C to Subpart B of Part 1955",
+                          "label_description": "Cooperative Agreement (Example)\n",
+                          "reserved": false,
+                          "type": "appendix",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 550
+                        },
+                        {
+                          "identifier": "Exhibit D to Subpart B of Part 1955",
+                          "label": "Exhibit D to Subpart B of Part 1955—Fact Sheet—The Federal Interagency Task Force on Food and Shelter for the Homeless\n",
+                          "label_level": "Exhibit D to Subpart B of Part 1955",
+                          "label_description": "Fact Sheet—The Federal Interagency Task Force on Food and Shelter for the Homeless\n",
+                          "reserved": false,
+                          "type": "appendix",
+                          "volumes": ["14"],
+                          "received_on": "2023-03-29T21:40:16-0400",
+                          "size": 603
+                        }
+                      ],
+                      "descendant_range": "1955.51 – 1955.100"
+                    },
+                    {
+                      "identifier": "C",
+                      "label": "Subpart C—Disposal of Inventory Property",
+                      "label_level": "Subpart C",
+                      "label_description": "Disposal of Inventory Property",
+                      "reserved": false,
+                      "type": "subpart",
+                      "volumes": ["14"],
+                      "size": 168824,
+                      "children": [
+                        {
+                          "identifier": "1955.101",
+                          "label": "§ 1955.101 Purpose.",
+                          "label_level": "§ 1955.101",
+                          "label_description": "Purpose.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1440
+                        },
+                        {
+                          "identifier": "1955.102",
+                          "label": "§ 1955.102 Policy.",
+                          "label_level": "§ 1955.102",
+                          "label_description": "Policy.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 1409
+                        },
+                        {
+                          "identifier": "1955.103",
+                          "label": "§ 1955.103 Definitions.",
+                          "label_level": "§ 1955.103",
+                          "label_description": "Definitions.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2019-02-27T21:00:06-0500",
+                          "size": 13306
+                        },
+                        {
+                          "identifier": "1955.104",
+                          "label": "§ 1955.104 Authorities and responsibilities.",
+                          "label_level": "§ 1955.104",
+                          "label_description": "Authorities and responsibilities.",
+                          "reserved": false,
+                          "type": "section",
+                          "volumes": ["14"],
+                          "received_on": "2017-01-07T00:00:00-0500",
+                          "size": 2555
+                        },
+                        {
+                          "generated_id": true,
+                          "identifier": "ECFR67ca98b4f297987",
+                          "label": "Consolidated Farm and Rural Development Act (CONACT) Real Property",
+                          "label_level": "Consolidated Farm and Rural Development Act (CONACT) Real Property",
+                          "label_description": "Consolidated Farm and Rural Development Act (CONACT) Real Property",
+                          "reserved": false,
+                          "type": "subject_group",
+                          "size": 19738,
+                          "children": [
+                            {
+                              "identifier": "1955.105",
+                              "label": "§ 1955.105 Real property affected (CONACT).",
+                              "label_level": "§ 1955.105",
+                              "label_description": "Real property affected (CONACT).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 4548
+                            },
+                            {
+                              "identifier": "1955.106",
+                              "label": "§ 1955.106 Disposition of farm property.",
+                              "label_level": "§ 1955.106",
+                              "label_description": "Disposition of farm property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1594
+                            },
+                            {
+                              "identifier": "1955.107",
+                              "label": "§ 1955.107 Sale of FSA property (CONACT).",
+                              "label_level": "§ 1955.107",
+                              "label_description": "Sale of FSA property (CONACT).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-04-29T01:00:00-0400",
+                              "size": 10555
+                            },
+                            {
+                              "identifier": "1955.108",
+                              "label": "§ 1955.108 Sale of (CONACT) property other than FSA property.",
+                              "label_level": "§ 1955.108",
+                              "label_description": "Sale of (CONACT) property other than FSA property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 537
+                            },
+                            {
+                              "identifier": "1955.109",
+                              "label": "§ 1955.109 Processing and closing (CONACT).",
+                              "label_level": "§ 1955.109",
+                              "label_description": "Processing and closing (CONACT).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2504
+                            }
+                          ],
+                          "descendant_range": "1955.105 – 1955.109"
+                        },
+                        {
+                          "generated_id": true,
+                          "identifier": "ECFRbe277dd2b3e7a5d",
+                          "label": "Rural Housing (RH) Real Property",
+                          "label_level": "Rural Housing (RH) Real Property",
+                          "label_description": "Rural Housing (RH) Real Property",
+                          "reserved": false,
+                          "type": "subject_group",
+                          "size": 45492,
+                          "children": [
+                            {
+                              "identifier": "1955.110",
+                              "label": "§ 1955.110 [Reserved]",
+                              "label_level": "§ 1955.110",
+                              "label_description": "§ 1955.110 [Reserved]",
+                              "reserved": true,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 226
+                            },
+                            {
+                              "identifier": "1955.111",
+                              "label": "§ 1955.111 Sale of real estate for RH purposes (housing).",
+                              "label_level": "§ 1955.111",
+                              "label_description": "Sale of real estate for RH purposes (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 931
+                            },
+                            {
+                              "identifier": "1955.112",
+                              "label": "§ 1955.112 Method of sale (housing).",
+                              "label_level": "§ 1955.112",
+                              "label_description": "Method of sale (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-05-17T19:30:11-0400",
+                              "size": 3903
+                            },
+                            {
+                              "identifier": "1955.113",
+                              "label": "§ 1955.113 Price (housing).",
+                              "label_level": "§ 1955.113",
+                              "label_description": "Price (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 4059
+                            },
+                            {
+                              "identifier": "1955.114",
+                              "label": "§ 1955.114 Sales steps for program property (housing).",
+                              "label_level": "§ 1955.114",
+                              "label_description": "Sales steps for program property (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 13283
+                            },
+                            {
+                              "identifier": "1955.115",
+                              "label": "§ 1955.115 Sales steps for nonprogram (NP) property (housing).",
+                              "label_level": "§ 1955.115",
+                              "label_description": "Sales steps for nonprogram (NP) property (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 4474
+                            },
+                            {
+                              "identifier": "1955.116",
+                              "label": "§ 1955.116 Requirements for sale of property not meeting decent, safe and sanitary (DSS) standards (housing).",
+                              "label_level": "§ 1955.116",
+                              "label_description": "Requirements for sale of property not meeting decent, safe and sanitary (DSS) standards (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 5421
+                            },
+                            {
+                              "identifier": "1955.117",
+                              "label": "§ 1955.117 Processing credit sales on program terms (housing).",
+                              "label_level": "§ 1955.117",
+                              "label_description": "Processing credit sales on program terms (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 3929
+                            },
+                            {
+                              "identifier": "1955.118",
+                              "label": "§ 1955.118 Processing cash sales or MFH credit sales on NP terms.",
+                              "label_level": "§ 1955.118",
+                              "label_description": "Processing cash sales or MFH credit sales on NP terms.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2025-04-02T17:50:20-0400",
+                              "size": 5185
+                            },
+                            {
+                              "identifier": "1955.119",
+                              "label": "§ 1955.119 Sale of SFH inventory property to a public body or nonprofit organization.",
+                              "label_level": "§ 1955.119",
+                              "label_description": "Sale of SFH inventory property to a public body or nonprofit organization.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2976
+                            },
+                            {
+                              "identifier": "1955.120",
+                              "label": "§ 1955.120 Payment of points (housing).",
+                              "label_level": "§ 1955.120",
+                              "label_description": "Payment of points (housing).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1105
+                            }
+                          ],
+                          "descendant_range": "1955.110 – 1955.120"
+                        },
+                        {
+                          "generated_id": true,
+                          "identifier": "ECFR2708f7a1398833d",
+                          "label": "Chattel Property",
+                          "label_level": "Chattel Property",
+                          "label_description": "Chattel Property",
+                          "reserved": false,
+                          "type": "subject_group",
+                          "size": 9633,
+                          "children": [
+                            {
+                              "identifier": "1955.121",
+                              "label": "§ 1955.121 Sale of acquired chattels (chattel).",
+                              "label_level": "§ 1955.121",
+                              "label_description": "Sale of acquired chattels (chattel).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 647
+                            },
+                            {
+                              "identifier": "1955.122",
+                              "label": "§ 1955.122 Method of sale (chattel).",
+                              "label_level": "§ 1955.122",
+                              "label_description": "Method of sale (chattel).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 5093
+                            },
+                            {
+                              "identifier": "1955.123",
+                              "label": "§ 1955.123 Sale procedures (chattel).",
+                              "label_level": "§ 1955.123",
+                              "label_description": "Sale procedures (chattel).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2806
+                            },
+                            {
+                              "identifier": "1955.124",
+                              "label": "§ 1955.124 Sale with inventory real estate (chattel).",
+                              "label_level": "§ 1955.124",
+                              "label_description": "Sale with inventory real estate (chattel).",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 823
+                            },
+                            {
+                              "identifier": "1955.125-1955.126",
+                              "label": "§§ 1955.125-1955.126 [Reserved]",
+                              "label_level": "§§ 1955.125-1955.126",
+                              "label_description": "§§ 1955.125-1955.126 [Reserved]",
+                              "reserved": true,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 264
+                            }
+                          ],
+                          "descendant_range": "1955.121 – 1955.126"
+                        },
+                        {
+                          "generated_id": true,
+                          "identifier": "ECFR4a39b613e93d562",
+                          "label": "Use of Contractors To Dispose of Inventory Property",
+                          "label_level": "Use of Contractors To Dispose of Inventory Property",
+                          "label_description": "Use of Contractors To Dispose of Inventory Property",
+                          "reserved": false,
+                          "type": "subject_group",
+                          "size": 13938,
+                          "children": [
+                            {
+                              "identifier": "1955.127",
+                              "label": "§ 1955.127 Selection and use of contractors to dispose of inventory property.",
+                              "label_level": "§ 1955.127",
+                              "label_description": "Selection and use of contractors to dispose of inventory property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 593
+                            },
+                            {
+                              "identifier": "1955.128",
+                              "label": "§ 1955.128 Appraisers.",
+                              "label_level": "§ 1955.128",
+                              "label_description": "Appraisers.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1923
+                            },
+                            {
+                              "identifier": "1955.129",
+                              "label": "§ 1955.129 Business brokers.",
+                              "label_level": "§ 1955.129",
+                              "label_description": "Business brokers.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 744
+                            },
+                            {
+                              "identifier": "1955.130",
+                              "label": "§ 1955.130 Real estate brokers.",
+                              "label_level": "§ 1955.130",
+                              "label_description": "Real estate brokers.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 8562
+                            },
+                            {
+                              "identifier": "1955.131",
+                              "label": "§ 1955.131 Auctioneers.",
+                              "label_level": "§ 1955.131",
+                              "label_description": "Auctioneers.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2116
+                            }
+                          ],
+                          "descendant_range": "1955.127 – 1955.131"
+                        },
+                        {
+                          "generated_id": true,
+                          "identifier": "ECFRb2a213d03a141ba",
+                          "label": "General",
+                          "label_level": "General",
+                          "label_description": "General",
+                          "reserved": false,
+                          "type": "subject_group",
+                          "size": 61313,
+                          "children": [
+                            {
+                              "identifier": "1955.132",
+                              "label": "§ 1955.132 Pilot projects.",
+                              "label_level": "§ 1955.132",
+                              "label_description": "Pilot projects.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 853
+                            },
+                            {
+                              "identifier": "1955.133",
+                              "label": "§ 1955.133 Nondiscrimination.",
+                              "label_level": "§ 1955.133",
+                              "label_description": "Nondiscrimination.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1668
+                            },
+                            {
+                              "identifier": "1955.134",
+                              "label": "§ 1955.134 Loss, damage, or existing defects in inventory real property.",
+                              "label_level": "§ 1955.134",
+                              "label_description": "Loss, damage, or existing defects in inventory real property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1591
+                            },
+                            {
+                              "identifier": "1955.135",
+                              "label": "§ 1955.135 Taxes on inventory real property.",
+                              "label_level": "§ 1955.135",
+                              "label_description": "Taxes on inventory real property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2020
+                            },
+                            {
+                              "identifier": "1955.136",
+                              "label": "§ 1955.136 Environmental review requirements.",
+                              "label_level": "§ 1955.136",
+                              "label_description": "Environmental review requirements.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-04-29T01:00:00-0400",
+                              "size": 1743
+                            },
+                            {
+                              "identifier": "1955.137",
+                              "label": "§ 1955.137 Real property located in special areas or having special characteristics.",
+                              "label_level": "§ 1955.137",
+                              "label_description": "Real property located in special areas or having special characteristics.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 13249
+                            },
+                            {
+                              "identifier": "1955.138",
+                              "label": "§ 1955.138 Property subject to redemption rights.",
+                              "label_level": "§ 1955.138",
+                              "label_description": "Property subject to redemption rights.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1881
+                            },
+                            {
+                              "identifier": "1955.139",
+                              "label": "§ 1955.139 Disposition of real property rights and title to real property.",
+                              "label_level": "§ 1955.139",
+                              "label_description": "Disposition of real property rights and title to real property.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-04-29T01:00:00-0400",
+                              "size": 14147
+                            },
+                            {
+                              "identifier": "1955.140",
+                              "label": "§ 1955.140 Sale in parcels.",
+                              "label_level": "§ 1955.140",
+                              "label_description": "Sale in parcels.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 1721
+                            },
+                            {
+                              "identifier": "1955.141",
+                              "label": "§ 1955.141 Transferring title.",
+                              "label_level": "§ 1955.141",
+                              "label_description": "Transferring title.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1280
+                            },
+                            {
+                              "identifier": "1955.142-1955.143",
+                              "label": "§§ 1955.142-1955.143 [Reserved]",
+                              "label_level": "§§ 1955.142-1955.143",
+                              "label_description": "§§ 1955.142-1955.143 [Reserved]",
+                              "reserved": true,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 264
+                            },
+                            {
+                              "identifier": "1955.144",
+                              "label": "§ 1955.144 Disposal of NP or surplus property to, through, or acquisition from other agencies.",
+                              "label_level": "§ 1955.144",
+                              "label_description": "Disposal of NP or surplus property to, through, or acquisition from other agencies.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2025-05-13T17:40:09-0400",
+                              "size": 2575
+                            },
+                            {
+                              "identifier": "1955.145",
+                              "label": "§ 1955.145 Land acquisition to effect sale.",
+                              "label_level": "§ 1955.145",
+                              "label_description": "Land acquisition to effect sale.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1905
+                            },
+                            {
+                              "identifier": "1955.146",
+                              "label": "§ 1955.146 Advertising.",
+                              "label_level": "§ 1955.146",
+                              "label_description": "Advertising.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 3224
+                            },
+                            {
+                              "identifier": "1955.147",
+                              "label": "§ 1955.147 Sealed bid sales.",
+                              "label_level": "§ 1955.147",
+                              "label_description": "Sealed bid sales.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2022-05-31T22:00:09-0400",
+                              "size": 5571
+                            },
+                            {
+                              "identifier": "1955.148",
+                              "label": "§ 1955.148 Auction sales.",
+                              "label_level": "§ 1955.148",
+                              "label_description": "Auction sales.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 2843
+                            },
+                            {
+                              "identifier": "1955.149",
+                              "label": "§ 1955.149 Exception authority.",
+                              "label_level": "§ 1955.149",
+                              "label_description": "Exception authority.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 1435
+                            },
+                            {
+                              "identifier": "1955.150",
+                              "label": "§ 1955.150 State supplements.",
+                              "label_level": "§ 1955.150",
+                              "label_description": "State supplements.",
+                              "reserved": false,
+                              "type": "section",
+                              "volumes": ["14"],
+                              "received_on": "2017-01-07T00:00:00-0500",
+                              "size": 682
+                            },
+                            {
+                              "identifier": "Exhibit A to Subpart C of Part 1955",
+                              "label": "Exhibit A to Subpart C of Part 1955—Notice of Flood, Mudslide Hazard or Wetland Area\n",
+                              "label_level": "Exhibit A to Subpart C of Part 1955",
+                              "label_description": "Notice of Flood, Mudslide Hazard or Wetland Area\n",
+                              "reserved": false,
+                              "type": "appendix",
+                              "volumes": ["14"],
+                              "received_on": "2023-03-29T21:40:16-0400",
+                              "size": 2661
+                            }
+                          ],
+                          "descendant_range": "1955.132 – 1955.150"
+                        }
+                      ],
+                      "descendant_range": "1955.101 – 1955.150"
+                    }
+                  ],
+                  "descendant_range": "1955.1 – 1955.150"
+                }
+              ],
+              "descendant_range": "1900 – 1999"
+            }
+          ],
+          "descendant_range": "1800 – 2099"
+        }
+      ],
+      "descendant_range": "27 – 5099"
+    }
+  ]
+}

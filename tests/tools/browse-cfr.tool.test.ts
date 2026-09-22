@@ -18,6 +18,7 @@ const browseStructure = vi.hoisted(() => vi.fn());
 const liveSearch = vi.hoisted(() => vi.fn());
 const latestIssueDate = vi.hoisted(() => vi.fn());
 const currentDate = vi.hoisted(() => vi.fn());
+const upToDateAsOf = vi.hoisted(() => vi.fn());
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorScope = vi.hoisted(() => vi.fn());
 const mirrorSearch = vi.hoisted(() => vi.fn());
@@ -29,8 +30,10 @@ vi.mock('@/services/ecfr/ecfr-service.js', () => ({
     search: liveSearch,
     latestIssueDate,
     currentDate,
+    upToDateAsOf,
   }),
   today: () => '2026-06-13',
+  ECFR_SEARCH_WINDOW: 10_000,
 }));
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
   mirrorReady,
@@ -73,16 +76,29 @@ const FULL_MIRROR = { complete: true, titles: [1, 2, 3] };
  * the shape a caller sees when a scoped search reaches the mirror unscoped.
  */
 function mirrorIndex(titles: number[], parts: string[] = ['50']) {
-  return (_query: string, title: number | undefined, part: string | undefined, limit: number) => {
+  return (
+    _query: string,
+    title: number | undefined,
+    part: string | undefined,
+    limit: number,
+    offset: number,
+  ) => {
     const rows = titles
       .filter((t) => title === undefined || t === title)
       .flatMap((t) =>
         parts
           .filter((p) => part === undefined || p === part)
           .map((p) => ({ ...hit, title: t, part: p, cfrCite: `${t} CFR ${p}.1` })),
-      )
-      .slice(0, limit);
-    return Promise.resolve({ totalCount: rows.length, results: rows });
+      );
+    const results = rows.slice(offset, offset + limit);
+    return Promise.resolve({
+      totalCount: rows.length,
+      results,
+      countBasis: 'sections',
+      hasMore: offset + results.length < rows.length,
+      windowCapped: false,
+      windowEnd: false,
+    });
   };
 }
 
@@ -94,6 +110,8 @@ describe('browseCfrTool', () => {
     latestIssueDate.mockReset();
     currentDate.mockReset();
     currentDate.mockResolvedValue('2026-08-06');
+    upToDateAsOf.mockReset();
+    upToDateAsOf.mockResolvedValue('2026-08-06');
     mirrorReady.mockReset();
     mirrorScope.mockReset();
     mirrorSearch.mockReset();
@@ -217,6 +235,7 @@ describe('browseCfrTool', () => {
       'ambient',
       40,
       undefined,
+      1,
       20,
       '2026-08-06',
       expect.anything(),
@@ -274,6 +293,7 @@ describe('browseCfrTool', () => {
       'ambient',
       undefined,
       undefined,
+      1,
       20,
       '2026-08-06',
       expect.anything(),
@@ -300,6 +320,7 @@ describe('browseCfrTool', () => {
       'ambient',
       undefined,
       undefined,
+      1,
       20,
       '2018-01-01',
       expect.anything(),
@@ -341,6 +362,7 @@ describe('browseCfrTool', () => {
       'ambient',
       40,
       '58',
+      1,
       20,
       '2026-08-06',
       expect.anything(),
@@ -365,7 +387,7 @@ describe('browseCfrTool', () => {
     const result = await browseCfrTool.handler(input, ctx);
 
     expect(result.source).toBe('mirror');
-    expect(mirrorSearch).toHaveBeenCalledWith('oxygen', 14, '25', 20);
+    expect(mirrorSearch).toHaveBeenCalledWith('oxygen', 14, '25', 20, 0);
     expect(result.results?.map((r) => r.cfrCite)).toEqual(['14 CFR 25.1']);
     expect(result.sourceScope).toContain('filtered to title 14 part 25');
     expect(liveSearch).not.toHaveBeenCalled();
@@ -389,6 +411,7 @@ describe('browseCfrTool', () => {
       'ambient',
       40,
       '58',
+      1,
       20,
       '2026-08-06',
       expect.anything(),
@@ -410,7 +433,15 @@ describe('browseCfrTool', () => {
     });
     await browseCfrTool.handler(input, ctx);
 
-    expect(liveSearch).toHaveBeenCalledWith('tax', 26, '16A', 20, '2026-08-06', expect.anything());
+    expect(liveSearch).toHaveBeenCalledWith(
+      'tax',
+      26,
+      '16A',
+      1,
+      20,
+      '2026-08-06',
+      expect.anything(),
+    );
   });
 
   it('rejects a part with no title in search mode rather than dropping the filter', async () => {
@@ -456,6 +487,7 @@ describe('browseCfrTool', () => {
       'ambient',
       undefined,
       undefined,
+      1,
       20,
       '2026-08-06',
       expect.anything(),
@@ -471,19 +503,79 @@ describe('browseCfrTool', () => {
     });
   });
 
+  it('pages a mirror search by offset and names the last page past the end', async () => {
+    mirrorReady.mockResolvedValue(true);
+    mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
+    mirrorSearch.mockImplementation(mirrorIndex([14], ['25', '91', '121']));
+    const search = async (page: number) => {
+      const ctx = handlerContext(browseCfrTool);
+      const input = browseCfrTool.input.parse({
+        mode: 'search',
+        query: 'oxygen',
+        title: 14,
+        page,
+        per_page: 2,
+      });
+      const result = await browseCfrTool.handler(input, ctx);
+      return { result, enrichment: getEnrichment(ctx) };
+    };
+
+    const first = await search(1);
+    expect(first.result.results?.map((r) => r.part)).toEqual(['25', '91']);
+    expect(first.enrichment).toMatchObject({ page: 1, totalCount: 3, truncated: true });
+    expect(first.enrichment.notice).toContain('page 2');
+
+    const second = await search(2);
+    expect(mirrorSearch).toHaveBeenLastCalledWith('oxygen', 14, undefined, 2, 2);
+    expect(second.result.results?.map((r) => r.part)).toEqual(['121']);
+    expect(second.enrichment.truncated).toBeUndefined();
+
+    const past = await search(3);
+    expect(past.result.results).toEqual([]);
+    expect(past.enrichment.notice).toMatch(/end on page 2/);
+    expect(past.enrichment.notice).not.toMatch(/No CFR sections matched/);
+    expect(liveSearch).not.toHaveBeenCalled();
+  });
+
+  it('says a page past 1 of an unpaged structure listing returns the listing whole', async () => {
+    listTitleNodes.mockResolvedValue([]);
+    const ctx = handlerContext(browseCfrTool);
+    const result = await browseCfrTool.handler(
+      browseCfrTool.input.parse({ mode: 'structure', page: 3 }),
+      ctx,
+    );
+    expect(result.nodes).toEqual([]);
+    expect(getEnrichment(ctx).notice).toMatch(/complete in one response/);
+  });
+
+  it('says a part that lists nothing may be reserved', async () => {
+    latestIssueDate.mockResolvedValue('2026-08-05');
+    browseStructure.mockResolvedValue([]);
+    const ctx = handlerContext(browseCfrTool);
+    const result = await browseCfrTool.handler(
+      browseCfrTool.input.parse({ mode: 'structure', title: 40, part: '99' }),
+      ctx,
+    );
+    expect(result.nodes).toEqual([]);
+    expect(getEnrichment(ctx)).toMatchObject({ totalCount: 0, page: 1 });
+    expect(getEnrichment(ctx).notice).toMatch(/lists no sections or appendices.*reserved/);
+  });
+
   it('format() renders structure nodes and search hits', () => {
     const structureBlocks = browseCfrTool.format!({
       mode: 'structure',
       date: '2026-06-13',
       nodes: [
         {
-          type: 'part',
-          identifier: '50',
-          label: 'Part 50',
-          description: null,
+          type: 'section',
+          identifier: '50.1',
+          label: '§ 50.1 Definitions.',
+          description: 'Definitions.',
           reserved: false,
-          cfrCite: '40 CFR 50',
+          cfrCite: '40 CFR 50.1',
           appendix: null,
+          subpart: null,
+          subjectGroup: null,
         },
         {
           type: 'appendix',
@@ -493,11 +585,13 @@ describe('browseCfrTool', () => {
           reserved: false,
           cfrCite: 'Appendix A-1 to Part 50, Title 40',
           appendix: 'Appendix A-1 to Part 50',
+          subpart: null,
+          subjectGroup: null,
         },
       ],
     });
     const structureText = structureBlocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
-    expect(structureText).toContain('40 CFR 50');
+    expect(structureText).toContain('40 CFR 50.1');
     // The appendix handle has to reach content[] too, or a markdown-only client
     // sees an appendix it cannot follow.
     expect(structureText).toContain('`Appendix A-1 to Part 50`');

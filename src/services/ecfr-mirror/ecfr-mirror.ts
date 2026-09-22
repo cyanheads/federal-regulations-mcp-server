@@ -41,7 +41,7 @@ import { logger, requestContextService } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { sectionCite } from '@/services/ecfr/cite.js';
 import { getEcfrService } from '@/services/ecfr/ecfr-service.js';
-import type { EcfrSearchHit, EcfrSectionResult } from '@/services/ecfr/types.js';
+import type { EcfrSearchHit, EcfrSearchPage, EcfrSectionResult } from '@/services/ecfr/types.js';
 import { isCompleteXmlDocument, parseCfrXml } from '@/services/ecfr/xml.js';
 import { ingestBudget } from '@/services/request-budget.js';
 
@@ -469,13 +469,18 @@ export async function mirrorGetSection(
  * `appendix` is always null here where a live hit may carry one. `sourceScope`
  * says so, because an appendix match the mirror cannot make is otherwise
  * indistinguishable from an appendix that does not exist.
+ *
+ * `offset` pages through the same relevance order. The index holds one row per
+ * section — no versions to collapse — and has no paging window, so the count is
+ * always of sections and every page is reachable.
  */
 export async function mirrorSearch(
   query: string,
   title: number | undefined,
   part: string | undefined,
   limit: number,
-): Promise<{ totalCount: number; results: EcfrSearchHit[] }> {
+  offset: number,
+): Promise<EcfrSearchPage> {
   const filters = [
     ...(typeof title === 'number' ? [{ column: 'title', op: 'eq' as const, value: title }] : []),
     ...(part ? [{ column: 'part', op: 'eq' as const, value: part }] : []),
@@ -485,7 +490,7 @@ export async function mirrorSearch(
     ...(filters.length > 0 ? { filters } : {}),
     sort: 'relevance',
     limit,
-    offset: 0,
+    offset,
   });
 
   const results: EcfrSearchHit[] = result.rows.map((row) => {
@@ -505,7 +510,14 @@ export async function mirrorSearch(
     };
   });
 
-  return { totalCount: result.total, results };
+  return {
+    results,
+    totalCount: result.total,
+    countBasis: 'sections',
+    hasMore: offset + results.length < result.total,
+    windowCapped: false,
+    windowEnd: false,
+  };
 }
 
 /**
