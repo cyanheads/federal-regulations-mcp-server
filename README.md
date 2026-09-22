@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.5-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -35,13 +35,13 @@ US federal regulatory law across three official sources: the Federal Register (p
 
 | Tool | Description |
 |:---|:---|
-| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, date range, and comment status |
+| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, and date range, ranked by relevance or date |
 | `regulations_get_document` | Fetch one Federal Register document by number, with the docket ID, CFR parts, and comment count that chain into other tools |
 | `regulations_browse_cfr` | Walk the CFR hierarchy or full-text-search the codified CFR |
 | `regulations_get_cfr_section` | Read codified CFR text for a section, whole part, or appendix, current or as of a past date |
 | `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov (key required) |
 | `regulations_find_comments` | Fetch public comments on a document or docket, or one comment's full body and attachments (key required) |
-| `regulations_list_open_comments` | List rules currently open for public comment, sorted by closing date |
+| `regulations_list_open_comments` | List proposed rules, comment-requesting final rules, and optionally notices currently open for public comment, soonest closing first |
 
 ### Resources
 
@@ -56,18 +56,21 @@ All resource data is also reachable via the tool surface — tool-only MCP clien
 
 ### `regulations_search_rules` <sub>tool</sub>
 
-- Keyless; full-text `query` optional, or browse by `type` (`PRORULE`/`RULE`/`NOTICE`/`PRESDOCU`), `agencies` (Federal Register slug), and `published_after`/`published_before`
+- Keyless; full-text `query` optional, or browse by `type` (`PRORULE`/`RULE`/`NOTICE`/`PRESDOCU`), `agencies` (Federal Register slug, e.g. `environmental-protection-agency`), and `published_after`/`published_before` (real calendar days, `YYYY-MM-DD`)
+- `order` is `relevance`, `newest`, or `oldest`; omitted, it is `relevance` with a `query` and `newest` without one
 - `per_page` 2–100 (default 20), `page` 1–50 — the Federal Register caps navigation at 50 pages / 5,000 records and total matches at 10,000; narrow the date window rather than paging deeper
-- Each result carries `documentNumber` (→ `regulations_get_document`), `docketIds` (→ `regulations_get_docket` / `find_comments`), `regulationIdNumbers`, and `cfrReferences` (→ `regulations_get_cfr_section`)
-- `upstream_unavailable` on a Federal Register 5xx/timeout, retryable after a brief wait
+- Each result carries `documentNumber` (→ `regulations_get_document`), `agencies` as `{ name, slug }` (the slug feeds back into `agencies`; null when the Federal Register lists an agency by raw name only), `docketIds` (→ `regulations_get_docket` / `find_comments`), `regulationIdNumbers`, and `cfrReferences` (→ `regulations_get_cfr_section`)
+- `invalid_filter` when the Federal Register rejects a filter value (an agency name or acronym instead of a slug), naming the parameter; `upstream_unavailable` on a 5xx/timeout, retryable after a brief wait
 
 ---
 
 ### `regulations_get_document` <sub>tool</sub>
 
 - Keyless; fetch one document by `document_number` (format `\d{4}-\d+`, e.g. `2025-14555`)
-- Full metadata (title, type, agencies, abstract, action, effective/comment dates, RINs) plus cross-source handles: `docketId`, `regulationsGovDocumentId`, `commentCount`, and `cfrReferences`
-- `include_full_text` (default `false`) inlines the plain-text body — final rules can run tens of thousands of words, so it's opt-in
+- Full metadata (title, type, agencies as `{ name, slug }`, abstract, action, effective/comment dates, RINs) plus cross-source handles: `docketId`, `regulationsGovDocumentId`, `commentCount`, and `cfrReferences`
+- `include_full_text` inlines the plain-text body as a character window: `max_chars` (default 64,000, up to 200,000) from `offset` (default 0). `fullTextLength` reports the whole body's length and `fullTextNextOffset` the offset to resume from while text remains; documents of about ten printed pages or fewer come back whole, while a major final rule runs past a million characters
+- Passing `offset` or `max_chars` implies `include_full_text`; pairing either with an explicit `include_full_text: false` fails as `full_text_disabled`. An offset at or past the end returns empty `fullText` with the length and a notice
+- `fullText` is plain text: links reduce to their text, and email addresses the published body obfuscates are decoded
 - `not_found` when the FR number doesn't exist; `upstream_unavailable` on a 5xx/timeout
 
 ---
@@ -115,17 +118,18 @@ All resource data is also reachable via the tool surface — tool-only MCP clien
 
 ### `regulations_list_open_comments` <sub>tool</sub>
 
-- Keyless; lists rules currently open for public comment, sorted by closing date soonest first — filter by `query`, `agencies`, and `closing_before`
-- `per_page` 2–100 (default 20), `page` 1–50 — same Federal Register 5,000-record navigation ceiling as `regulations_search_rules`
-- Each row carries `daysRemaining`, `documentNumber` (→ `regulations_get_document`), and `docketIds` (→ `regulations_find_comments`)
+- Keyless; lists documents currently open for public comment, sorted by closing date soonest first (same-day closes by document number) across the whole open window — filter by `type`, `query`, `agencies` (Federal Register slug), and `closing_before` (a real calendar day, `YYYY-MM-DD`)
+- `type` takes `PRORULE`, `RULE`, and `NOTICE`; the default (also used for an empty list) is `["PRORULE", "RULE"]` — proposed rules plus the direct final and interim final rules that take comment. `NOTICE` adds several hundred information-collection and other notices
+- `per_page` 1–100 (default 20), `page` from 1; `totalCount`, `totalPages`, and `nextPage` describe the window. The Federal Register can't sort by comment date, so the window is fetched whole (one request up to 2,000 documents, then 2,000 per request) and paged locally; past the Federal Register's 10,000-document limit the response is `truncated` and holds the 10,000 most recently published matches
+- Each row carries `daysRemaining`, `documentNumber` (→ `regulations_get_document`), `agencies` as `{ name, slug }`, and `docketIds` (→ `regulations_find_comments`)
 - Fully functional keyless; when `REGULATIONS_GOV_API_KEY` is set, `commentCount` is enriched from the Federal Register document's own embedded Regulations.gov info (no extra call) — `keyed` reports which
-- `upstream_unavailable` on a Federal Register 5xx/timeout
+- `invalid_filter` when the Federal Register rejects a filter value, naming the parameter; `upstream_unavailable` on a 5xx/timeout
 
 ---
 
 ### `regulations://document/{documentNumber}` <sub>resource</sub>
 
-- Same payload as `regulations_get_document` with `include_full_text` omitted — metadata plus cross-source handles, full text never inlined
+- Same payload as `regulations_get_document` without full text — metadata plus cross-source handles, the body never inlined
 - `documentNumber` format `\d{4}-\d+` (e.g. `2025-14555`)
 - `not_found` / `upstream_unavailable` mirror the tool's errors
 

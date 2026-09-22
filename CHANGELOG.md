@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-09-22 · ⚠️ Breaking
+
+Agencies now expose Federal Register slugs (breaking), full text pages by offset, and the open-comment window covers final rules in true closing-date order.
+
 ## [0.2.5](changelog/0.2.x/0.2.5.md) — 2026-09-20
 
 HTTP deployments now declare stateless session mode explicitly, and markdown table cells with a backslash render correctly.
