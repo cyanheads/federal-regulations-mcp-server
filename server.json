@@ -103,6 +103,12 @@
           "isSecret": true
         },
         {
+          "name": "ECFR_MIRROR_REFRESH_CRON",
+          "description": "Cron expression for an in-process eCFR mirror refresh (e.g. '0 4 * * 0'). Unset registers no job. Each run re-harvests every configured title in full, and a tick is skipped until mirror:init has completed once.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
           "format": "string",

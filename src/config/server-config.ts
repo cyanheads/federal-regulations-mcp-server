@@ -38,8 +38,10 @@ const ServerConfigSchema = z.object({
     .describe('Filesystem path for the eCFR SQLite mirror database.'),
   ecfrMirrorRefreshCron: z
     .string()
-    .default('0 4 * * 0')
-    .describe('Cron expression for the weekly eCFR mirror refresh.'),
+    .optional()
+    .describe(
+      'Cron expression for an in-process eCFR mirror refresh (HTTP transport only). Unset registers no job. Each run re-harvests every configured title in full.',
+    ),
   ecfrMirrorTitles: z
     .string()
     .optional()

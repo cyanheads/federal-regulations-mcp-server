@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 /**
- * @fileoverview `mirror:refresh` — incremental refresh of the codified CFR mirror
- * from the persisted high-water checkpoint. Re-walks the titles and upserts
- * current text; the dataset stays queryable throughout. Wired on a weekly cron in
- * the server's `setup()`, and runnable on demand here.
+ * @fileoverview `mirror:refresh` — refresh the codified CFR mirror by
+ * re-harvesting every configured title in full: each title's whole XML is read
+ * again and its rows upserted, with sections gone upstream tombstoned. The
+ * dataset stays queryable throughout. Runnable on demand here; an HTTP server
+ * runs the same refresh in process only when `ECFR_MIRROR_REFRESH_CRON` is set.
  *
  * @module scripts/ecfr-mirror-refresh
  */
