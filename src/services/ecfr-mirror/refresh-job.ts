@@ -88,10 +88,22 @@ export async function scheduleMirrorRefresh(
  * some point — the same marker the read path trusts — so a tick on a cold or
  * half-built mirror does not turn into the full build `mirror:init` exists to
  * run out of band. A mirror whose rows an older ingester wrote still refreshes:
- * that is the run that re-derives them.
+ * that is the run that re-derives them. A readiness check that itself fails
+ * (the store will not open) skips the tick too, logging that error rather than
+ * reporting it as a missing init.
  */
 export async function runMirrorRefresh(): Promise<void> {
-  const initialized = await ecfrMirror.ready().catch(() => false);
+  let initialized: boolean;
+  try {
+    initialized = await ecfrMirror.ready();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warning(
+      `eCFR mirror refresh skipped: could not read the mirror's readiness — ${message}`,
+      logContext('ecfr-mirror:refresh'),
+    );
+    return;
+  }
   if (!initialized) {
     logger.warning(
       'eCFR mirror refresh skipped: the mirror has never completed `mirror:init`. Run it out of band; later ticks refresh the mirror once it has.',

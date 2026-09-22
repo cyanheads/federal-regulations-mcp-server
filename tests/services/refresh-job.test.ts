@@ -103,12 +103,16 @@ describe('runMirrorRefresh', () => {
     expect(messages(warning).some((m) => m.includes('mirror:init'))).toBe(true);
   });
 
-  it('skips a tick when readiness cannot be read', async () => {
+  it('skips a tick when readiness cannot be read, logging the error rather than blaming init', async () => {
     ready.mockRejectedValue(new Error('SQLITE_CANTOPEN'));
+    const warning = vi.spyOn(logger, 'warning');
 
     await runMirrorRefresh();
 
     expect(runSync).not.toHaveBeenCalled();
+    const logged = messages(warning);
+    expect(logged.some((m) => m.includes('SQLITE_CANTOPEN'))).toBe(true);
+    expect(logged.some((m) => m.includes('never completed'))).toBe(false);
   });
 });
 
