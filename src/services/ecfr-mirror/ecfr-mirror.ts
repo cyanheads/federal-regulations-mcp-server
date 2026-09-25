@@ -21,9 +21,11 @@
  * Those two aux tables also carry the mirror's title coverage — which titles the
  * index holds, and which titles the whole Code had at ingest time — and the
  * ingest version that produced the rows. `mirrorScope` reads the coverage so a
- * partial mirror is never asked a question it cannot answer; `mirrorReady` reads
- * the ingest version so an index built by a superseded ingester is not asked at
- * all (see {@link INGEST_VERSION}).
+ * partial mirror is never asked a question it cannot answer, along with the
+ * issue date each title's rows were taken at, so a title eCFR has since
+ * re-issued is not answered from its older text; `mirrorReady` reads the ingest
+ * version so an index built by a superseded ingester is not asked at all (see
+ * {@link INGEST_VERSION}).
  *
  * @module services/ecfr-mirror/ecfr-mirror
  */
@@ -100,8 +102,16 @@ function mirrorLoggerContext(meta: Readonly<Record<string, unknown>> | undefined
  *    that the citation and figure references are present and that the body is
  *    empty only for a reserved location, so a row lacking them contradicts the
  *    contract the tool advertises rather than merely trailing it.
+ * 4. `body_text` renders inline markup instead of flattening it — superscripts
+ *    `^x` and subscripts `_x` (`3 × 10^−8`, `SO_2`, not `3 × 10 − 8`, `SO 2`),
+ *    footnote markers `[n]`, and no stray space after an inline element
+ *    (`Paragraph (a)`, not `( a)`); carries `<AC>` diacritics and `<E T="7503">`
+ *    overlines as combining marks (`x̄`, not `x`); and keeps a section's own
+ *    `<SECAUTH>` and `<APPRO>` notes. A quarter of sections across a 23-document
+ *    sample read differently, and each of these is a claim the read tool's
+ *    `bodyText` contract makes about the text it returns.
  */
-const INGEST_VERSION = 3;
+const INGEST_VERSION = 4;
 
 /** Composite primary-key value for a section row: `title:part:section`. */
 function rowId(title: number, part: string, section: string): string {
@@ -293,21 +303,23 @@ export const ecfrMirror: Mirror = defineMirror({
         continue;
       }
 
-      // Maintain the aux index from the sync mapping (the mirror-owned secondary structure).
-      const tombstones = staleRowIds(handle, title.number, records);
+      yield {
+        records,
+        tombstones: staleRowIds(handle, title.number, records),
+        checkpoint: issueDate,
+      };
+
+      // The aux index is rewritten only once the runner has committed the page —
+      // it resumes this generator after the write, and not at all when the write
+      // fails or the run is aborted first. Its issue date is what the freshness
+      // gate trusts for the title's rows, so it may trail them, never lead them.
       handle.transaction(() => {
         handle.prepare(`DELETE FROM ${PART_INDEX_TABLE} WHERE title = ?;`).run(title.number);
         for (const [part, count] of partCounts) {
           upsertPartIndex(handle, title.number, part, count, issueDate);
         }
       });
-
       rewritten.add(title.number);
-      yield {
-        records,
-        tombstones,
-        checkpoint: issueDate,
-      };
     }
 
     // The marker certifies the rows, so it is written only once every title the
@@ -387,6 +399,14 @@ export interface MirrorScope {
    * one would report its own three titles as the whole Code.
    */
   complete: boolean;
+  /**
+   * The eCFR issue each held title's rows were ingested at, by title. A title's
+   * rows are rewritten together, so they share one date; a title whose rows
+   * carry none is absent. This, not the sync checkpoint, is what dates a title's
+   * text — the checkpoint is the latest date any title reached, and a title
+   * whose re-fetch failed keeps its older rows under it.
+   */
+  issueDates: ReadonlyMap<number, string>;
   /** CFR title numbers the index actually holds, ascending. */
   titles: number[];
 }
@@ -394,8 +414,9 @@ export interface MirrorScope {
 /**
  * The mirror's title coverage, read from the index itself: `cfr_part_index` holds
  * one row per ingested title+part, so its distinct titles are what the mirror can
- * answer for, and the corpus list recorded at sync time is what it would take to
- * be complete. Both come from the DB — an index built under one
+ * answer for, its issue dates say which eCFR issue each title's text is from,
+ * and the corpus list recorded at sync time is what it would take to be
+ * complete. Both come from the DB — an index built under one
  * `ECFR_MIRROR_TITLES` value and served under another must still report the
  * coverage it actually has. An index predating the corpus marker reads as
  * incomplete, which routes all-titles searches live until the next refresh
@@ -403,17 +424,22 @@ export interface MirrorScope {
  */
 export async function mirrorScope(): Promise<MirrorScope> {
   const handle = await ecfrMirror.raw();
-  const titles = handle
-    .prepare<{ title: number }>(
-      `SELECT DISTINCT title FROM ${PART_INDEX_TABLE} ORDER BY title ASC;`,
+  const rows = handle
+    .prepare<{ issue_date: string | null; title: number }>(
+      `SELECT title, MIN(issue_date) AS issue_date FROM ${PART_INDEX_TABLE}
+       GROUP BY title ORDER BY title ASC;`,
     )
-    .all()
-    .map((r) => Number(r.title));
+    .all();
+  const titles = rows.map((r) => Number(r.title));
+  const issueDates = new Map(
+    rows.flatMap((r) => (r.issue_date ? [[Number(r.title), r.issue_date] as const] : [])),
+  );
 
   const corpus = readCorpusTitles(handle);
   const held = new Set(titles);
   return {
     complete: corpus !== undefined && corpus.length > 0 && corpus.every((t) => held.has(t)),
+    issueDates,
     titles,
   };
 }

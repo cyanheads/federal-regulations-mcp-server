@@ -39,6 +39,8 @@ async function seedMirror(options: {
   held: number[];
   corpus?: number[];
   ingestVersion?: number;
+  /** The issue date each held title's rows were ingested at; none when omitted. */
+  issueDates?: Partial<Record<number, string>>;
   withMeta?: boolean;
 }) {
   const dir = mkdtempSync(join(tmpdir(), 'ecfr-mirror-test-'));
@@ -57,8 +59,10 @@ async function seedMirror(options: {
   `);
   for (const title of options.held) {
     handle
-      .prepare('INSERT INTO cfr_part_index (title, part, section_count) VALUES (?, ?, ?);')
-      .run(title, '1', 1);
+      .prepare(
+        'INSERT INTO cfr_part_index (title, part, section_count, issue_date) VALUES (?, ?, ?, ?);',
+      )
+      .run(title, '1', 1, options.issueDates?.[title] ?? null);
   }
   if (options.withMeta !== false) {
     handle.exec(
@@ -127,6 +131,58 @@ describe('mirrorScope', () => {
     const scope = await mirrorScope();
     expect(scope.complete).toBe(false);
     expect(scope.titles).toEqual(WHOLE_CFR);
+  });
+});
+
+describe('mirrorScope issue dates (#55)', () => {
+  afterEach(async () => {
+    await cleanup?.();
+    cleanup = undefined;
+    vi.unstubAllEnvs();
+  });
+
+  it("reports each held title's own issue date, not the sync checkpoint", async () => {
+    // The shape of the June mirror: its checkpoint is the latest date any title
+    // reached, while title 1's rows are two years older.
+    const mod = await seedMirror({
+      held: [1, 11, 14],
+      issueDates: { 1: '2024-05-17', 11: '2026-06-08', 14: '2026-06-08' },
+    });
+    await mod.ecfrMirror.store.writeState({
+      status: 'complete',
+      completedAt: '2026-06-08T00:00:00Z',
+      checkpoint: '2026-06-08',
+    });
+
+    const { issueDates } = await mod.mirrorScope();
+    expect(Object.fromEntries(issueDates)).toEqual({
+      1: '2024-05-17',
+      11: '2026-06-08',
+      14: '2026-06-08',
+    });
+  });
+
+  it('names no date for a title whose rows carry none', async () => {
+    const { mirrorScope } = await seedMirror({ held: [1, 14], issueDates: { 14: '2026-09-15' } });
+    const scope = await mirrorScope();
+    expect(scope.titles).toEqual([1, 14]);
+    expect(scope.issueDates.has(1)).toBe(false);
+    expect(scope.issueDates.get(14)).toBe('2026-09-15');
+  });
+
+  it('reads the date an ingest stamped on the title', async () => {
+    const mod = await seedMirror({ held: [], corpus: [14] });
+    listTitles.mockResolvedValue([
+      { number: 14, name: 'Aeronautics and Space', latestIssueDate: '2026-09-15', reserved: false },
+    ]);
+    fetchFullTitleXml.mockResolvedValue(
+      '<DIV1 TYPE="TITLE" N="14"><DIV5 TYPE="PART" N="1"><DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 General definitions.</HEAD><P>Text.</P></DIV8></DIV5></DIV1>',
+    );
+    await mod.ecfrMirror.runSync({ mode: 'init', signal: new AbortController().signal });
+
+    expect((await mod.mirrorScope()).issueDates.get(14)).toBe('2026-09-15');
+    listTitles.mockReset();
+    fetchFullTitleXml.mockReset();
   });
 });
 
@@ -352,6 +408,42 @@ describe('eCFR mirror ingest', () => {
     expect(await mod.mirrorIngestStale()).toBe(true);
   });
 
+  it('refuses an index whose rows predate the inline notation, diacritics, and section notes', async () => {
+    // Marker 3 is what a 0.5.x mirror carries: its rows read `SO 2` for SO_2,
+    // `x is the sample mean` for x̄, and drop a section's <SECAUTH> and <APPRO>,
+    // where the live path now answers the same cite with all of them.
+    const mod = await seedMirror({ held: [14], corpus: [14], ingestVersion: 3 });
+    await mod.ecfrMirror.store.writeState({
+      status: 'complete',
+      completedAt: '2026-06-08T00:00:00Z',
+    });
+    expect(await mod.mirrorIngestStale()).toBe(true);
+    expect(await mod.mirrorReady()).toBe(false);
+  });
+
+  it('stores a marked character and finds it by its base or its marked form', async () => {
+    const mod = await seedMirror({ held: [], corpus: [10] });
+    listTitles.mockResolvedValue([
+      { number: 10, name: 'Energy', latestIssueDate: '2026-09-22', reserved: false },
+    ]);
+    // 10 CFR 429.35's markup, verbatim in shape: the mark sits after a newline.
+    fetchFullTitleXml.mockResolvedValue(`<DIV1 TYPE="TITLE" N="10">
+      <DIV5 TYPE="PART" N="429"><DIV8 TYPE="SECTION" N="429.35"><HEAD>§ 429.35 Sampling.</HEAD>
+        <P><I>x
+<AC T="8"/></I> is the sample mean of SO<E T="52">2</E>,</P>
+        <SECAUTH TYPE="N">(Sec. 161, Pub. L. 83-703)</SECAUTH>
+      </DIV8></DIV5>
+    </DIV1>`);
+    await mod.ecfrMirror.runSync({ mode: 'init', signal: new AbortController().signal });
+
+    for (const query of ['x', 'x̄', 'sample mean']) {
+      const page = await mod.mirrorSearch(query, 10, undefined, 20, 0);
+      expect(page.results.map((r) => r.cfrCite)).toEqual(['10 CFR 429.35']);
+    }
+    const row = await mod.mirrorGetSection(10, '429', '429.35');
+    expect(row?.bodyText).toBe('x̄ is the sample mean of SO_2,\n\n(Sec. 161, Pub. L. 83-703)');
+  });
+
   it('treats an index with no ingest marker as superseded', async () => {
     const mod = await seedMirror({ held: [14], corpus: [14] });
     expect(await mod.mirrorIngestStale()).toBe(true);
@@ -417,6 +509,44 @@ describe('eCFR mirror ingest', () => {
     expect((await mod.ecfrMirror.query({ limit: 50, offset: 0 })).rows).toHaveLength(before);
     expect(await mod.ecfrMirror.getByIds(['14:241:25', '14:241:1-1'])).toHaveLength(2);
     expect(await mod.mirrorSearch('traffic', 14, '241', 20, 0)).toMatchObject({ totalCount: 1 });
+  });
+
+  it("never dates a title's index past the rows a refresh actually wrote", async () => {
+    // The freshness gate trusts the part index's date for the title's rows. A
+    // refresh stopped between reading a newer issue and writing its rows must
+    // leave that date on the rows still there, or the older text reads as current.
+    const mod = await seedMirror({ held: [], corpus: [14] });
+    await ingestTitle14(mod, 'init');
+    expect((await mod.mirrorScope()).issueDates.get(14)).toBe('2026-08-05');
+
+    listTitles.mockResolvedValue([
+      { number: 14, name: 'Aeronautics and Space', latestIssueDate: '2026-09-15', reserved: false },
+    ]);
+    const controller = new AbortController();
+    fetchFullTitleXml.mockImplementation(async () => {
+      controller.abort();
+      return TITLE_14_XML;
+    });
+    await expect(
+      mod.ecfrMirror.runSync({ mode: 'refresh', signal: controller.signal }),
+    ).rejects.toThrow();
+
+    const [row] = await mod.ecfrMirror.getByIds(['14:25:25.1']);
+    expect(row?.issue_date).toBe('2026-08-05');
+    expect((await mod.mirrorScope()).issueDates.get(14)).toBe('2026-08-05');
+  });
+
+  it("dates a title's index once a refresh has written its rows", async () => {
+    const mod = await seedMirror({ held: [], corpus: [14] });
+    await ingestTitle14(mod, 'init');
+    listTitles.mockResolvedValue([
+      { number: 14, name: 'Aeronautics and Space', latestIssueDate: '2026-09-15', reserved: false },
+    ]);
+    await mod.ecfrMirror.runSync({ mode: 'refresh', signal: new AbortController().signal });
+
+    const [row] = await mod.ecfrMirror.getByIds(['14:25:25.1']);
+    expect(row?.issue_date).toBe('2026-09-15');
+    expect((await mod.mirrorScope()).issueDates.get(14)).toBe('2026-09-15');
   });
 
   it('tombstones only inside the title being synced', async () => {
