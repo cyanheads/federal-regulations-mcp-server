@@ -16,9 +16,9 @@ US federal regulatory law as one workflow server over three official sources: th
 | `regulations_get_cfr_section` | Read the codified text at a CFR location via eCFR — a section, a whole part, or an appendix — current or as of a past date, as one bounded, resumable window of text. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `appendix`, `date`, `offset`, `max_chars` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
 | `regulations_get_docket` | Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-2025-0194`): docket metadata plus the documents filed in it (NPRM, final rule, supporting materials). | `docket_id`, `document_types`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `idempotentHint` |
 | `regulations_find_comments` | Fetch public comments on a Federal Register document or a docket from Regulations.gov, resolving comment bodies and flagging when the substance lives in an attachment. The unique corpus — what citizens and organizations actually submitted. | `docket_id`, `document_object_id`, `fr_document_number`, `comment_id`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `openWorldHint` |
-| `regulations_list_open_comments` | Tracking tool: documents currently open for public comment — proposed rules and comment-requesting final rules by default, notices on request — soonest closing first, filterable by agency and topic. "What can I still weigh in on?" Federal Register's open-comment window is the spine; Regulations.gov comment counts enrich each row when the key is present. | `query`, `type`, `agencies`, `closing_before`, `per_page`, `page` | Federal Register (+ Regulations.gov enrich) · key optional | `readOnlyHint`, `openWorldHint` |
+| `regulations_list_open_comments` | Tracking tool: documents currently open for public comment — proposed rules and comment-requesting final rules by default, notices on request — soonest closing first, filterable by agency and topic. "What can I still weigh in on?" Federal Register's open-comment window is the spine; each row carries the Regulations.gov IDs, comment count, and comment URL the FR embeds. | `query`, `type`, `agencies`, `closing_before`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
 
-7 tools. Tools 1–4 and 7 work with **no key** (keyless core); tools 5–6 require `REGULATIONS_GOV_API_KEY` and fail with an actionable `auth_required` contract error when it is absent. Tool 7 degrades gracefully — it runs keyless on the Federal Register and silently skips the Regulations.gov comment-count enrichment when no key is configured.
+7 tools. Tools 1–4 and 7 work with **no key** (keyless core); tools 5–6 require `REGULATIONS_GOV_API_KEY` and fail with an actionable `auth_required` contract error when it is absent. Tool 7 runs keyless on the Federal Register, comment counts included — they are embedded in the Federal Register documents.
 
 ### Resources
 
@@ -51,7 +51,7 @@ It is a **multi-source workflow server**, not three API wrappers. The agent sees
 
 - **Three sources, three auth states.** Federal Register (keyless), eCFR (keyless), Regulations.gov v4 (free `api.data.gov` key via the `X-Api-Key` header). The keyless core (FR + eCFR, tools 1–4 + 7) is a complete, hostable product on its own; the Regulations.gov leg (dockets + comments) layers on top.
 - **Single shared `api.data.gov` key** for the Regulations.gov leg — same hosting pattern as `congressgov`/`census`, not per-user. Stays hostable. 1,000 requests/hour per key.
-- **Keyless tools never require the key.** The two keyed tools (`get_docket`, `find_comments`) must detect a missing key and return an actionable `auth_required` error naming the env var and the signup URL — not a generic 401 passthrough or a silent empty result. `list_open_comments` degrades: it runs on the Federal Register without the key and only enriches with Regulations.gov comment counts when the key is present.
+- **Keyless tools never require the key.** The two keyed tools (`get_docket`, `find_comments`) must detect a missing key and return an actionable `auth_required` error naming the env var and the signup URL — not a generic 401 passthrough or a silent empty result. `list_open_comments` needs no key: the comment counts and Regulations.gov IDs it shows are embedded in the Federal Register documents, and `keyed` only says whether the Regulations.gov tools can follow up.
 - **eCFR codified full text is mirrored, not paginated live** (see Services → eCFR mirror). The Federal Register search/document data and the Regulations.gov docket/comment data stay live — they are volatile (the FR publishes daily; comments arrive continuously) and, for Regulations.gov, key-rate-limited.
 - **Pagination truncation is surfaced, never silent** (see Tool Detail → The paging contract). The Federal Register serves 50 pages (up to 5,000 records with per_page=100); Regulations.gov serves 40 (up to 10,000 records at 250). When a result set is larger than the pages reach, the tool says so and tells the agent how to narrow; a page past the end names the last page rather than reading as "nothing matched".
 - **Comment bodies can be attachment-only.** When a comment's substance is a PDF/DOCX attachment rather than inline text, the inline `comment` field is null; the tool flags this and surfaces the attachment download URLs so the agent knows where the real content lives.
@@ -241,8 +241,14 @@ published_after: z.union([z.literal(''), isoDate()]).optional()   // isoDate(): 
   .describe('Earliest publication date, ISO 8601 (YYYY-MM-DD), a real calendar day. Combine with published_before to window large result sets — the FR caps navigation at 50 pages.'),
 published_before: z.union([z.literal(''), isoDate()]).optional()
   .describe('Latest publication date, ISO 8601 (YYYY-MM-DD), a real calendar day.'),
+cfr_title: z.number().int().min(1).max(50).optional()   // FR conditions[cfr][title]
+cfr_part: z.string().optional()                         // FR conditions[cfr][part]: a part or a range ("140-143"); Part/pt. prefix dropped (normalizePart, shared with browse_cfr); needs cfr_title
+docket_id: z.string().optional()                        // FR conditions[docket_id]: matches the printed docket_ids, not the Regulations.gov docket
+rin: z.string().optional()                              // FR conditions[regulation_id_number]
+citation: z.union([z.literal(''), frCitation()]).optional()        // "89 FR 49102" — volume FR page ("F.R.", either case)
+citation_date: z.union([z.literal(''), isoDate()]).optional()      // the date the source note prints beside the cite
 order: z.enum(['relevance', 'newest', 'oldest']).optional()
-  .describe('Result order. Defaults to relevance with a query, newest without one. relevance without a query falls back to newest first; oldest lists the earliest publications first.'),
+  .describe('Result order. Defaults to relevance with a query, newest without one. relevance without a query falls back to newest first; oldest lists the earliest publications first. Ignored with citation, whose matches come in page order.'),
 per_page: z.number().int().min(2).max(100).optional().default(20)
   .describe('Results per page (2–100, default 20). The Federal Register API treats exactly 1 as its default page size instead of returning one result.'),
 page: z.number().int().min(1).max(50).optional().default(1)
@@ -259,11 +265,19 @@ page: z.number().int().min(1).max(50).optional().default(1)
     type: string,                     // "Proposed Rule" | "Final Rule" | "Notice" | "Presidential Document"
     abstract: string | null,
     publicationDate: string,          // ISO 8601
+    citation: string | null,          // "89 FR 49101"; null where the FR records no pages (most of 1994)
+    startPage: number | null,         // FR start_page; the FR's 0 for "unrecorded" becomes null
+    endPage: number | null,
     agencies: Array<{ name: string; slug: string | null }>,  // from raw agencies[]; slug chains back into the agencies filter
-    docketIds: string[],              // chaining → regulations_get_docket / regulations_find_comments
-    regulationIdNumbers: string[],    // RIN(s)
-    cfrReferences: Array<{ title: number; part: string }>,  // chaining → regulations_get_cfr_section
-    commentsCloseOn: string | null,   // ISO 8601 — when set, still open for comment
+    docketIds: string[],              // docket numbers as the FR prints them → the docket_id filter
+    regulationsGovDocketId: string | null,    // regulations_dot_gov_info.docket_id → get_docket / find_comments
+    regulationsGovDocumentId: string | null,  // regulations_dot_gov_info.document_id → find_comments(document_object_id)
+    commentCount: number | null,      // regulations_dot_gov_info.comments_count — keyless
+    commentUrl: string | null,        // FR comment_url, relayed verbatim (the FR serves http://)
+    regulationIdNumbers: string[],    // RIN(s) → the rin filter
+    cfrReferences: Array<{ title: number; part: string }>,  // chaining → regulations_get_cfr_section; a numeric FR part is stringified
+    commentsCloseOn: string | null,   // last day of the period this document printed, inclusive, Eastern time
+    commentPeriodOpen: boolean | null,  // commentsCloseOn >= today's Eastern date; null without a close date
     effectiveOn: string | null,
     htmlUrl: string,
   }>,
@@ -277,7 +291,7 @@ page: z.number().int().min(1).max(50).optional().default(1)
 }
 ```
 
-`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close); the enrichment trailer follows it. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
+`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close with `(open)` / `(closed)`), each row followed by a sub-row with the citation and pages, printed dockets, Regulations.gov IDs, comment count and URL, CFR parts, RINs, abstract, and URL; the enrichment trailer follows it. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
 
 **Order.** `order` resolves before the request: an explicit value is sent as given; omitted, it is `relevance` when `query` is set and `newest` otherwise, and the resolved value is always sent. Measured live: on "PFAS drinking water" (type RULE, 38 matches) the PFAS National Primary Drinking Water Regulation (2024-07773) ranks 1st under `relevance`, 13th under `newest`, 26th under `oldest`; `relevance` without `conditions[term]` returns 200 in newest order; an unrecognized `order` returns 200 and is silently ignored, so the enum is the only guard.
 
@@ -287,12 +301,23 @@ page: z.number().int().min(1).max(50).optional().default(1)
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
 | `invalid_filter` | `ValidationError` | FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) — most often an agency name or acronym where a slug belongs | Correct the parameter the message names; the hint is per field — for `agencies`, the kebab-case slug format and where to read one (`agencies[].slug` on any result); for dates, a real `YYYY-MM-DD` day. |
 | `date_range_inverted` | `ValidationError` | `published_after` later than `published_before` | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
+| `title_required_for_part` | `ValidationError` | `cfr_part` with no `cfr_title` | Add the title the part belongs to (e.g. cfr_title 40 with cfr_part 141), or drop cfr_part to search every title. |
+| `citation_incomplete` | `ValidationError` | `citation` or `citation_date` alone, or the pair with `published_after`/`published_before` | Pass the pair together and drop the date window, which a cite replaces. |
+| `citation_out_of_range` | `ValidationError` | Volume below 59 (the API starts in 1994), or a `citation_date` year other than volume + 1935 | Pair the cite with the date its source note prints; pre-1994 cites cannot be resolved. |
+
+`title_required_for_part`, `citation_incomplete`, and `citation_out_of_range` are thrown before any request, like `date_range_inverted`. The FR's own answer to a part with no title — `{"cfr":"CFR title must be between 1 and 50"}` — names the wrong parameter, so the reason and recovery follow `regulations_browse_cfr`'s, in this tool's parameter names.
+
+**CFR, docket, and RIN filters** pass through to FR conditions and AND with everything else. `docket_id` matches the docket numbers the FR prints (`docket_ids`, wrapped or bare), not the Regulations.gov docket: `IRS-2026-0925` finds nothing while its printed `REG-101355-26` finds the document, and no FR condition reaches the Regulations.gov ID. A fragment matches every docket or RIN containing it (`FAA-2026` → 589), hence the "complete ID" guidance. A part with a letter (`1203a`) is a FR 400 that `invalid_filter` names as `cfr_part`. *Decision:* flat `cfr_title` / `cfr_part` rather than a nested `cfr` object — they mirror `browse_cfr`'s `title` / `part`, a title alone is a filter the FR honors, and an optional nested object is a form-client hazard.
+
+**Citation resolution.** A CFR source note prints each cite with its date ("89 FR 49102, June 11, 2024"), and the FR API has no citation condition (`conditions[citation]` is "not a valid field") while full-text search does not match a cite. `searchCitation` lists the cited day in one `conditions[publication_date][is]` request (the heaviest day from 1994 to 2026-09-24 holds 344 documents) and keeps the documents whose `start_page ≤ page ≤ end_page`, ordered by start page and paged locally. Source-note cites usually land mid-document (`89 FR 32744` is inside 2024-07773, pp. 32532–32757), and about one page in ten is shared, so every document on the page comes back. A `start_page` of 0 — most of volume 59 — never matches. With `citation` set, the empty notice explains the miss instead of the generic one: the day's page span (and whether the page falls between documents), a day whose documents carry no page ranges, or a day with no documents. *Decision:* the date is required. It is always printed beside the cite, and it makes resolution one deterministic request; a date-less cite would need a year bisection or the GovInfo link redirect, which silently picks one document on a shared page.
 
 `date_range_inverted` is thrown before any request: the Federal Register answers an inverted window with an empty success, which read as "nothing matched, widen the date range." Equal dates are a one-day window, and `''` on either side skips the check as it skips the filter.
 
-`invalid_filter` maps each FR field to the parameter the caller set — `agencies` → `agencies`, `publication_date` → whichever of `published_after`/`published_before` was sent, `term` → `query` — and names a field with no mapping as the FR spells it. The raw upstream body is not echoed. A 400 without a parseable non-empty `errors` object keeps the framework's classification (`InvalidParams`). The 400 is not retried. Calendar-invalid dates (`2025-13-45`, `2025-02-30`), which the FR also answers with a 400, are rejected at the schema before any request.
+`invalid_filter` maps each FR field to the parameter the caller set — `agencies` → `agencies`, `publication_date` → whichever of `published_after`/`published_before` was sent (`citation_date` in citation mode), `term` → `query`, `cfr` → `cfr_part` (or `cfr_title` with no part), `docket_id` → `docket_id`, `regulation_id_number` → `rin` — and names a field with no mapping as the FR spells it. The raw upstream body is not echoed. A 400 without a parseable non-empty `errors` object keeps the framework's classification (`InvalidParams`). The 400 is not retried. Calendar-invalid dates (`2025-13-45`, `2025-02-30`), which the FR also answers with a 400, are rejected at the schema before any request.
 
-Zero matches is a successful empty result, not an error — the search ran and the answer is "nothing." The recovery guidance (broaden the query, widen the date range, drop an agency filter) rides a `notice` enrichment on that response.
+Zero matches is a successful empty result, not an error — the search ran and the answer is "nothing." The recovery guidance rides a `notice` enrichment on that response, naming every active filter (`query "PFAS", cfr_title 40, cfr_part 141, …`) and, when `docket_id` or `rin` is set, that they take a complete, FR-printed value.
+
+**`commentPeriodOpen` is computed, and on the Eastern calendar.** The close date alone read as "open" to a model — every closed proposal carries one too — and a model cannot reliably compare a date against a "today" it does not know. A period runs through 11:59 PM Eastern on the close date (Regulations.gov encodes FR close date 2023-05-30 as `2023-05-31T03:59:59Z`), so `easternToday()` (`src/services/federal-register/comment-period.ts`, `America/New_York` via `Intl`) is the reference; the eCFR tools keep their UTC `today()`. The value reflects the close date this document printed — an extension published as its own document is not seen.
 
 ---
 
@@ -326,15 +351,21 @@ max_chars: z.number().int().min(1).max(200_000).optional()
   action: string | null,              // e.g. "Notification of public hearing."
   dates: string | null,               // free-text dates summary from the rule
   publicationDate: string,
+  citation: string | null,            // "89 FR 49101"; with startPage / endPage, null where unrecorded
+  startPage: number | null,
+  endPage: number | null,
   effectiveOn: string | null,
-  commentsCloseOn: string | null,
+  commentsCloseOn: string | null,     // last day of the period, inclusive, Eastern time
+  commentPeriodOpen: boolean | null,  // as on search_rules
   agencies: Array<{ name: string; slug: string | null }>,
   regulationIdNumbers: string[],      // RIN(s)
   cfrReferences: Array<{ title: number; part: string }>,  // → regulations_get_cfr_section
   // Cross-source handles (the point of the tool):
-  docketId: string | null,            // from regulations_dot_gov_info.docket_id → regulations_get_docket / find_comments
+  docketIds: string[],                // printed docket numbers → search_rules(docket_id)
+  docketId: string | null,            // Regulations.gov docket (regulations_dot_gov_info.docket_id) → get_docket / find_comments; an <AGENCY>_FRDOC_0001 docket is a catch-all
   regulationsGovDocumentId: string | null,  // regulations_dot_gov_info.document_id → find_comments(document_object_id)
-  commentCount: number | null,        // regulations_dot_gov_info.comments_count (FR-reported; null if not on Regulations.gov)
+  commentCount: number | null,        // regulations_dot_gov_info.comments_count — comments received; can exceed the records find_comments lists
+  commentUrl: string | null,          // FR comment_url; usually dropped once the period closes
   supportingDocuments: Array<{ title: string; documentId: string }>,  // related Regulations.gov docs
   bodyHtmlUrl: string,
   rawTextUrl: string,
@@ -350,7 +381,7 @@ max_chars: z.number().int().min(1).max(200_000).optional()
 
 **The body is a character window, not the whole text.** A major final rule's plain text runs past a million characters (2024-07773 is ~1.2 M; 2024-25382 ~5.7 M), which overruns a client context in one call and rides both `structuredContent` and `content[]`. Offsets index the unwrapped plain text; a window never splits a surrogate pair, so consecutive windows concatenate back to the exact body. `fullText` is plain text: the raw-text endpoint's `<pre>` envelope is stripped, links reduce to their text, email addresses the published body carries as Cloudflare `[email protected]` placeholders are decoded from their `data-cfemail` value (served on a `<span>` inside the link or on the `<a>` itself), and character references decode in one pass, so an escaped one (`&amp;lt;`) stays literal and one naming no character (`&#xD800;`) is left as written. GPO locator codes in the text (`<bullet>`, `<SUP>`, `<INF>`) are text, not markup, and are left in place.
 
-`format()` renders structured markdown sections: header (FR number, type, agencies as `Name (slug)`, dates), abstract, **"Cross-source handles"** block listing the docket ID, CFR parts, and comment count with the exact follow-up tool names, then the body URLs and, when requested, a **"Full text"** heading naming the character span and total length, a `resume with offset=N` line while text remains, and the window itself. Surfacing the handles with their target tool names is what primes the agent to chain.
+`format()` renders structured markdown sections: header (FR number, type, agencies as `Name (slug)`, citation and pages, dates, comment close with `(open)` / `(closed)`), abstract, **"Cross-source handles"** block listing the Regulations.gov docket ID, the printed docket numbers, the Regulations.gov document ID, comment count and comment URL, and CFR parts with the exact follow-up tool names, then the body URLs and, when requested, a **"Full text"** heading naming the character span and total length, a `resume with offset=N` line while text remains, and the window itself. Surfacing the handles with their target tool names is what primes the agent to chain.
 
 **Errors:**
 | Reason | Code | When | Recovery |
@@ -487,7 +518,7 @@ Read the codified text at a CFR location via eCFR — current or as of a past da
 
 Two ways a block tag is not what it looks like, both of which the capture has to name. A variant tag name has to be matched in full, because the closing tag is found by backreference and a group that captured only `FP` from `<FP-2>` runs on to the next `</FP>`. And the same family is written self-closing where it stands for spacing or a rule rather than for text — `<PSPACE/>`, `<FP-DASH/>`, `<P/>` — which must not open a capture at all, for the same reason in the other direction: it would run on to the next closing tag of that name and take the blocks between with it, flattening their paragraph breaks and dropping any figure among them. Across five whole titles the self-closing shape reaches 6 nodes, all in Title 40 — rare enough that a sample drawn from smaller titles reads as though it does not occur.
 
-**Source citations and figure references carry too.** Every section and appendix ends in a `<CITA>` giving the Federal Register cites that established and amended it (`[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]`). That string is the bridge from codified text back to `regulations_search_rules` / `regulations_get_document`, so it carries verbatim as a trailing line rather than being parsed into structured FR numbers — the verbatim string is what a caller feeds back. A figure is an `<img src="/graphics/…">` the versioner references but does not inline; it renders as `[Figure: /graphics/…]` in document order, because a node whose whole content is one otherwise reads back identical to `[Reserved]`. What comes back empty now is only a node whose XML holds nothing but its heading: `[Reserved]` in all but a handful of agency variants on the same shape (16 CFR 460.7 is `[Research]`).
+**Source citations and figure references carry too.** Every section and appendix ends in a `<CITA>` giving the Federal Register cites that established and amended it (`[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]`). That string is the bridge from codified text back to `regulations_search_rules` / `regulations_get_document`, so it carries verbatim as a trailing line rather than being parsed into structured FR numbers — a caller passes one cite from it as `citation` and the date printed beside it as `citation_date` (see citation resolution under `regulations_search_rules`). A figure is an `<img src="/graphics/…">` the versioner references but does not inline; it renders as `[Figure: /graphics/…]` in document order, because a node whose whole content is one otherwise reads back identical to `[Reserved]`. What comes back empty now is only a node whose XML holds nothing but its heading: `[Reserved]` in all but a handful of agency variants on the same shape (16 CFR 460.7 is `[Research]`).
 
 Measured over four whole titles (3, 4, 11, 16 — 2,994 sections, 143 appendices): section `bodyText` grew 1.48% in total, +37 characters on the mean section, with 41% of sections carrying a citation at all; appendix `bodyText` grew 6.4%, and the 77 appendices reading back blank in that sample dropped to zero. Citations are the bulk of the increase; figures are what it buys.
 
@@ -577,7 +608,7 @@ Pull a rulemaking docket from Regulations.gov by docket ID — the docket's meta
 **Input schema:**
 ```ts
 docket_id: z.string().regex(/^[A-Za-z0-9_-]+$/)
-  .describe('Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from a Federal Register document\'s docketId (regulations_get_document) or construct from an agency rulemaking reference.'),
+  .describe('Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. The printed docketIds on those tools are not always Regulations.gov IDs ("REG-101355-26" is the IRS\'s own number for docket IRS-2026-0925).'),
 document_types: z.array(z.enum(['Proposed Rule', 'Rule', 'Notice', 'Supporting & Related Material', 'Other'])).optional()
   .describe('Filter the docket\'s documents to these types. Omit for all. A docket often contains hundreds of "Supporting & Related Material" items — filter to "Proposed Rule"/"Rule" to find the rule documents themselves.'),
 per_page: z.number().int().min(5).max(250).optional().default(25)
@@ -605,7 +636,8 @@ page: z.number().int().min(1).max(40).optional().default(1)
     documentType: string,
     postedDate: string,
     frDocNum: string | null,          // chaining back → regulations_get_document
-    commentEndDate: string | null,    // when set, open for comment
+    commentEndDate: string | null,    // the UTC instant the period ends: 2023-05-31T03:59:59Z is 11:59 PM Eastern, FR close date 2023-05-30
+    commentPeriodOpen: boolean | null,  // Regulations.gov's own openForComment, relayed; null when absent
     withdrawn: boolean,
   }>,
   // enrichment (the paging contract above):
@@ -624,7 +656,7 @@ page: z.number().int().min(1).max(40).optional().default(1)
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured | Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
-| `not_found` | `NotFound` | No docket with that ID | Verify the docket ID from a Federal Register document\'s docketId; format is like "EPA-HQ-OAR-2025-0194". |
+| `not_found` | `NotFound` | No docket with that ID | Pass the Regulations.gov docket ID — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document — not an entry of the printed docketIds; format is like "EPA-HQ-OAR-2025-0194". |
 | `rate_limited` | `RateLimited` | Regulations.gov 429 (1,000 req/hr per key) | Wait and retry — the per-key hourly limit was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
@@ -645,7 +677,7 @@ Fetch public comments on a Federal Register document or a Regulations.gov docket
 **Input schema (one of the targeting params is required):**
 ```ts
 docket_id: z.string().optional()
-  .describe('Fetch all comments in a docket by docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Broadest scope. One of docket_id / document_object_id / fr_document_number / comment_id is required.'),
+  .describe('Fetch all comments in a docket by Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194") — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document, not an entry of the printed docketIds. Broadest scope. One of docket_id / document_object_id / fr_document_number / comment_id is required.'),
 document_object_id: z.string().optional()
   .describe('Fetch comments on one specific Regulations.gov document, by its object ID (16 hex characters, e.g. "0900006485883ec6") or its document ID (e.g. "EPA-HQ-OW-2022-0114-0027", the regulationsGovDocumentId from regulations_get_document). Narrower than docket_id — comments usually attach to the docket\'s primary (proposed-rule) document.'),
 fr_document_number: z.union([z.literal(''), frDocumentNumber()]).optional()
@@ -735,7 +767,7 @@ Truncation guidance names the reachable count, then `per_page` (below 250), then
 | `rate_limited` | `RateLimited` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
-**A document target resolves before the list runs, and an unmatched one is an error, never an empty success.** Regulations.gov answers `filter[commentOnId]=<anything>` with zero comments as a normal success, so a wrong handle used to read as "this document drew no comments." `document_object_id` takes a 16-hex object ID as-is and resolves anything else through `GET /documents/{id}` (404 → `not_found`). A `docket_id`, `document_object_id`, or `comment_id` with a character outside `[A-Za-z0-9_-]` names no record and is `not_found` without a request: sent anyway, `..` in a URL path reaches the API root, an encoded `/` draws a 403 that reads as a rejected key, and whitespace in a filter draws a 500. `fr_document_number` resolves through the exact `filter[frDocNum]` match, uppercased first because the filter is case-sensitive, and zero hits is `not_found`. *Decision:* the earlier `filter[searchTerm]` lookup with a first-hit fallback is gone — a text search ranks documents that merely quote the number (Executive Order 14192 resolved to an EPA supporting document reproducing it). A resolved document with no comments of its own — a final rule, a hearing notice — still lists 0 total, and the empty-result notice names the resolved document and its docket as the `docket_id` to widen with.
+**A document target resolves before the list runs, and an unmatched one is an error, never an empty success.** Regulations.gov answers `filter[commentOnId]=<anything>` with zero comments as a normal success, so a wrong handle used to read as "this document drew no comments." `document_object_id` takes a 16-hex object ID as-is and resolves anything else through `GET /documents/{id}` (404 → `not_found`). A `docket_id`, `document_object_id`, or `comment_id` with a character outside `[A-Za-z0-9_-]` names no record and is `not_found` without a request: sent anyway, `..` in a URL path reaches the API root, an encoded `/` draws a 403 that reads as a rejected key, and whitespace in a filter draws a 500. `fr_document_number` resolves through the exact `filter[frDocNum]` match, uppercased first because the filter is case-sensitive, and zero hits is `not_found`. *Decision:* the earlier `filter[searchTerm]` lookup with a first-hit fallback is gone — a text search ranks documents that merely quote the number (Executive Order 14192 resolved to an EPA supporting document reproducing it). A resolved document with no comments of its own — a final rule, a hearing notice — still lists 0 total, and the empty-result notice names the resolved document and its docket as the `docket_id` to widen with. A `docket_id` that lists nothing is most often a docket number the Federal Register prints (`REG-101355-26` for docket `IRS-2026-0925`), which Regulations.gov answers with an empty success, so that notice points at `regulationsGovDocketId` / `get_document`'s `docketId` before the comment-period hint.
 
 **Filters are validated before any request.** An empty `search_term` / `posted_after` / `posted_before` counts as absent, as does a whitespace-only `search_term` (Regulations.gov answers one with the unfiltered set); a `search_term` is sent trimmed. A window whose start falls after its end is `date_range_inverted` (equal dates are a one-day window), and any filter beside `comment_id` is `filter_requires_list_mode` rather than ignored.
 
@@ -745,11 +777,13 @@ The rule stays out of the advertised `inputSchema`. Expressing it as a JSON Sche
 
 ---
 
-### 7. `regulations_list_open_comments`  · key optional (degrades)
+### 7. `regulations_list_open_comments`  · keyless
 
-Tracking tool: documents currently open for public comment, filterable by type, agency, and topic, soonest closing first. "What can I still weigh in on?" Runs on the Federal Register's open-comment window (keyless); enriches each row with the Regulations.gov comment count when the key is present.
+Tracking tool: documents currently open for public comment, filterable by type, agency, and topic, soonest closing first. "What can I still weigh in on?" Runs on the Federal Register's open-comment window (keyless); each row carries the Regulations.gov IDs, comment count, and comment URL the FR document embeds.
 
-**API:** `GET /documents.json?conditions[comment_date][gte]={today}&conditions[type][]=…&per_page=2000` (Federal Register). The count is read from each FR document's own `regulations_dot_gov_info.comments_count` (no extra Regulations.gov call, so no rate-limit cost); that block is requested only when keyed, since unkeyed rows null the count anyway and it is most of the payload.
+**API:** `GET /documents.json?conditions[comment_date][gte]={today}&conditions[type][]=…&per_page=2000` (Federal Register). The Regulations.gov IDs and count come from each FR document's own `regulations_dot_gov_info` block and the URL from its `comment_url` (no Regulations.gov call, so no key and no rate-limit cost). *Decision:* both are requested whether or not a key is set. They are keyless FR data that `get_document` already returned unkeyed; the block roughly doubles the upstream response (226 open proposed and final rules on 2026-09-25: 179 KB without it, 345 KB with it), one request per call that keyed deployments already paid.
+
+**"Today" is the Eastern date.** `asOf` comes from `easternToday()`, the date in `America/New_York`: a period is open through 11:59 PM Eastern on its close date, and the UTC date dropped close-day documents from the window from 8 PM EDT (7 PM EST) on, while they were still taking comments. `daysRemaining` is 0 on the close day.
 
 **The window is fetched whole and sorted locally.** The FR cannot order by comment date — `order=comment_date` (or `comments_close_on`, `closing`) silently falls back to `newest` — so sorting one FR page put documents closing tomorrow on later pages. The service requests the whole window at the FR's 2,000-row page maximum (2,001 and above silently fall back to 20 rows), sorts it by `commentsCloseOn` then document number, and the tool pages it locally. Measured windows: 1,038 documents across all three types on 2026-09-22, at most 1,204 on eight sampled dates from 2020 to 2026, so one request covers every window seen; a larger window pages on in 2,000-row requests to the FR's 10,000-item limit (a page reaching past it is a 400), and past that the response is `truncated` and holds only the 10,000 most recently published matches.
 
@@ -774,8 +808,8 @@ page: z.number().int().min(1).max(10_000).optional().default(1)
 **Output:**
 ```ts
 {
-  asOf: string,                       // the "today" the open-window filter used (ISO 8601)
-  keyed: boolean,                     // whether comment counts were enriched (REGULATIONS_GOV_API_KEY present)
+  asOf: string,                       // today's date in Eastern time — the window's lower bound (ISO 8601)
+  keyed: boolean,                     // REGULATIONS_GOV_API_KEY set — whether get_docket / find_comments can follow up
   results: Array<{                    // this page, closing soonest first; same-day closes by document number
     documentNumber: string,           // → regulations_get_document
     title: string,
@@ -783,9 +817,12 @@ page: z.number().int().min(1).max(10_000).optional().default(1)
     agencies: Array<{ name: string; slug: string | null }>,
     publicationDate: string,
     commentsCloseOn: string,          // always set (rows without one are dropped)
-    daysRemaining: number,            // computed from commentsCloseOn − asOf
-    docketIds: string[],              // → regulations_get_docket / find_comments
-    commentCount: number | null,      // from FR's regulations_dot_gov_info; null when unkeyed or not on Regulations.gov
+    daysRemaining: number,            // computed from commentsCloseOn − asOf; 0 on the close day
+    docketIds: string[],              // printed docket numbers → search_rules(docket_id)
+    regulationsGovDocketId: string | null,    // → get_docket / find_comments
+    regulationsGovDocumentId: string | null,  // → find_comments(document_object_id)
+    commentCount: number | null,      // from FR's regulations_dot_gov_info; null when not on Regulations.gov
+    commentUrl: string | null,        // FR comment_url
   }>,
 }
 // enrichment:
@@ -793,10 +830,10 @@ page: z.number().int().min(1).max(10_000).optional().default(1)
 //   totalPages   pages at this per_page
 //   nextPage?    present only while documents remain past this page
 //   truncated? / shown? / cap?   set when the FR reported its 10,000-document maximum
-//   notice?      one composed string: empty window, page past the end, truncation, unkeyed
+//   notice?      one composed string: empty window, page past the end, truncation
 ```
 
-`format()`: a table in window order (closing soonest first) — title · type · agencies · published · closes · days-left · comment count (or "—" when unkeyed) · docket IDs. Every agency renders as `Name (slug)` (slug omitted when null) and every docket ID renders, each list joined on `; ` (a single FR docket ID can carry commas: "FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1") and pipe-escaped. The header says whether comment counts are keyed. `ctx.enrich.truncated()` rewrites `notice`, so the handler composes every notice source — empty window, page past the end (naming the last page), truncation, and the unkeyed note — into one string and writes it once; truncation never depends on the key.
+`format()`: a table in window order (closing soonest first) — title · type · agencies · published · closes · days-left · comment count (or "—") · docket IDs · Regulations.gov (docket, document, comment URL, or "—"). Every agency renders as `Name (slug)` (slug omitted when null) and every docket ID renders, each list joined on `; ` (a single FR docket ID can carry commas: "FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1") and pipe-escaped. The header says whether the key is set. `ctx.enrich.truncated()` rewrites `notice`, so the handler composes every notice source — empty window, page past the end (naming the last page), and truncation — into one string and writes it once.
 
 **Errors:**
 | Reason | Code | When | Recovery |
@@ -804,7 +841,7 @@ page: z.number().int().min(1).max(10_000).optional().default(1)
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout | Retry after a brief wait. |
 | `invalid_filter` | `ValidationError` | FR 400 naming rejected fields — `agencies` → `agencies`, `comment_date` → `closing_before` (the window's lower bound is the server's own date) | Same per-field hint as `regulations_search_rules`. |
 
-(No `auth_required` — this tool never requires the key; it degrades. No `no_results` either — nothing being open is a successful empty result with a `notice`, and so is a page past the end of the window.)
+(No `auth_required` — this tool never requires the key. No `no_results` either — nothing being open is a successful empty result with a `notice`, and so is a page past the end of the window.)
 
 ---
 
@@ -855,7 +892,7 @@ The cross-source chains are the reason this is one server. Each row is one tool 
 4. **Keyless tools** — `regulations_search_rules`, `regulations_get_document`, `regulations_browse_cfr` (live-search path first), `regulations_get_cfr_section` (live path first), `regulations_list_open_comments`. This is a shippable keyless v1.
 5. **eCFR mirror** — `defineMirror` schema + `sync` ingester (with idempotent aux-table DDL at sync start), `mirror:init`/`refresh`/`verify` scripts, `schedulerService` refresh wiring, `ready()`-gated read path in `browse_cfr`/`get_cfr_section` with live fallback.
 6. **`RegulationsGovService`** — keyed client (`X-Api-Key`), 429/Retry-After handling, JSON:API unwrapping, the missing-key → `auth_required` guard.
-7. **Keyed tools** — `regulations_get_docket`, `regulations_find_comments` (incl. attachment resolution); enrich `regulations_list_open_comments` with comment counts.
+7. **Keyed tools** — `regulations_get_docket`, `regulations_find_comments` (incl. attachment resolution).
 8. **Resources** — `regulations://document/{documentNumber}`, `regulations://cfr/{title}/{part}/{section}`.
 9. **Tests** — per service + per tool, including: a sparse FR payload (empty `regulation_id_numbers`, null `comments_close_on`), an attachment-only comment (null `comment`, populated `fileFormats`), a missing-key call to a keyed tool (`auth_required`), and a truncation case for both pagination ceilings.
 
@@ -865,7 +902,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 ## Design Decisions
 
-**Keyless core, keyed comments — a sequencing split, not a scope cut.** Federal Register + eCFR are keyless and are conceptually "the rules" — they form a clean, hostable product with no key at all (tools 1–4 + 7). Regulations.gov (the `api.data.gov` key, the comment corpus, the pagination pain) layers on as tools 5–6. The server identity is "federal regulations" either way. The two keyed tools must fail with an actionable `auth_required` contract error when the key is absent — naming the env var and the signup URL — never a generic 401 passthrough or a silent empty result. `list_open_comments` is the one hybrid: it *degrades* rather than failing, running FR-only and skipping comment-count enrichment when unkeyed, because its core value (what's open) is keyless.
+**Keyless core, keyed comments — a sequencing split, not a scope cut.** Federal Register + eCFR are keyless and are conceptually "the rules" — they form a clean, hostable product with no key at all (tools 1–4 + 7). Regulations.gov (the `api.data.gov` key, the comment corpus, the pagination pain) layers on as tools 5–6. The server identity is "federal regulations" either way. The two keyed tools must fail with an actionable `auth_required` contract error when the key is absent — naming the env var and the signup URL — never a generic 401 passthrough or a silent empty result. `list_open_comments` is keyless end to end: what's open, and each document's Regulations.gov IDs and comment count, all come from the Federal Register; `keyed` tells a caller whether the Regulations.gov tools can follow up.
 
 **The Federal Register is the spine; `get_document` is the stitch.** Live probing confirmed FR documents embed `regulations_dot_gov_info` (docket ID, Regulations.gov document ID, comment count, comment URL, supporting documents) **and** `cfr_references` (title + part) directly in the document payload. So `get_document` surfaces every cross-source handle from one keyless call — no Regulations.gov key needed just to *discover* the docket and CFR cites. The handles are rendered in `format()` next to their target tool names, which is what primes the agent to chain into `find_comments` and `get_cfr_section`.
 

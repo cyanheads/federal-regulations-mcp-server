@@ -35,8 +35,8 @@ US federal regulatory law from three official sources: the Federal Register (pro
 
 | Tool | Description |
 |:---|:---|
-| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, and date range |
-| `regulations_get_document` | Fetch one Federal Register document by number, with the docket ID, CFR parts, and comment count that chain into other tools |
+| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, date range, CFR part, docket number, and RIN, or resolve a page cite to its document |
+| `regulations_get_document` | Fetch one Federal Register document by number, with the docket IDs, CFR parts, citation, comment count, and comment URL that chain into other tools |
 | `regulations_browse_cfr` | List CFR titles, a title's chapters, or every section and appendix in a part, or full-text-search the codified CFR |
 | `regulations_get_cfr_section` | Read codified CFR text for a section, whole part, or appendix, current or as of a past date |
 | `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov (key required) |
@@ -56,15 +56,16 @@ Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_s
 
 ### `regulations_search_rules` <sub>tool</sub>
 
-- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), and `published_after` / `published_before`; `per_page` 2–100 (default 20), `page` 1–50
-- Each result carries `documentNumber`, `agencies[].slug`, `docketIds`, `regulationIdNumbers`, and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
+- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), `published_after` / `published_before`, `cfr_title` + `cfr_part` (a part number or range such as `140-143`; `cfr_part` needs `cfr_title`, else `title_required_for_part`), `docket_id` (a docket number as the Federal Register prints it), and `rin`, all combined; `per_page` 2–100 (default 20), `page` 1–50
+- `citation` (`"89 FR 49102"`) with `citation_date` (the date its source note prints beside it) returns the documents printed on that page, in page order, volume 59 (1994) onward. A cite missing its date, or combined with the date window, fails with `citation_incomplete`; a volume before 59 or a date from another year fails with `citation_out_of_range`. When no document spans the page, the notice gives that day's page range
+- Each result carries `documentNumber`, `citation` / `startPage` / `endPage`, `agencies[].slug`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, `commentUrl`, `commentsCloseOn` with `commentPeriodOpen` (open through 11:59 PM Eastern on the close date), `regulationIdNumbers`, and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
 
 ---
 
 ### `regulations_get_document` <sub>tool</sub>
 
 - `document_number` in any form the Federal Register issues: `2024-07773` from 2010 on, and older and correction numbers such as `98-1572`, `E9-25990`, or `C1-2009-30484`; `include_full_text` adds the plain-text body as one window of `max_chars` (default 64,000, max 200,000) starting at `offset`, and passing either of those implies it
-- Returns metadata plus the handles other tools take: `docketId`, `regulationsGovDocumentId`, `commentCount`, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
+- Returns metadata plus the handles other tools take: the Regulations.gov `docketId` and `regulationsGovDocumentId`, the printed `docketIds`, `citation` / `startPage` / `endPage`, `commentCount`, `commentUrl`, `commentPeriodOpen`, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
 
 ---
 
@@ -84,8 +85,8 @@ Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_s
 
 ### `regulations_get_docket` <sub>tool</sub> · key required
 
-- `docket_id` (e.g. `EPA-HQ-OAR-2025-0194`); `document_types` filters to `Proposed Rule`, `Rule`, `Notice`, `Supporting & Related Material`, or `Other`; `per_page` 5–250 (default 25), `page` 1–40
-- Returns the docket's metadata, `documentCount`, and `documents[]`, each with an `objectId` for `regulations_find_comments` and a `frDocNum` back to `regulations_get_document`. `totalPages` and `nextPage` page the documents; Regulations.gov serves 40 pages, so `truncated` marks a docket larger than 40 × `per_page` (10,000 at 250)
+- `docket_id`, the Regulations.gov docket ID (e.g. `EPA-HQ-OAR-2025-0194`) — `regulationsGovDocketId` on a search or open-comments row, `docketId` from `regulations_get_document`, not a printed `docketIds` entry; `document_types` filters to `Proposed Rule`, `Rule`, `Notice`, `Supporting & Related Material`, or `Other`; `per_page` 5–250 (default 25), `page` 1–40
+- Returns the docket's metadata, `documentCount`, and `documents[]`, each with an `objectId` for `regulations_find_comments`, a `frDocNum` back to `regulations_get_document`, and `commentPeriodOpen` as Regulations.gov reports it. `totalPages` and `nextPage` page the documents; Regulations.gov serves 40 pages, so `truncated` marks a docket larger than 40 × `per_page` (10,000 at 250)
 
 ---
 
@@ -101,15 +102,15 @@ Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_s
 ### `regulations_list_open_comments` <sub>tool</sub>
 
 - Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (Federal Register slugs), and `closing_before`; `per_page` 1–100 (default 20)
-- Rows sort by closing date, soonest first, and carry `commentsCloseOn`, `daysRemaining`, `documentNumber`, and `docketIds`. `totalPages` and `nextPage` page the window; `truncated` means the Federal Register's 10,000-document limit was reached
-- Keyless. `keyed` reports whether `commentCount` was filled in, which happens only when `REGULATIONS_GOV_API_KEY` is set
+- Rows sort by closing date, soonest first, and carry `commentsCloseOn`, `daysRemaining`, `documentNumber`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, and `commentUrl`. `asOf` is today's date in Eastern time, so a document stays listed through its close day. `totalPages` and `nextPage` page the window; `truncated` means the Federal Register's 10,000-document limit was reached
+- Keyless. `keyed` reports whether `REGULATIONS_GOV_API_KEY` is set, which `regulations_get_docket` and `regulations_find_comments` need to follow up on a row
 
 ---
 
 ### `regulations://document/{documentNumber}` <sub>resource</sub>
 
 - `documentNumber` in any Federal Register form (`2024-07773`, `98-1572`, `E9-25990`); the payload is `regulations_get_document`'s without the body text
-- `docketId`, `cfrReferences`, and `commentCount` chain into the comment and CFR tools
+- `docketId`, `regulationsGovDocumentId`, the printed `docketIds`, `cfrReferences`, `citation`, `commentCount`, and `commentUrl` chain into the search, comment, and CFR tools
 
 ---
 
@@ -222,7 +223,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
 ### Prerequisites
 
 - [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
-- Optional: a free [api.data.gov key](https://api.data.gov/signup/) for the Regulations.gov tools and comment counts.
+- Optional: a free [api.data.gov key](https://api.data.gov/signup/) for the Regulations.gov tools.
 
 ### Installation
 
@@ -255,7 +256,7 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |:---|:---|:---|
-| `REGULATIONS_GOV_API_KEY` | api.data.gov key for `regulations_get_docket`, `regulations_find_comments`, and comment counts in `regulations_list_open_comments`. | none |
+| `REGULATIONS_GOV_API_KEY` | api.data.gov key for `regulations_get_docket` and `regulations_find_comments`. | none |
 | `FEDERAL_REGISTER_BASE_URL` | Federal Register API v1 base URL. | `https://www.federalregister.gov/api/v1` |
 | `ECFR_BASE_URL` | eCFR API base URL. | `https://www.ecfr.gov/api` |
 | `REGULATIONS_GOV_BASE_URL` | Regulations.gov API v4 base URL. | `https://api.regulations.gov/v4` |
