@@ -56,19 +56,26 @@ export interface RawDocumentAttributes {
   withdrawn?: boolean | null;
 }
 
-/** Raw comment attributes (list + detail). */
+/**
+ * Raw comment attributes (list + detail). `highlightedContent` rides on list
+ * hits only, and only under `filter[searchTerm]` (an empty string otherwise);
+ * `receiveDate`, `postmarkDate`, and `duplicateComments` ride on detail only.
+ */
 export interface RawCommentAttributes {
   agencyId?: string | null;
   comment?: string | null;
   commentOnDocumentId?: string | null;
   docketId?: string | null;
   documentType?: string | null;
+  duplicateComments?: number | null;
   firstName?: string | null;
+  highlightedContent?: string | null;
   lastName?: string | null;
   objectId?: string | null;
   organization?: string | null;
   postedDate?: string | null;
-  receivedDate?: string | null;
+  postmarkDate?: string | null;
+  receiveDate?: string | null;
   restrictReason?: string | null;
   title?: string | null;
   withdrawn?: boolean | null;
@@ -115,6 +122,8 @@ export interface CommentSummary {
   agencyId: string | null;
   commentId: string;
   documentType: string;
+  /** The matched text as plain text; present only on a `searchTerm` query's hits. */
+  highlightedContent?: string;
   objectId: string;
   postedDate: string;
   title: string;
@@ -125,6 +134,13 @@ export interface CommentSummary {
 export interface CommentListResult {
   comments: CommentSummary[];
   totalCount: number;
+}
+
+/** A Regulations.gov document resolved to the handles a comment query needs. */
+export interface ResolvedDocument {
+  docketId: string | null;
+  documentId: string;
+  objectId: string;
 }
 
 /** Normalized attachment. */
@@ -141,8 +157,10 @@ export interface CommentDetailResult {
   commentId: string;
   commentOnDocumentId: string | null;
   docketId: string | null;
+  duplicateComments: number | null;
   organization: string | null;
   postedDate: string;
+  postmarkDate: string | null;
   receivedDate: string | null;
   restrictReason: string | null;
   submitterName: string | null;

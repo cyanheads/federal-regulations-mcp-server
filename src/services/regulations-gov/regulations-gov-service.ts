@@ -30,6 +30,7 @@ import {
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
+import { decodeCharacterReferences } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
 import {
   fetchUpstream,
@@ -51,6 +52,7 @@ import type {
   RawDocketAttributes,
   RawDocumentAttributes,
   RegDocument,
+  ResolvedDocument,
 } from './types.js';
 
 const BASE_DELAY_MS = 1500;
@@ -70,11 +72,18 @@ export interface DocketParams {
   perPage: number;
 }
 
-/** A comment list query targets either a document object ID or a docket ID. */
+/**
+ * A comment list query targets either a document object ID or a docket ID, and
+ * optionally narrows it by comment text and an inclusive posted-date window
+ * (`YYYY-MM-DD`; the API answers a datetime with a 400).
+ */
 export interface CommentListParams {
   filter: { commentOnId: string } | { docketId: string };
   page: number;
   perPage: number;
+  postedAfter?: string | undefined;
+  postedBefore?: string | undefined;
+  searchTerm?: string | undefined;
 }
 
 export class RegulationsGovService {
@@ -148,6 +157,9 @@ export class RegulationsGovService {
     } else {
       search.set('filter[docketId]', params.filter.docketId);
     }
+    if (params.searchTerm) search.set('filter[searchTerm]', params.searchTerm);
+    if (params.postedAfter) search.set('filter[postedDate][ge]', params.postedAfter);
+    if (params.postedBefore) search.set('filter[postedDate][le]', params.postedBefore);
     const url = `${this.baseUrl}/comments?${search.toString()}`;
     const raw = await this.fetchJson<JsonApiList<RawCommentAttributes>>(
       url,
@@ -174,13 +186,19 @@ export class RegulationsGovService {
   }
 
   /**
-   * Resolve a Federal Register document number to its Regulations.gov primary
-   * document object ID, via `filter[searchTerm]` on the FR number. Returns null
-   * when no matching document is found.
+   * Resolve a Federal Register document number to the Regulations.gov document
+   * carrying it, through the exact-match `filter[frDocNum]`. Null when no
+   * document carries that number — a text search would instead rank documents
+   * that merely quote it. The filter is case-sensitive (`e9-25990` matches
+   * nothing), so callers pass the number normalized. When several documents
+   * carry one number, the first with an object ID is taken.
    */
-  async resolveFrDocumentObjectId(frDocumentNumber: string, ctx: Context): Promise<string | null> {
+  async resolveFrDocument(
+    frDocumentNumber: string,
+    ctx: Context,
+  ): Promise<ResolvedDocument | null> {
     const search = new URLSearchParams({
-      'filter[searchTerm]': frDocumentNumber,
+      'filter[frDocNum]': frDocumentNumber,
       'page[size]': '5',
       'page[number]': '1',
     });
@@ -191,13 +209,40 @@ export class RegulationsGovService {
       'RegulationsGovService.resolveFrDocument',
     );
     for (const d of raw.data ?? []) {
-      if (d.attributes?.frDocNum === frDocumentNumber && d.attributes?.objectId) {
-        return d.attributes.objectId;
-      }
+      const resolved = toResolvedDocument(d);
+      if (resolved) return resolved;
     }
-    // Fall back to the first result's objectId if present.
-    const first = (raw.data ?? [])[0];
-    return first?.attributes?.objectId ?? null;
+    return null;
+  }
+
+  /**
+   * Resolve a Regulations.gov document ID (`EPA-HQ-OW-2022-0114-0027`) to the
+   * object ID comments are filed against, through the single-document endpoint.
+   * A document that does not exist leaves as `not_found`.
+   */
+  async resolveDocument(documentId: string, ctx: Context): Promise<ResolvedDocument> {
+    const url = `${this.baseUrl}/documents/${encodeURIComponent(documentId)}`;
+    const missing = (cause?: unknown) =>
+      notFound(
+        `No Regulations.gov document ${documentId} to list comments on.`,
+        { documentId, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+        { cause },
+      );
+    let raw: JsonApiSingle<RawDocumentAttributes>;
+    try {
+      raw = await this.fetchJson<JsonApiSingle<RawDocumentAttributes>>(
+        url,
+        ctx,
+        'RegulationsGovService.resolveDocument',
+      );
+    } catch (err) {
+      // The shared 404 text names a docket example; this lookup has one ID to name.
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) throw missing(err);
+      throw err;
+    }
+    const resolved = raw.data ? toResolvedDocument(raw.data) : null;
+    if (!resolved) throw missing();
+    return resolved;
   }
 
   /**
@@ -379,9 +424,20 @@ function normalizeDocument(d: JsonApiResource<RawDocumentAttributes>): RegDocume
   };
 }
 
+/** A document's comment-query handles, or null when it carries no object ID. */
+function toResolvedDocument(d: JsonApiResource<RawDocumentAttributes>): ResolvedDocument | null {
+  const objectId = d.attributes?.objectId;
+  if (!d.id || !objectId) return null;
+  return { documentId: d.id, objectId, docketId: d.attributes?.docketId ?? null };
+}
+
 function normalizeCommentSummary(c: JsonApiResource<RawCommentAttributes>): CommentSummary | null {
   const a = c.attributes;
   if (!c.id) return null;
+  // Upstream sends '' when the query carried no searchTerm; there is no match to show.
+  const highlighted = a?.highlightedContent
+    ? stripHtml(a.highlightedContent).replace(/\s+/g, ' ')
+    : '';
   return {
     commentId: c.id,
     title: a?.title ?? '(untitled comment)',
@@ -390,6 +446,7 @@ function normalizeCommentSummary(c: JsonApiResource<RawCommentAttributes>): Comm
     agencyId: a?.agencyId ?? null,
     objectId: a?.objectId ?? '',
     withdrawn: a?.withdrawn ?? false,
+    ...(highlighted && { highlightedContent: highlighted }),
   };
 }
 
@@ -415,41 +472,22 @@ function collectAttachments(
     .filter((a) => a.formats.length > 0);
 }
 
-const HTML_NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-  mdash: '—',
-  ndash: '–',
-  rsquo: '’',
-  lsquo: '‘',
-  ldquo: '“',
-  rdquo: '”',
-  hellip: '…',
-};
-
-/** Strip HTML tags + decode entities from a comment body. */
+/**
+ * Reduce comment HTML (a body, or a search hit's `highlightedContent`) to text:
+ * line-breaking tags become newlines, every other tag goes, then character
+ * references decode in one pass — tags first, so an escaped `&lt;b&gt;` survives
+ * as the text `<b>`. A tag never spans another `<`, so a stray less-than sign in
+ * the text ("levels < 4 ppt") is kept rather than read as the start of a tag
+ * running to the next `>`, and a run of openers with no closer stays linear. A
+ * non-breaking space collapses like any other space.
+ */
 function stripHtml(html: string): string {
   const text = html
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li)\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, '');
-  return text
-    .replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
-      if (body.startsWith('#x') || body.startsWith('#X')) {
-        const code = Number.parseInt(body.slice(2), 16);
-        return Number.isNaN(code) ? match : String.fromCodePoint(code);
-      }
-      if (body.startsWith('#')) {
-        const code = Number.parseInt(body.slice(1), 10);
-        return Number.isNaN(code) ? match : String.fromCodePoint(code);
-      }
-      return HTML_NAMED_ENTITIES[body] ?? match;
-    })
-    .replace(/[ \t]+/g, ' ')
+    .replace(/<[^<>]+>/g, '');
+  return decodeCharacterReferences(text)
+    .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -491,7 +529,9 @@ function normalizeCommentDetail(
     docketId: a.docketId ?? null,
     commentOnDocumentId: a.commentOnDocumentId ?? null,
     postedDate: a.postedDate ?? '',
-    receivedDate: a.receivedDate ?? null,
+    receivedDate: a.receiveDate ?? null,
+    postmarkDate: a.postmarkDate ?? null,
+    duplicateComments: typeof a.duplicateComments === 'number' ? a.duplicateComments : null,
     submitterName: submitterName.length > 0 ? submitterName : null,
     organization: a.organization ?? null,
     bodyText,

@@ -61,8 +61,10 @@ function invalidId(id: string): Response {
 describe('RegulationsGovService', () => {
   beforeEach(() => {
     // Reset call history + implementation, but keep the spy installed so no test
-    // ever reaches the real Regulations.gov endpoint.
+    // ever reaches the real Regulations.gov endpoint: a call no test layered a
+    // fake for rejects rather than going out.
     fetchSpy.mockReset();
+    fetchSpy.mockRejectedValue(new Error('unmocked fetch'));
     configMock.regulationsGovApiKey = 'test-key';
   });
 
@@ -370,5 +372,336 @@ describe('RegulationsGovService', () => {
     expect(result.comments[0]!.commentId).toBe('EPA-HQ-OAR-2025-0194-31102');
     // The summary shape carries no body field — bodies require detail mode.
     expect(result.comments[0]).not.toHaveProperty('bodyText');
+  });
+
+  describe('comment body decoding', () => {
+    /** One comment detail whose `comment` attribute is `html`, read back through getComment. */
+    async function bodyOf(html: string): Promise<string | null> {
+      fetchSpy.mockResolvedValueOnce(
+        jsonApiResponse({
+          data: {
+            id: 'EPA-HQ-OW-2022-0114-3057',
+            type: 'comments',
+            attributes: { title: 'Comment', comment: html, postedDate: '2023-05-10T04:00:00Z' },
+          },
+        }),
+      );
+      return (await newService().getComment('EPA-HQ-OW-2022-0114-3057', createMockContext()))
+        .bodyText;
+    }
+
+    it('decodes named references outside the old table, as in a live campaign letter', async () => {
+      // Verbatim from EPA-HQ-OW-2022-0114-3057: `&bull;` bullets between `<br/>`s.
+      const body = await bodyOf(
+        "I understand EPA&rsquo;s proposed rule would:<br/>&bull;<span style='padding-left: 30px'></span>provide safer drinking water;<br/>&bull;<span style='padding-left: 30px'></span>save thousands of lives.",
+      );
+      expect(body).toBe(
+        'I understand EPA’s proposed rule would:\n•provide safer drinking water;\n•save thousands of lives.',
+      );
+      expect(body).not.toContain('&bull;');
+    });
+
+    it('decodes the wider HTML set — section sign, accented letters', async () => {
+      expect(await bodyOf('<p>&sect; 141.61 &eacute;t&eacute; &frac12;</p>')).toBe(
+        '§ 141.61 été ½',
+      );
+    });
+
+    it('leaves a numeric reference naming no Unicode scalar value as written, and succeeds', async () => {
+      // `&#1114112;` used to throw RangeError out of String.fromCodePoint and fail
+      // the whole call; `&#0;` and `&#xD800;` decoded to a NUL and a lone surrogate.
+      expect(await bodyOf('<p>ok &#1114112; after</p>')).toBe('ok &#1114112; after');
+      expect(await bodyOf('a &#99999999999; &#0; &#xD800; b')).toBe(
+        'a &#99999999999; &#0; &#xD800; b',
+      );
+    });
+
+    it('leaves inherited property names and unknown names as written', async () => {
+      // A plain-object table resolved `&constructor;` to Object's source text.
+      expect(
+        await bodyOf('<p>proto &constructor; &toString; &hasOwnProperty; &notanentity;</p>'),
+      ).toBe('proto &constructor; &toString; &hasOwnProperty; &notanentity;');
+    });
+
+    it('does not decode the leading digits of a decimal reference that carries hex letters', async () => {
+      expect(await bodyOf('x &#12ab; y')).toBe('x &#12ab; y');
+    });
+
+    it('strips tags before decoding, and decodes once', async () => {
+      expect(await bodyOf('<b>real</b> &lt;b&gt;escaped&lt;/b&gt; &amp;lt;')).toBe(
+        'real <b>escaped</b> &lt;',
+      );
+    });
+
+    it('keeps a non-breaking space a plain space, as before', async () => {
+      expect(await bodyOf('a&nbsp;b &nbsp; c')).toBe('a b c');
+    });
+
+    it('keeps text around a stray less-than sign instead of eating it as a tag', async () => {
+      expect(await bodyOf('<p>levels < 4 ppt and <b>bold</b></p>')).toBe('levels < 4 ppt and bold');
+    });
+
+    it('strips a body of unclosed tag openers in linear time', async () => {
+      // A run of `<` with no `>` made the tag pattern rescan to the end from every
+      // opener: 1.1 s at 80k characters.
+      const timings: number[] = [];
+      for (const n of [5_000, 20_000, 80_000]) {
+        const html = `${'<'.repeat(n)}x`;
+        const started = performance.now();
+        const body = await bodyOf(html);
+        timings.push(performance.now() - started);
+        expect(body).toBe(html);
+      }
+      const [t5k = 0, , t80k = 0] = timings;
+      expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
+      expect(t80k).toBeLessThan(250);
+    });
+  });
+
+  describe('comment detail dates and campaign count', () => {
+    it('maps the upstream receiveDate, postmarkDate, and duplicateComments', async () => {
+      // Real attribute names from GET /v4/comments/EPA-HQ-OW-2022-0114-1835. The
+      // normalizer read `receivedDate`, which the API never sends.
+      fetchSpy.mockResolvedValueOnce(
+        jsonApiResponse({
+          data: {
+            id: 'EPA-HQ-OW-2022-0114-1835',
+            type: 'comments',
+            attributes: {
+              title: 'Comment',
+              comment: 'Text.',
+              postedDate: '2023-06-05T04:00:00Z',
+              receiveDate: '2023-05-30T04:00:00Z',
+              postmarkDate: '2023-05-30T04:00:00Z',
+              duplicateComments: 1,
+            },
+          },
+        }),
+      );
+      const detail = await newService().getComment('EPA-HQ-OW-2022-0114-1835', createMockContext());
+      expect(detail.receivedDate).toBe('2023-05-30T04:00:00Z');
+      expect(detail.postmarkDate).toBe('2023-05-30T04:00:00Z');
+      expect(detail.duplicateComments).toBe(1);
+    });
+
+    it('passes a mass-mail campaign count and a null postmark through as-is', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        jsonApiResponse({
+          data: {
+            id: 'EPA-HQ-OAR-2023-0072-0856',
+            type: 'comments',
+            attributes: {
+              title: 'Mass Comment Campaign',
+              comment: 'See attached',
+              postedDate: '2023-08-01T04:00:00Z',
+              receiveDate: '2023-07-08T04:00:00Z',
+              postmarkDate: null,
+              duplicateComments: 99324,
+            },
+          },
+        }),
+      );
+      const detail = await newService().getComment(
+        'EPA-HQ-OAR-2023-0072-0856',
+        createMockContext(),
+      );
+      expect(detail.duplicateComments).toBe(99324);
+      expect(detail.postmarkDate).toBeNull();
+    });
+
+    it('reports null for each attribute the upstream omits', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        jsonApiResponse({
+          data: { id: 'X-1', type: 'comments', attributes: { title: 'Sparse' } },
+        }),
+      );
+      const detail = await newService().getComment('X-1', createMockContext());
+      expect(detail.receivedDate).toBeNull();
+      expect(detail.postmarkDate).toBeNull();
+      expect(detail.duplicateComments).toBeNull();
+    });
+  });
+
+  describe('document resolution', () => {
+    /** The live answer for `filter[frDocNum]=E9-25990`, trimmed to what the resolver reads. */
+    function frHits(...hits: Array<{ id: string; objectId?: string; docketId?: string }>) {
+      return jsonApiResponse({
+        data: hits.map((h) => ({
+          id: h.id,
+          type: 'documents',
+          attributes: {
+            objectId: h.objectId,
+            docketId: h.docketId,
+            frDocNum: 'E9-25990',
+            highlightedContent: '',
+          },
+        })),
+        meta: { totalElements: hits.length },
+      });
+    }
+
+    it('resolves an FR number through the exact-match frDocNum filter, not a text search', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        frHits({
+          id: 'FWS-R6-ES-2009-0065-0001',
+          objectId: '0900006480a4cb43',
+          docketId: 'FWS-R6-ES-2009-0065',
+        }),
+      );
+      const resolved = await newService().resolveFrDocument('E9-25990', createMockContext());
+      expect(resolved).toEqual({
+        documentId: 'FWS-R6-ES-2009-0065-0001',
+        objectId: '0900006480a4cb43',
+        docketId: 'FWS-R6-ES-2009-0065',
+      });
+      const url = new URL(String(fetchSpy.mock.calls[0]![0]));
+      expect(url.pathname).toBe('/v4/documents');
+      expect(url.searchParams.get('filter[frDocNum]')).toBe('E9-25990');
+      expect(url.searchParams.has('filter[searchTerm]')).toBe(false);
+    });
+
+    it('returns null on zero hits instead of borrowing an unrelated document', async () => {
+      fetchSpy.mockResolvedValueOnce(frHits());
+      expect(await newService().resolveFrDocument('2025-02345', createMockContext())).toBeNull();
+    });
+
+    it('skips a hit carrying no object ID', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        frHits(
+          { id: 'A-1', docketId: 'A' },
+          { id: 'B-2', objectId: '0900006480000002', docketId: 'B' },
+        ),
+      );
+      expect(await newService().resolveFrDocument('E9-25990', createMockContext())).toMatchObject({
+        documentId: 'B-2',
+        objectId: '0900006480000002',
+      });
+    });
+
+    it('resolves a document ID to its object ID through the single-document endpoint', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        jsonApiResponse({
+          data: {
+            id: 'EPA-HQ-OW-2022-0114-0027',
+            type: 'documents',
+            attributes: {
+              objectId: '0900006485883ec6',
+              docketId: 'EPA-HQ-OW-2022-0114',
+              frDocNum: '2023-05471',
+            },
+          },
+        }),
+      );
+      const resolved = await newService().resolveDocument(
+        'EPA-HQ-OW-2022-0114-0027',
+        createMockContext(),
+      );
+      expect(resolved).toEqual({
+        documentId: 'EPA-HQ-OW-2022-0114-0027',
+        objectId: '0900006485883ec6',
+        docketId: 'EPA-HQ-OW-2022-0114',
+      });
+      expect(new URL(String(fetchSpy.mock.calls[0]![0])).pathname).toBe(
+        '/v4/documents/EPA-HQ-OW-2022-0114-0027',
+      );
+    });
+
+    it('answers not_found for a document ID that does not exist', async () => {
+      // Live: GET /v4/documents/EPA-HQ-OW-2022-0114-9999999 is a 404.
+      fetchSpy.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [
+              { status: '404', title: 'The document with the specified ID could not be found.' },
+            ],
+          }),
+          { status: 404 },
+        ),
+      );
+      const err = await newService()
+        .resolveDocument('EPA-HQ-OW-2022-0114-9999999', createMockContext())
+        .catch((e: unknown) => e);
+      expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+      expect((err as McpError).data?.reason).toBe('not_found');
+    });
+  });
+
+  describe('comment list filters', () => {
+    function listPage(highlightedContent: string) {
+      return jsonApiResponse({
+        data: [
+          {
+            id: 'EPA-HQ-OW-2022-0114-1591',
+            type: 'comments',
+            attributes: {
+              title: 'Comment from Org',
+              documentType: 'Public Submission',
+              postedDate: '2023-05-31T04:00:00Z',
+              objectId: '0900006485a00001',
+              agencyId: 'EPA',
+              withdrawn: false,
+              highlightedContent,
+            },
+          },
+        ],
+        meta: { totalElements: 403 },
+      });
+    }
+
+    it('maps search_term and the posted-date bounds onto a commentOnId target', async () => {
+      fetchSpy.mockResolvedValueOnce(listPage(''));
+      await newService().listComments(
+        {
+          filter: { commentOnId: '0900006485883ec6' },
+          searchTerm: 'PFOA',
+          postedAfter: '2023-05-01',
+          postedBefore: '2023-05-31',
+          perPage: 25,
+          page: 1,
+        },
+        createMockContext(),
+      );
+      const params = new URL(String(fetchSpy.mock.calls[0]![0])).searchParams;
+      expect(params.get('filter[commentOnId]')).toBe('0900006485883ec6');
+      expect(params.get('filter[searchTerm]')).toBe('PFOA');
+      expect(params.get('filter[postedDate][ge]')).toBe('2023-05-01');
+      expect(params.get('filter[postedDate][le]')).toBe('2023-05-31');
+    });
+
+    it('sends no filter the caller did not set', async () => {
+      fetchSpy.mockResolvedValueOnce(listPage(''));
+      await newService().listComments(
+        { filter: { docketId: 'EPA-HQ-OAR-2021-0317' }, perPage: 25, page: 1 },
+        createMockContext(),
+      );
+      const params = new URL(String(fetchSpy.mock.calls[0]![0])).searchParams;
+      expect(params.get('filter[docketId]')).toBe('EPA-HQ-OAR-2021-0317');
+      expect(
+        [...params.keys()].filter((k) => k !== 'filter[docketId]' && k.startsWith('filter')),
+      ).toEqual([]);
+    });
+
+    it('relays highlightedContent stripped and decoded, and omits it when upstream sends empty', async () => {
+      // Verbatim fragment from a live `filter[searchTerm]=PFOA` hit.
+      fetchSpy.mockResolvedValueOnce(
+        listPage(
+          'report levels of PFOS/<mark><em>PFOA</em></mark>&hellip;&nbsp;We note that many labs \nare reporting at +/- 1.8 ppt for <mark><em>PFOA</em></mark>/PFOS.',
+        ),
+      );
+      const hit = await newService().listComments(
+        { filter: { docketId: 'EPA-HQ-OW-2022-0114' }, searchTerm: 'PFOA', perPage: 25, page: 1 },
+        createMockContext(),
+      );
+      expect(hit.comments[0]!.highlightedContent).toBe(
+        'report levels of PFOS/PFOA… We note that many labs are reporting at +/- 1.8 ppt for PFOA/PFOS.',
+      );
+
+      fetchSpy.mockResolvedValueOnce(listPage(''));
+      const plain = await newService().listComments(
+        { filter: { docketId: 'EPA-HQ-OW-2022-0114' }, perPage: 25, page: 1 },
+        createMockContext(),
+      );
+      expect(plain.comments[0]).not.toHaveProperty('highlightedContent');
+    });
   });
 });

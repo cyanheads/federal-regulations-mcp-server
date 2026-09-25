@@ -618,6 +618,118 @@ describe('not_found reaches the caller', () => {
     expect(err.data?.reason).toBe('not_found');
     expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/regulations_search_rules/);
   });
+
+  it('names an FR number no Regulations.gov document carries, after one exact-match lookup', async () => {
+    // Live: `filter[frDocNum]=2025-02345` (Executive Order 14192) answers zero hits.
+    serveEverything(() => Response.json({ data: [], meta: { totalElements: 0 } }));
+    const { error, text } = surfaces(
+      await runToolContract(findCommentsTool, { fr_document_number: '2025-02345' }),
+    );
+
+    expect(error.code).toBe(-32001);
+    expect(error.data?.reason).toBe('not_found');
+    expect(error.message).toContain('2025-02345');
+    expect(text).toMatch(/^Recovery: .+$/m);
+    expect(http.calls).toHaveLength(1);
+    expect(new URL(http.calls[0]!.request.url).searchParams.get('filter[frDocNum]')).toBe(
+      '2025-02345',
+    );
+  });
+
+  it('names a Regulations.gov document ID that does not exist, and lists nothing', async () => {
+    // Live: GET /v4/documents/EPA-HQ-OW-2022-0114-9999999 is a 404 with this body.
+    serveEverything(() =>
+      Response.json(
+        {
+          errors: [
+            { status: '404', title: 'The document with the specified ID could not be found.' },
+          ],
+        },
+        { status: 404 },
+      ),
+    );
+    const { error, text } = surfaces(
+      await runToolContract(findCommentsTool, {
+        document_object_id: 'EPA-HQ-OW-2022-0114-9999999',
+      }),
+    );
+
+    expect(error.code).toBe(-32001);
+    expect(error.data?.reason).toBe('not_found');
+    expect(error.message).toContain('EPA-HQ-OW-2022-0114-9999999');
+    expect(text).toMatch(/^Recovery: .+$/m);
+    expect(http.calls).toHaveLength(1);
+  });
+});
+
+describe('regulations_find_comments filter validation never reaches Regulations.gov', () => {
+  it('answers an inverted posted-date window with date_range_inverted', async () => {
+    serveEverything(() => Response.json({ data: [], meta: { totalElements: 0 } }));
+    const { error, text } = surfaces(
+      await runToolContract(findCommentsTool, {
+        docket_id: 'EPA-HQ-OAR-2021-0317',
+        posted_after: '2023-03-01',
+        posted_before: '2023-01-01',
+      }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('date_range_inverted');
+    expect(text).toMatch(/^Recovery: Swap the two dates/m);
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('answers a filter on detail mode with filter_requires_list_mode', async () => {
+    serveEverything(() => Response.json({ data: {} }));
+    const { error, text } = surfaces(
+      await runToolContract(findCommentsTool, {
+        comment_id: 'EPA-HQ-OW-2022-0114-1835',
+        search_term: 'PFOA',
+      }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('filter_requires_list_mode');
+    expect(text).toMatch(/^Recovery: Drop the filters/m);
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe('regulations_search_rules date validation never reaches the Federal Register', () => {
+  it('answers an inverted publication window with date_range_inverted', async () => {
+    serveEverything(() => Response.json({ count: 0, results: [] }));
+    const { error, text } = surfaces(
+      await runToolContract(searchRulesTool, {
+        query: 'PFAS',
+        published_after: '2025-01-01',
+        published_before: '2024-01-01',
+      }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('date_range_inverted');
+    expect(error.message).toMatch(/published_after.+published_before/);
+    expect(text).toMatch(/^Recovery: Swap the two dates/m);
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe('a page past the Regulations.gov ceiling never reaches Regulations.gov', () => {
+  const cases = [
+    { tool: getDocketTool, input: { docket_id: 'EPA-HQ-OW-2022-0114', page: 41 } },
+    { tool: findCommentsTool, input: { docket_id: 'EPA-HQ-OW-2022-0114', page: 41 } },
+  ];
+
+  for (const { tool, input } of cases) {
+    it(`${tool.name} rejects page 41 at the schema`, async () => {
+      serveEverything(() => Response.json({ data: [], meta: { totalElements: 0 } }));
+      const { error } = surfaces(await runToolContract(tool, input));
+
+      expect(error.code).toBe(-32602);
+      expect(error.message).toMatch(/page/);
+      expect(http.calls).toHaveLength(0);
+    });
+  }
 });
 
 describe('a Federal Register 400 without a field report', () => {
