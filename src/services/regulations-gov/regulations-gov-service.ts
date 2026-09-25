@@ -476,8 +476,9 @@ function collectAttachments(
  * Reduce comment HTML (a body, or a search hit's `highlightedContent`) to text:
  * line-breaking tags become newlines, every other tag goes, then character
  * references decode in one pass — tags first, so an escaped `&lt;b&gt;` survives
- * as the text `<b>`. A tag never spans another `<`, so a stray less-than sign in
- * the text ("levels < 4 ppt") is kept rather than read as the start of a tag
+ * as the text `<b>`. A tag opens as HTML opens one — `<` then a letter, `/`,
+ * `!`, or `?` — and never spans another `<`, so a less-than sign in the text
+ * ("levels < 4 ppt", "<4 ppt") is kept rather than read as the start of a tag
  * running to the next `>`, and a run of openers with no closer stays linear. A
  * non-breaking space collapses like any other space.
  */
@@ -485,7 +486,7 @@ function stripHtml(html: string): string {
   const text = html
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li)\s*>/gi, '\n')
-    .replace(/<[^<>]+>/g, '');
+    .replace(/<[A-Za-z/!?][^<>]*>/g, '');
   return decodeCharacterReferences(text)
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')

@@ -441,6 +441,14 @@ describe('RegulationsGovService', () => {
       expect(await bodyOf('<p>levels < 4 ppt and <b>bold</b></p>')).toBe('levels < 4 ppt and bold');
     });
 
+    it('keeps a less-than and a later greater-than that open no tag', async () => {
+      // A tag opens with `<` then a letter, `/`, `!`, or `?`; `< 4` and `<4` open none.
+      expect(await bodyOf('<p>between < 4 ppt and > 2 ppt</p>')).toBe(
+        'between < 4 ppt and > 2 ppt',
+      );
+      expect(await bodyOf('limits <4 ppt, >2 ppt<br/>next')).toBe('limits <4 ppt, >2 ppt\nnext');
+    });
+
     it('strips a body of unclosed tag openers in linear time', async () => {
       // A run of `<` with no `>` made the tag pattern rescan to the end from every
       // opener: 1.1 s at 80k characters.
