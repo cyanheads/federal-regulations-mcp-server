@@ -52,6 +52,12 @@ const BASE_DELAY_MS = 400;
 /** The titles document advances at most once a day; re-read it at most this often. */
 const TITLES_TTL_MS = 15 * 60_000;
 
+/**
+ * Parsed structure documents held at once. Title 40's runs to 9.4 MB of JSON, so
+ * the bound is what keeps a walk across several titles from holding them all.
+ */
+const STRUCTURE_CACHE_ENTRIES = 4;
+
 /** eCFR retains point-in-time versions back to roughly this date. */
 export const ECFR_EARLIEST_DATE = '2017-01-01';
 
@@ -130,6 +136,11 @@ const CITABLE_TYPES = new Set(['part', 'section']);
 export class EcfrService {
   private readonly baseUrl: string;
   private titlesCache: { doc: TitlesDocument; expiresAt: number } | undefined;
+  /** Parsed structure documents by `title/date`, oldest first; see {@link EcfrService.structureDocument}. */
+  private readonly structureCache = new Map<
+    string,
+    { expiresAt: number; root: RawEcfrStructureNode }
+  >();
 
   constructor(_config: AppConfig, _storage: StorageService) {
     this.baseUrl = getServerConfig().ecfrBaseUrl.replace(/\/$/, '');
@@ -179,9 +190,36 @@ export class EcfrService {
    * as "current". Falls back to today when the title can't be resolved.
    */
   async latestIssueDate(title: number, ctx: Context): Promise<string> {
-    const titles = await this.listTitles(ctx);
-    const match = titles.find((t) => t.number === title);
-    return match?.latestIssueDate ?? match?.upToDateAsOf ?? today();
+    return (await this.titleIssueDate(title, ctx)) ?? today();
+  }
+
+  /**
+   * A title's latest issue as the titles document states it — its
+   * `latest_issue_date`, or its `up_to_date_as_of` when it names no issue, the
+   * same value the mirror ingest stamps on the title's rows. Null when the
+   * document does not name the title: unlike {@link EcfrService.latestIssueDate},
+   * nothing stands in for it.
+   */
+  async titleIssueDate(title: number, ctx: Context): Promise<string | null> {
+    const match = (await this.listTitles(ctx)).find((t) => t.number === title);
+    return match?.latestIssueDate ?? match?.upToDateAsOf ?? null;
+  }
+
+  /**
+   * Whether text taken from a title at `issueDate` is still its current text —
+   * true when that is the title's latest issue or later. No date, or a titles
+   * document that does not name the title, is not current. A titles document
+   * that cannot be read throws rather than answering: every current read needs
+   * it anyway, so a live fallback would fail on the same document.
+   */
+  async isLatestIssue(
+    title: number,
+    issueDate: string | undefined,
+    ctx: Context,
+  ): Promise<boolean> {
+    if (!issueDate) return false;
+    const latest = await this.titleIssueDate(title, ctx);
+    return latest !== null && issueDate >= latest;
   }
 
   /**
@@ -223,7 +261,9 @@ export class EcfrService {
    * the part's own children are mostly subparts and subject groups, which have
    * no read path, so one level down would list nothing a caller can open. The
    * structure document already holds every leaf, so this costs no extra request.
-   * Each citable node carries an assembled cite.
+   * Each citable node carries an assembled cite. The document is read once per
+   * title and date and reused, so paging through a part, or listing the title
+   * and then a part of it, costs one upstream read.
    *
    * Both ways this can name nothing — a title the versioner publishes no tree
    * for, and a part absent from the tree it does publish — carry the browse
@@ -236,15 +276,9 @@ export class EcfrService {
     date: string,
     ctx: Context,
   ): Promise<EcfrStructureNode[]> {
-    const url = `${this.baseUrl}/versioner/v1/structure/${date}/title-${title}.json`;
     let root: RawEcfrStructureNode;
     try {
-      root = await this.fetchJson<RawEcfrStructureNode>(
-        url,
-        ctx,
-        'EcfrService.browseStructure',
-        [404],
-      );
+      root = await this.structureDocument(title, date, ctx);
     } catch (err) {
       // The versioner 404s a title it holds no tree for at that date — a
       // reserved title, or a date before its coverage. A date past its coverage
@@ -270,7 +304,44 @@ export class EcfrService {
         ...ctx.recoveryFor('title_not_found'),
       });
     }
-    return partLeaves(partNode, title, { subpart: null, subjectGroup: null });
+    return partLeaves(partNode, title, { part, subpart: null, subjectGroup: null });
+  }
+
+  /**
+   * A title's structure document at `date`, parsed, from the cache when it holds
+   * one. The whole document is kept, not one part's listing, because consecutive
+   * pages of a part and the parts of one title all slice the same tree — 40 CFR
+   * 63 alone pages 3,120 nodes out of a 9.4 MB document.
+   *
+   * The key is the resolved date, and an undated browse resolves its date from
+   * the titles document, so a title's new issue changes the key and is read
+   * fresh. Entries also lapse after {@link TITLES_TTL_MS}, the titles document's
+   * own horizon, and the oldest gives way once {@link STRUCTURE_CACHE_ENTRIES}
+   * are held. A read that fails — a 404 included — throws before anything is
+   * stored, so the next call asks again.
+   */
+  private async structureDocument(
+    title: number,
+    date: string,
+    ctx: Context,
+  ): Promise<RawEcfrStructureNode> {
+    const key = `${title}/${date}`;
+    const held = this.structureCache.get(key);
+    if (held && Date.now() < held.expiresAt) return held.root;
+    this.structureCache.delete(key);
+
+    const root = await this.fetchJson<RawEcfrStructureNode>(
+      `${this.baseUrl}/versioner/v1/structure/${date}/title-${title}.json`,
+      ctx,
+      'EcfrService.browseStructure',
+      [404],
+    );
+    this.structureCache.set(key, { root, expiresAt: Date.now() + TITLES_TTL_MS });
+    for (const oldest of this.structureCache.keys()) {
+      if (this.structureCache.size <= STRUCTURE_CACHE_ENTRIES) break;
+      this.structureCache.delete(oldest);
+    }
+    return root;
   }
 
   /** List all titles as structure nodes (the top of the browse tree). */
@@ -306,6 +377,13 @@ export class EcfrService {
    * and an index of its sections: each one's identifier, heading, cite, and the
    * offset its heading starts at in that body. The index carries no text — the
    * body already does.
+   *
+   * A whole-part read also carries the part's own heading ("PART 141—…"), its
+   * Authority and Source, and its part-level notes, and each index entry carries
+   * the Authority or Source a subpart or subject group states for it. They come
+   * from the part's `<DIV5>` preamble and the levels inside it, which only a
+   * whole-part response holds: a section-filtered one is a bare `<DIV8>`, so a
+   * single-section read carries none of them rather than a corpus-dependent few.
    */
   async getSectionText(
     title: number,
@@ -330,7 +408,7 @@ export class EcfrService {
       throwIfPastCoverage(err, title, date, ctx);
       return null;
     }
-    const { sections, appendices } = parseCfrXml(xml);
+    const { sections, appendices, parts } = parseCfrXml(xml);
 
     // A part that exists always has sections; none means the cite named nothing.
     const [first] = sections;
@@ -355,16 +433,22 @@ export class EcfrService {
         heading: s.heading,
         cfrCite: sectionCite(title, part, s.section),
         offset,
+        ...(s.authority && { authority: s.authority }),
+        ...(s.sourceNote && { sourceNote: s.sourceNote }),
       };
       offset += s.heading.length + 1 + s.bodyText.length + PART_BODY_SEPARATOR.length;
       return entry;
     });
+    const preamble = parts.find((p) => p.part === part) ?? parts[0];
 
     return {
       title,
       part,
       section: null,
-      heading: `Part ${part}`,
+      heading: preamble?.heading || `Part ${part}`,
+      authority: preamble?.authority ?? null,
+      sourceNote: preamble?.sourceNote ?? null,
+      notes: preamble?.notes ?? [],
       date,
       bodyText: sections.map((s) => `${s.heading}\n${s.bodyText}`).join(PART_BODY_SEPARATOR),
       sections: index,
@@ -737,19 +821,24 @@ function searchRejection(err: McpError): { detail: string; fields: string[] } | 
 }
 
 /**
- * Build the cite a node hands to `regulations_get_cfr_section`. Parts and
- * sections cite as `${title} CFR ${identifier}`; an appendix cites in eCFR's own
- * form, which leads with the identifier the read call needs. Every other level
- * has no read path and stays null.
+ * Build the cite a node hands to `regulations_get_cfr_section`. A part cites as
+ * `${title} CFR ${identifier}`; a section cites through {@link sectionCite}, so
+ * one numbered without its part ("01" in 14 CFR 241) names the part rather than
+ * reading as another one; an appendix cites in eCFR's own form, which leads with
+ * the identifier the read call needs. Every other level has no read path and
+ * stays null.
  */
-function buildCite(node: RawEcfrStructureNode, title: number): string | null {
+function buildCite(node: RawEcfrStructureNode, title: number, part?: string): string | null {
   if (!node.type || !node.identifier) return null;
   if (node.type === 'appendix') return appendixCite(node.identifier, title);
+  if (node.type === 'section' && part) return sectionCite(title, part, node.identifier);
   return CITABLE_TYPES.has(node.type) ? `${title} CFR ${node.identifier}` : null;
 }
 
-/** Where a node sits inside its part — the subpart and subject group around it. */
+/** Where a node sits inside its part — the part, and the subpart and subject group around it. */
 interface Placement {
+  /** The part's identifier; absent above a part. */
+  part?: string;
   subjectGroup: string | null;
   subpart: string | null;
 }
@@ -775,7 +864,7 @@ function normalizeNode(
     label,
     description,
     reserved: node.reserved ?? false,
-    cfrCite: buildCite(node, title),
+    cfrCite: buildCite(node, title, placement.part),
     appendix: node.type === 'appendix' ? (node.identifier ?? null) : null,
     subpart: placement.subpart,
     subjectGroup: placement.subjectGroup,
@@ -802,6 +891,7 @@ function partLeaves(
     if (child.type && LEAF_TYPES.has(child.type)) return [normalizeNode(child, title, placement)];
     if (child.type === 'subpart') {
       return partLeaves(child, title, {
+        ...placement,
         subpart: plainText(child.label ?? '') || null,
         subjectGroup: null,
       });
@@ -846,9 +936,13 @@ function labelForAncestor(node: RawEcfrStructureNode): string | null {
  * `&lt;` / `&amp;`. Tags go before references are decoded, so an escaped `&lt;10`
  * survives as the text `<10` rather than being read as the start of a tag. An
  * unknown name is left as written.
+ *
+ * A tag opens as HTML opens one — `<` then a letter, `/`, `!`, or `?` — and never
+ * spans another `<`, so a stray `<` stays text and a run of openers with no `>`
+ * is scanned once rather than rescanned to the end from each.
  */
 function plainText(text: string): string {
-  return decodeCharacterReferences(text.replace(/<[^>]+>/g, ''))
+  return decodeCharacterReferences(text.replace(/<[A-Za-z/!?][^<>]*>/g, ''))
     .replace(/\s+/g, ' ')
     .trim();
 }

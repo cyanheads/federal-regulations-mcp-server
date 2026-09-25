@@ -13,11 +13,12 @@
  * @module tests/services/ecfr-service.test
  */
 
+import { readFileSync } from 'node:fs';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock('@cyanheads/mcp-ts-core/utils', async (importOriginal) => {
@@ -26,6 +27,11 @@ vi.mock('@cyanheads/mcp-ts-core/utils', async (importOriginal) => {
 });
 
 const { EcfrService } = await import('@/services/ecfr/ecfr-service.js');
+
+/** A verbatim cut of a real versioner response, from `tests/fixtures/`. */
+function fixture(name: string): string {
+  return readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf-8');
+}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200 });
@@ -221,7 +227,7 @@ let service: InstanceType<typeof EcfrService>;
 
 describe('EcfrService', () => {
   beforeEach(() => {
-    fetchMock.mockReset();
+    fetchMock.mockReset().mockRejectedValue(new Error('unmocked fetch'));
     service = new EcfrService({} as AppConfig, {} as StorageService);
   });
 
@@ -280,6 +286,100 @@ describe('EcfrService', () => {
     expect(result.bodyText).not.toContain('would dwarf the sections');
   });
 
+  it('returns the part’s heading, Authority, Source, and notes on a whole-part read', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(fixture('ecfr-40-141-part-notes.xml')));
+    const result = await service.getSectionText(
+      40,
+      '141',
+      undefined,
+      '2026-09-22',
+      createMockContext(),
+    );
+    if (!result) throw new Error('expected part text, got null');
+
+    expect(result.heading).toBe('PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS');
+    expect(result.authority).toMatch(/^42 U\.S\.C\. 300f, /);
+    expect(result.sourceNote).toBe('40 FR 59570, Dec. 24, 1975, unless otherwise noted.');
+    expect(result.notes?.map((n) => n.slice(0, 40))).toEqual([
+      'Nomenclature changes to part 141 appear ',
+      'For community water systems serving 75,0',
+    ]);
+    // The part's notes sit beside the body, not in it.
+    expect(result.bodyText).not.toContain('unless otherwise noted');
+    // No subpart note governs these sections, so their entries carry none.
+    for (const entry of result.sections ?? []) {
+      expect(entry).not.toHaveProperty('authority');
+      expect(entry).not.toHaveProperty('sourceNote');
+    }
+  });
+
+  it('puts a subpart’s Source on the index entries it governs (10 CFR 20)', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(fixture('ecfr-10-20-part-notes.xml')));
+    const result = await service.getSectionText(
+      10,
+      '20',
+      undefined,
+      '2026-09-22',
+      createMockContext(),
+    );
+    if (!result) throw new Error('expected part text, got null');
+
+    expect(result.sourceNote).toBeNull();
+    expect(result.sections?.map((s) => [s.section, s.sourceNote])).toEqual([
+      ['20.1001', '56 FR 23391, May 21, 1991, unless otherwise noted.'],
+      ['20.1002', '56 FR 23391, May 21, 1991, unless otherwise noted.'],
+      ['20.1101', '56 FR 23396, May 21, 1991, unless otherwise noted.'],
+    ]);
+    // The offsets still land on each section's own heading.
+    for (const entry of result.sections ?? []) {
+      expect(result.bodyText.startsWith(`${entry.heading}\n`, entry.offset)).toBe(true);
+    }
+  });
+
+  it('reports null notes for a part that states none, and falls back to "Part N" with no heading', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(fixture('ecfr-10-622.xml')));
+    const none = await service.getSectionText(
+      10,
+      '622',
+      undefined,
+      '2026-09-22',
+      createMockContext(),
+    );
+    expect(none).toMatchObject({
+      heading: 'PART 622—CONTRACTUAL PROVISIONS',
+      authority: null,
+      sourceNote: null,
+      notes: [],
+    });
+
+    fetchMock.mockResolvedValueOnce(xmlResponse(SECTION_XML));
+    const bare = await service.getSectionText(
+      40,
+      '50',
+      undefined,
+      '2026-08-06',
+      createMockContext(),
+    );
+    expect(bare?.heading).toBe('Part 50');
+  });
+
+  it('carries none of the part fields on a single-section read', async () => {
+    fetchMock.mockResolvedValueOnce(xmlResponse(fixture('ecfr-10-622.xml')));
+    const result = await service.getSectionText(
+      10,
+      '622',
+      '622.103',
+      '2026-09-22',
+      createMockContext(),
+    );
+    if (!result) throw new Error('expected section text, got null');
+    for (const key of ['authority', 'sourceNote', 'notes', 'sections']) {
+      expect(result).not.toHaveProperty(key);
+    }
+    // Its own <SECAUTH> is text, ahead of the <CITA>.
+    expect(result.bodyText).toMatch(/\(Sec\. 644, .*7254\)\)\n\n\[46 FR 34559, July 2, 1981\]$/);
+  });
+
   it('omits appendices from a whole-part read of a part that has none', async () => {
     fetchMock.mockResolvedValueOnce(xmlResponse(SECTION_XML));
     const ctx = createMockContext();
@@ -308,7 +408,7 @@ describe('EcfrService', () => {
     expect(result.part).toBe('50');
     expect(result.heading).toContain('Ultraviolet Fluorescence Method');
     expect(result.bodyText).toContain('1.0 Applicability');
-    expect(result.bodyText).toContain('sulfur dioxide (SO 2) in ambient air');
+    expect(result.bodyText).toContain('sulfur dioxide (SO_2) in ambient air');
 
     const requested = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
     expect(requested.get('appendix')).toBe('Appendix A-1 to Part 50');
@@ -781,6 +881,66 @@ describe('EcfrService', () => {
     expect(named?.label).toBe('§ 60.2 Ratios ½ ⁄ & é');
   });
 
+  it('keeps a literal less-than in a search excerpt instead of reading it as a tag', async () => {
+    // 40 CFR 142.62, from a real `/search/v1/results` response: the excerpt
+    // carries an unescaped `<500` ahead of a `<strong>` match, and a tag pattern
+    // that spans `<` swallowed "500 " along with the markup.
+    const lead = JSON.parse(
+      readFileSync(
+        new URL('../fixtures/ecfr-search-lead-service-line-t40.json', import.meta.url),
+        'utf-8',
+      ),
+    ) as { results: { hierarchy: { section: string } }[] };
+    const hit = lead.results.find((r) => r.hierarchy.section === '142.62');
+    fetchMock.mockImplementation(ecfrEndpoints(hit));
+    const [result] = (
+      await service.search('lead', 40, undefined, 1, 20, FAKE_INDEX_DATE, createMockContext())
+    ).results;
+
+    expect(result?.excerpt).toContain(
+      'Coagulation/Filtration (not BAT for systems <500 service connections) 3 = Direct',
+    );
+  });
+
+  it.each([
+    ['unclosed <', (n: number) => '<'.repeat(n)],
+    ['<a openers', (n: number) => '<a'.repeat(n / 2)],
+    ['</ closers', (n: number) => '</'.repeat(n / 2)],
+  ])('reduces a structure label of %s to text in linear time', async (_label, build) => {
+    // A `<` that opens no tag is text; the label comes back as written. Each
+    // read asks for its own date, so the structure cache serves none of them.
+    let reads = 0;
+    const labelOf = async (label: string) => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          type: 'title',
+          identifier: '40',
+          children: [
+            {
+              type: 'part',
+              identifier: '60',
+              children: [{ type: 'section', identifier: '60.1', label }],
+            },
+          ],
+        }),
+      );
+      const date = `2026-09-${String(++reads).padStart(2, '0')}`;
+      const [node] = await service.browseStructure(40, '60', date, createMockContext());
+      return node?.label;
+    };
+    await labelOf(build(5_000));
+    const timings: number[] = [];
+    for (const n of [5_000, 20_000, 80_000]) {
+      const label = build(n);
+      const started = performance.now();
+      expect(await labelOf(label)).toBe(label);
+      timings.push(performance.now() - started);
+    }
+    const [t5k = 0, , t80k = 0] = timings;
+    expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
+    expect(t80k).toBeLessThan(150);
+  });
+
   it("reads eCFR's current index date and reuses it across calls", async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();
@@ -977,5 +1137,189 @@ describe('EcfrService', () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(McpError);
     expect((err as McpError).code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+  });
+});
+
+describe('EcfrService structure document cache (#44)', () => {
+  /** Structure requests made so far, as `title-N@date`. */
+  const structureReads = () =>
+    fetchMock.mock.calls
+      .map(([url]) => new URL(String(url)).pathname.match(/structure\/([^/]+)\/title-(\d+)\.json$/))
+      .filter((m): m is RegExpMatchArray => m !== null)
+      .map((m) => `title-${m[2]}@${m[1]}`);
+
+  /** A title tree holding one part with one section. */
+  const tree = (title: number) => ({
+    type: 'title',
+    identifier: String(title),
+    children: [
+      {
+        type: 'part',
+        identifier: '1',
+        children: [{ type: 'section', identifier: '1.1', label: '§ 1.1 Scope.' }],
+      },
+    ],
+  });
+
+  /** Serve every structure document; `fail` answers the listed `title@date` keys with `error`. */
+  function serveStructure(fail: Map<string, McpError> = new Map()) {
+    fetchMock.mockImplementation((url: string) => {
+      const m = new URL(url).pathname.match(/structure\/([^/]+)\/title-(\d+)\.json$/);
+      if (!m) return Promise.reject(new Error(`unmocked fetch ${url}`));
+      const error = fail.get(`${m[2]}@${m[1]}`);
+      if (error) return Promise.reject(error);
+      return Promise.resolve(jsonResponse(tree(Number(m[2]))));
+    });
+  }
+
+  let service: InstanceType<typeof EcfrService>;
+  beforeEach(() => {
+    fetchMock.mockReset().mockRejectedValue(new Error('unmocked fetch'));
+    service = new EcfrService({} as AppConfig, {} as StorageService);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reads a title and date once for every part listing and the title listing', async () => {
+    serveStructure();
+    const ctx = createMockContext();
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    const top = await service.browseStructure(40, undefined, '2026-09-22', ctx);
+
+    expect(top.map((n) => n.identifier)).toEqual(['1']);
+    expect(structureReads()).toEqual(['title-40@2026-09-22']);
+  });
+
+  it('reads a different date, or a different title, fresh', async () => {
+    serveStructure();
+    const ctx = createMockContext();
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    await service.browseStructure(40, '1', '2026-09-23', ctx);
+    await service.browseStructure(7, '1', '2026-09-22', ctx);
+
+    expect(structureReads()).toEqual([
+      'title-40@2026-09-22',
+      'title-40@2026-09-23',
+      'title-7@2026-09-22',
+    ]);
+  });
+
+  it('re-reads an entry once it is older than the titles horizon (15 minutes)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-25T12:00:00Z'));
+    serveStructure();
+    const ctx = createMockContext();
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    vi.setSystemTime(new Date('2026-09-25T12:14:59Z'));
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    expect(structureReads()).toHaveLength(1);
+
+    vi.setSystemTime(new Date('2026-09-25T12:15:01Z'));
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    expect(structureReads()).toEqual(['title-40@2026-09-22', 'title-40@2026-09-22']);
+  });
+
+  it('holds four entries, evicting the oldest for a fifth', async () => {
+    serveStructure();
+    const ctx = createMockContext();
+    for (const title of [1, 2, 3, 4, 5])
+      await service.browseStructure(title, '1', '2026-09-22', ctx);
+    // 1 went out when 5 came in; 2–5 are still held.
+    await service.browseStructure(5, '1', '2026-09-22', ctx);
+    await service.browseStructure(2, '1', '2026-09-22', ctx);
+    expect(structureReads()).toHaveLength(5);
+
+    await service.browseStructure(1, '1', '2026-09-22', ctx);
+    expect(structureReads()).toHaveLength(6);
+    expect(structureReads().at(-1)).toBe('title-1@2026-09-22');
+  });
+
+  it('does not keep a 404, so the next call asks again', async () => {
+    const noTree = new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404', {
+      status: 404,
+      body: '{"error":"No matching content found."}',
+    });
+    serveStructure(new Map([['35@2026-09-22', noTree]]));
+    const ctx = createMockContext();
+    for (let i = 0; i < 2; i++) {
+      await expect(service.browseStructure(35, undefined, '2026-09-22', ctx)).rejects.toMatchObject(
+        { data: { reason: 'title_not_found' } },
+      );
+    }
+    expect(structureReads()).toEqual(['title-35@2026-09-22', 'title-35@2026-09-22']);
+  });
+
+  it('does not keep a failed read, so the next call asks again', async () => {
+    const ctx = createMockContext();
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve(new Response('<html><body>Service unavailable</body></html>')),
+    );
+    fetchMock.mockImplementationOnce(() => Promise.resolve(new Response('{"type":')));
+    await expect(service.browseStructure(40, '1', '2026-09-22', ctx)).rejects.toThrow();
+    const failedReads = structureReads().length;
+
+    serveStructure();
+    await service.browseStructure(40, '1', '2026-09-22', ctx);
+    expect(structureReads()).toHaveLength(failedReads + 1);
+  });
+});
+
+describe('EcfrService title issue dates (#55)', () => {
+  let service: InstanceType<typeof EcfrService>;
+  beforeEach(() => {
+    fetchMock.mockReset().mockRejectedValue(new Error('unmocked fetch'));
+    service = new EcfrService({} as AppConfig, {} as StorageService);
+    // The titles document's real shape, 2026-09-25: title 11's latest issue is
+    // months old while every title reads through the same up-to-date date.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          meta: { date: '2026-09-23' },
+          titles: [
+            {
+              number: 11,
+              name: 'Federal Elections',
+              latest_issue_date: '2026-06-08',
+              up_to_date_as_of: '2026-09-23',
+            },
+            {
+              number: 14,
+              name: 'Aeronautics and Space',
+              latest_issue_date: '2026-09-15',
+              up_to_date_as_of: '2026-09-23',
+            },
+            { number: 99, name: 'No issue', up_to_date_as_of: '2026-09-23' },
+          ],
+        }),
+      ),
+    );
+  });
+
+  it("reads a title's latest issue, and names none for a title the document omits", async () => {
+    const ctx = createMockContext();
+    expect(await service.titleIssueDate(14, ctx)).toBe('2026-09-15');
+    expect(await service.titleIssueDate(99, ctx)).toBe('2026-09-23');
+    expect(await service.titleIssueDate(35, ctx)).toBeNull();
+    // latestIssueDate keeps its fallback to today; titleIssueDate has none.
+    expect(await service.latestIssueDate(35, ctx)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it.each([
+    [14, '2026-06-08', false],
+    [14, '2026-09-15', true],
+    [14, '2026-09-16', true],
+    [11, '2026-06-08', true],
+    [14, undefined, false],
+    [35, '2026-09-15', false],
+  ] as const)('calls title %i taken at %s current: %s', async (title, issueDate, current) => {
+    expect(await service.isLatestIssue(title, issueDate, createMockContext())).toBe(current);
+  });
+
+  it('reads the titles document once for every check inside its horizon', async () => {
+    const ctx = createMockContext();
+    for (const title of [11, 14, 35]) await service.isLatestIssue(title, '2026-09-15', ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
