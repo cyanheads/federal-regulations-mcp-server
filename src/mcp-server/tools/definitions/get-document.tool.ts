@@ -12,6 +12,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS } from '@/services/text-window.js';
+import { frDocumentNumber, normalizeFrDocumentNumber } from './document-number.js';
 import { formatAgencies } from './format-utils.js';
 
 export const getDocumentTool = tool('regulations_get_document', {
@@ -20,12 +21,9 @@ export const getDocumentTool = tool('regulations_get_document', {
     "Fetch one Federal Register document by its FR document number — full metadata (title, type, agencies, abstract, action, effective/comment dates, RINs) plus the cross-source handles that make this a workflow server. The output carries the docket ID (chain into regulations_get_docket or regulations_find_comments) and the affected CFR parts (chain into regulations_get_cfr_section). Set include_full_text only when the rule body itself is needed: it returns the plain-text body as a window of up to 64,000 characters (max_chars raises it to 200,000), with the body's total length and, when text remains, the offset to resume from. Short documents return whole; major final rules run past a million characters, so page through with offset rather than reading them in one call.",
   annotations: { readOnlyHint: true, idempotentHint: true },
   input: z.object({
-    document_number: z
-      .string()
-      .regex(/^[0-9]{4}-[0-9]+$/)
-      .describe(
-        'Federal Register document number (e.g. "2025-14555"). Obtain from regulations_search_rules results (the documentNumber field).',
-      ),
+    document_number: frDocumentNumber().describe(
+      'Federal Register document number, as regulations_search_rules returns it in documentNumber: "2024-07773" from 2010 on, older and correction numbers like "98-1572", "E9-25990", or "C1-2009-30484".',
+    ),
     include_full_text: z
       .boolean()
       .optional()
@@ -99,7 +97,7 @@ export const getDocumentTool = tool('regulations_get_document', {
       .string()
       .nullable()
       .describe(
-        'Regulations.gov document ID — chain into regulations_find_comments (document-scoped). Null when absent.',
+        'Regulations.gov document ID — pass as document_object_id to regulations_find_comments for the comments filed on this document alone. Null when absent.',
       ),
     commentCount: z
       .number()
@@ -160,7 +158,7 @@ export const getDocumentTool = tool('regulations_get_document', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No Federal Register document exists with that number.',
       recovery:
-        'Verify the number via regulations_search_rules; FR numbers look like "2025-14555".',
+        'Verify the number via regulations_search_rules; FR numbers look like "2024-07773", or "98-1572" and "E9-25990" before 2010.',
       thrownBy: 'service',
     },
     {
@@ -187,7 +185,7 @@ export const getDocumentTool = tool('regulations_get_document', {
         : undefined;
 
     const detail = await getFederalRegisterService().getDocument(
-      input.document_number,
+      normalizeFrDocumentNumber(input.document_number),
       window,
       ctx,
     );

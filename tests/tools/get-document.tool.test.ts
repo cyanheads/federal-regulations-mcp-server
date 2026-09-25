@@ -122,6 +122,50 @@ describe('getDocumentTool', () => {
     expect(() => getDocumentTool.input.parse({ document_number: 'not-a-number' })).toThrow();
   });
 
+  it.each([
+    '2024-07773',
+    '98-1572',
+    '94-31556-2',
+    'E9-25990',
+    'Z8-11479',
+    'E10-31397',
+    'X94-100621',
+    'X26-10925',
+    'C1-2009-30484',
+    'R1-2013-29649',
+  ])('accepts the Federal Register number shape %s', async (number) => {
+    // Every shape regulations_search_rules returns as documentNumber, 1994 on.
+    getDocumentFn.mockResolvedValue({ ...detail, documentNumber: number });
+    const ctx = handlerContext(getDocumentTool);
+    await getDocumentTool.handler(getDocumentTool.input.parse({ document_number: number }), ctx);
+    expect(getDocumentFn).toHaveBeenCalledWith(number, undefined, ctx);
+  });
+
+  it.each(['EPA-HQ-OW-2022-0114-0027', '90 FR 12345', '2025-14555 ', 'not-a-number', ''])(
+    'rejects %j at the schema',
+    (number) => {
+      expect(getDocumentTool.input.safeParse({ document_number: number }).success).toBe(false);
+    },
+  );
+
+  it('requests a lowercase letter prefix uppercased, the only form the API serves', async () => {
+    getDocumentFn.mockResolvedValue({ ...detail, documentNumber: 'E9-25990' });
+    const ctx = handlerContext(getDocumentTool);
+    await getDocumentTool.handler(
+      getDocumentTool.input.parse({ document_number: 'e9-25990' }),
+      ctx,
+    );
+    expect(getDocumentFn).toHaveBeenCalledWith('E9-25990', undefined, ctx);
+  });
+
+  it('format() points a Regulations.gov document ID at the input that now takes it', () => {
+    const blocks = getDocumentTool.format!(detail);
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+    expect(text).toContain(
+      '`EPA-HQ-OAR-2025-0194-0001` → regulations_find_comments(document_object_id)',
+    );
+  });
+
   it('format() surfaces the handles next to their target tool names', () => {
     const blocks = getDocumentTool.format!(detail);
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');

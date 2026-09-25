@@ -75,6 +75,30 @@ describe('documentResource', () => {
     expect(getDocument).toHaveBeenCalledWith('2025-14555', undefined, ctx);
   });
 
+  it.each(['98-1572', '94-31556-2', 'E9-25990', 'C1-2009-30484', 'X26-10925'])(
+    'accepts the pre-2010 and correction shape %s',
+    (documentNumber) => {
+      expect(documentResource.params!.safeParse({ documentNumber }).success).toBe(true);
+    },
+  );
+
+  it.each(['EPA-HQ-OW-2022-0114-0027', '90 FR 12345', '2025-14555 ', ''])(
+    'rejects %j',
+    (documentNumber) => {
+      expect(documentResource.params!.safeParse({ documentNumber }).success).toBe(false);
+    },
+  );
+
+  it('requests a lowercase letter prefix uppercased', async () => {
+    getDocument.mockResolvedValue({ ...detail, documentNumber: 'E9-25990' });
+    const ctx = handlerContext(documentResource);
+    await documentResource.handler(
+      documentResource.params!.parse({ documentNumber: 'e9-25990' }),
+      ctx,
+    );
+    expect(getDocument).toHaveBeenCalledWith('E9-25990', undefined, ctx);
+  });
+
   it('lists an example resource', async () => {
     // `list` ignores its extra; the resource surfaces one static example.
     const listing = await documentResource.list!({} as ListExtra);
