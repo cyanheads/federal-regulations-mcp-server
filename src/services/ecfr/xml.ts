@@ -271,11 +271,17 @@ function overline(text: string): string {
  * the following one first (`10^−8`), else the one before (`SO_4 ^2−`) — so an
  * exponent written as two elements reads as one. Nothing else merges: two
  * footnote letters side by side (`^d ^e`) stay two runs.
+ *
+ * A chain of sign-only runs joins forward link by link, so the signs gathered so
+ * far travel beside the scan rather than being written into each run and read
+ * back from it at the next — which would cost the square of the chain's length.
  */
 function joinSigns(pieces: Piece[]): Piece[] {
   const out: Piece[] = [];
   /** Index in `out` of the last run, while only whitespace has followed it. */
   let lastRun = -1;
+  /** Signs joined forward from the runs before, which the current run leads with. */
+  let carried = '';
   for (let i = 0; i < pieces.length; i++) {
     const piece = pieces[i];
     if (piece === undefined) continue;
@@ -284,13 +290,15 @@ function joinSigns(pieces: Piece[]): Piece[] {
       out.push(piece);
       continue;
     }
-    const sign = piece.text.trim();
-    if (!piece.footnote && SIGN_ONLY.test(sign)) {
+    const own = piece.text.trim();
+    // `carried` holds signs alone, so an empty run it lands on is sign-only too.
+    if (!piece.footnote && (own ? SIGN_ONLY.test(own) : carried !== '')) {
+      const sign = carried + own;
       let j = i + 1;
       while (isBlank(pieces[j])) j++;
       const next = pieces[j];
       if (next && typeof next !== 'string' && next.kind === piece.kind && !next.footnote) {
-        next.text = sign + next.text.trimStart();
+        carried = sign;
         i = j - 1;
         continue;
       }
@@ -298,8 +306,13 @@ function joinSigns(pieces: Piece[]): Piece[] {
       if (prev && typeof prev !== 'string' && prev.kind === piece.kind && !prev.footnote) {
         out.length = lastRun + 1;
         prev.text = prev.text.trimEnd() + sign;
+        carried = '';
         continue;
       }
+    }
+    if (carried) {
+      piece.text = carried + piece.text.trimStart();
+      carried = '';
     }
     out.push(piece);
     lastRun = out.length - 1;

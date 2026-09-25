@@ -356,6 +356,18 @@ describe('inline rendering stays linear (#51, #60)', () => {
     const timings = timeAcrossSizes(build, (inner) => paragraphText(inner));
     expectLinear(timings);
   });
+
+  it('joins a chain of sign-only runs in linear time', () => {
+    // Every link joins the next, so the joined signs grow with the chain; the
+    // square of its length only shows past 80k, hence the larger sizes.
+    expect(paragraphText('10<sup>−</sup> <sup>−</sup> <sup>8</sup>')).toBe('10^−−8');
+    const timings = timeAcrossSizes(
+      (n) => '<sup>−</sup> '.repeat(n / 13),
+      (inner) => paragraphText(inner),
+      [20_000, 80_000, 320_000],
+    );
+    expectLinear(timings);
+  });
 });
 
 /** A verbatim cut of a real whole-part versioner response (`tests/fixtures/`). */
@@ -655,14 +667,18 @@ describe('parseCfrXml appendices', () => {
 });
 
 /**
- * Time `run` over the input `build` makes at 5k, 20k, and 80k characters, after
- * one warm-up call, returning the best of three runs at each size in
- * milliseconds — the best, so a collector pause during one run of a
- * few-millisecond call is not read as the algorithm's cost.
+ * Time `run` over the input `build` makes at each of `sizes` characters (5k,
+ * 20k, and 80k unless given), after one warm-up call, returning the best of
+ * three runs at each size in milliseconds — the best, so a collector pause
+ * during one run of a few-millisecond call is not read as the algorithm's cost.
  */
-function timeAcrossSizes(build: (n: number) => string, run: (input: string) => void): number[] {
+function timeAcrossSizes(
+  build: (n: number) => string,
+  run: (input: string) => void,
+  sizes: readonly number[] = [5_000, 20_000, 80_000],
+): number[] {
   run(build(5_000));
-  return [5_000, 20_000, 80_000].map((n) => {
+  return sizes.map((n) => {
     const input = build(n);
     let best = Number.POSITIVE_INFINITY;
     for (let i = 0; i < 3; i++) {
@@ -674,10 +690,10 @@ function timeAcrossSizes(build: (n: number) => string, run: (input: string) => v
   });
 }
 
-/** Sixteen times the input may cost at most ~64× the time, and 80k stays fast. */
-function expectLinear([t5k = 0, , t80k = 0]: number[]): void {
-  expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
-  expect(t80k).toBeLessThan(150);
+/** Sixteen times the input may cost at most ~64× the time, and the largest size stays fast. */
+function expectLinear([small = 0, , large = 0]: number[]): void {
+  expect(large / Math.max(small, 0.5)).toBeLessThan(64);
+  expect(large).toBeLessThan(150);
 }
 
 describe('parseCfrXml on malformed markup stays linear (#57)', () => {
