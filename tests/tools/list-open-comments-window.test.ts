@@ -10,9 +10,10 @@
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/ecfr/ecfr-service.js', () => ({ today: () => '2026-09-22' }));
+/** Noon UTC — the same calendar day in UTC and in Eastern time. */
+const MIDDAY = new Date('2026-09-22T12:00:00Z');
 
 const { initFederalRegisterService } = await import(
   '@/services/federal-register/federal-register-service.js'
@@ -71,11 +72,16 @@ beforeAll(() => {
   initFederalRegisterService(stub, stub);
   initRegulationsGovService(stub, stub);
   http.install();
+  // Only Date is faked: the clock the open window reads, never the retry timers.
+  vi.useFakeTimers({ toFake: ['Date'] });
 });
+
+beforeEach(() => vi.setSystemTime(MIDDAY));
 
 afterEach(() => http.reset());
 
 afterAll(() => {
+  vi.useRealTimers();
   http.restore();
   vi.unstubAllEnvs();
 });
@@ -103,11 +109,111 @@ describe('regulations_list_open_comments (current shape)', () => {
       daysRemaining: 1,
       commentCount: null,
     });
-    expect(structured.notice).toMatch(/comment counts are unavailable/i);
 
     const rendered = text(result);
     expect(rendered).toContain('open for comment');
     expect(rendered.indexOf('[FR 2026-17211]')).toBeLessThan(rendered.indexOf('[FR 2026-19000]'));
+  });
+});
+
+describe('regulations_list_open_comments Regulations.gov handles without a key', () => {
+  /** 2026-16314 and 2026-16333 as the Federal Register served them on 2026-09-25. */
+  const irs = {
+    ...row('2026-16314', '2026-09-25'),
+    docket_ids: ['REG-101355-26'],
+    comment_url: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+    regulations_dot_gov_info: {
+      comments_count: 41,
+      docket_id: 'IRS-2026-0925',
+      document_id: 'IRS-2026-0925-0001',
+    },
+  };
+  const faa = {
+    ...row('2026-16333', '2026-10-01'),
+    docket_ids: ['Docket No. FAA-2026-8449', 'Airspace Docket No. 26-ASO-15'],
+    comment_url: null,
+    regulations_dot_gov_info: {
+      comments_count: 2,
+      docket_id: 'FAA-2026-8449',
+      document_id: 'FAA-2026-8449-0001',
+    },
+  };
+  const unlisted = row('2026-16400', '2026-10-02');
+
+  it('carries each row’s Regulations.gov IDs, count, and comment URL on both surfaces', async () => {
+    serveWindow([irs, faa, unlisted]);
+    const result = await runToolContract(listOpenCommentsTool, {});
+    const structured = result.structuredContent as Structured & {
+      results: Array<Record<string, unknown>>;
+    };
+
+    expect(structured.keyed).toBe(false);
+    expect(structured.results.map((r) => r.documentNumber)).toEqual([
+      '2026-16314',
+      '2026-16333',
+      '2026-16400',
+    ]);
+    expect(structured.results[0]).toMatchObject({
+      docketIds: ['REG-101355-26'],
+      regulationsGovDocketId: 'IRS-2026-0925',
+      regulationsGovDocumentId: 'IRS-2026-0925-0001',
+      commentCount: 41,
+      commentUrl: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+    });
+    expect(structured.results[1]).toMatchObject({ commentCount: 2, commentUrl: null });
+    expect(structured.results[2]).toMatchObject({
+      regulationsGovDocketId: null,
+      regulationsGovDocumentId: null,
+      commentCount: null,
+      commentUrl: null,
+    });
+    // Counts are keyless data, so a missing key is no longer a reason to warn.
+    expect(structured).not.toHaveProperty('notice');
+
+    const rendered = text(result);
+    const irsLine = rendered.split('\n').find((l) => l.includes('[FR 2026-16314]'))!;
+    expect(irsLine).toContain('| 41 |');
+    expect(irsLine).toContain('IRS-2026-0925');
+    expect(irsLine).toContain('IRS-2026-0925-0001');
+    expect(irsLine).toContain('http://www.regulations.gov/commenton/IRS-2026-0925-0001');
+    expect(irsLine).toContain('REG-101355-26');
+    expect(rendered).not.toMatch(/comment counts unavailable/i);
+  });
+});
+
+describe('regulations_list_open_comments reads "today" in Eastern time', () => {
+  // 10 PM EDT on 2026-09-25 — already 2026-09-26 in UTC.
+  const lateEvening = new Date('2026-09-26T02:00:00Z');
+
+  it('keeps a document closing today in the window until midnight Eastern', async () => {
+    vi.setSystemTime(lateEvening);
+    serveWindow([row('2026-16314', '2026-09-25'), row('2026-16400', '2026-10-02')]);
+    const result = await runToolContract(listOpenCommentsTool, {});
+    const structured = result.structuredContent as Structured;
+
+    expect(sentUrls()[0]!.searchParams.get('conditions[comment_date][gte]')).toBe('2026-09-25');
+    expect(structured.asOf).toBe('2026-09-25');
+    expect(structured.results[0]).toMatchObject({
+      documentNumber: '2026-16314',
+      commentsCloseOn: '2026-09-25',
+      daysRemaining: 0,
+    });
+    expect(structured.results[1]!.daysRemaining).toBe(7);
+    expect(text(result)).toContain('as of 2026-09-25');
+  });
+
+  it('rolls over at midnight Eastern, not midnight UTC', async () => {
+    vi.setSystemTime(new Date('2026-09-26T04:00:00Z')); // 00:00 EDT on 2026-09-26
+    serveWindow([]);
+    const result = await runToolContract(listOpenCommentsTool, {});
+    expect((result.structuredContent as Structured).asOf).toBe('2026-09-26');
+  });
+
+  it('follows standard time in winter', async () => {
+    vi.setSystemTime(new Date('2026-12-02T04:30:00Z')); // 11:30 PM EST on 2026-12-01
+    serveWindow([]);
+    const result = await runToolContract(listOpenCommentsTool, {});
+    expect((result.structuredContent as Structured).asOf).toBe('2026-12-01');
   });
 });
 
@@ -168,10 +274,12 @@ describe('regulations_list_open_comments whole-window fetch', () => {
     expect(url!.searchParams.getAll('fields[]').sort()).toEqual(
       [
         'agencies',
+        'comment_url',
         'comments_close_on',
         'docket_ids',
         'document_number',
         'publication_date',
+        'regulations_dot_gov_info',
         'title',
         'type',
       ].sort(),
@@ -287,17 +395,17 @@ describe('regulations_list_open_comments whole-window fetch', () => {
 
   it('stops at the 10,000-document limit, flags truncation, and composes one notice', async () => {
     serveWindow(newestFirstWindow(10_500));
-    const result = await runToolContract(listOpenCommentsTool, { per_page: 100 });
+    const result = await runToolContract(listOpenCommentsTool, { per_page: 100, page: 101 });
     const structured = result.structuredContent as Structured;
 
     expect(sentUrls().map((u) => u.searchParams.get('page'))).toEqual(['1', '2', '3', '4', '5']);
     expect(structured.truncated).toBe(true);
     expect(structured.totalCount).toBe(10_000);
-    // Truncation and the unkeyed notice survive together — truncated() would
+    // The past-end and truncation notices survive together — truncated() would
     // otherwise overwrite the notice written before it.
+    expect(structured.notice).toMatch(/Page 101 is past the end/);
     expect(structured.notice).toMatch(/10,000/);
-    expect(structured.notice).toMatch(/REGULATIONS_GOV_API_KEY/);
-    expect(structured.notice).not.toMatch(/list itself is complete/i);
+    expect(structured.notice).not.toMatch(/REGULATIONS_GOV_API_KEY/);
   });
 
   it('keeps an empty window a successful result with a notice', async () => {

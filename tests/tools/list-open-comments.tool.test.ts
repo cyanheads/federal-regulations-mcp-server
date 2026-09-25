@@ -19,7 +19,6 @@ const hasKey = vi.hoisted(() => vi.fn());
 vi.mock('@/services/federal-register/federal-register-service.js', () => ({
   getFederalRegisterService: () => ({ listOpenComments }),
 }));
-vi.mock('@/services/ecfr/ecfr-service.js', () => ({ today: () => '2025-06-13' }));
 vi.mock('@/services/regulations-gov/regulations-gov-service.js', () => ({
   getRegulationsGovService: () => ({ hasKey }),
 }));
@@ -42,7 +41,10 @@ const response: OpenCommentsResponse = {
       publicationDate: '2025-05-01',
       commentsCloseOn: '2025-06-20',
       docketIds: ['EPA-2025-1'],
+      regulationsGovDocketId: 'EPA-2025-1',
+      regulationsGovDocumentId: 'EPA-2025-1-0001',
       commentCount: 12,
+      commentUrl: 'http://www.regulations.gov/commenton/EPA-2025-1-0001',
     },
     {
       documentNumber: '2025-2',
@@ -52,7 +54,10 @@ const response: OpenCommentsResponse = {
       publicationDate: '2025-05-10',
       commentsCloseOn: '2025-09-01',
       docketIds: ['AG-2025-2'],
+      regulationsGovDocketId: null,
+      regulationsGovDocumentId: null,
       commentCount: 50,
+      commentUrl: null,
     },
   ],
 };
@@ -70,17 +75,16 @@ describe('listOpenCommentsTool', () => {
     expect(listOpenCommentsTool.input.safeParse({ page: 0 }).success).toBe(false);
   });
 
-  it('asks the service for the default types, and for comment counts only when keyed', async () => {
+  it('asks the service for the default types the same way whatever the key state', async () => {
     listOpenComments.mockResolvedValue(response);
     for (const keyed of [true, false]) {
       hasKey.mockReturnValue(keyed);
       const ctx = handlerContext(listOpenCommentsTool);
       await listOpenCommentsTool.handler(listOpenCommentsTool.input.parse({ type: [] }), ctx);
     }
-    expect(listOpenComments.mock.calls.map(([params]) => params)).toEqual([
-      expect.objectContaining({ types: ['PRORULE', 'RULE'], includeCommentCounts: true }),
-      expect.objectContaining({ types: ['PRORULE', 'RULE'], includeCommentCounts: false }),
-    ]);
+    const [keyedCall, unkeyedCall] = listOpenComments.mock.calls.map(([params]) => params);
+    expect(keyedCall).toEqual(unkeyedCall);
+    expect(keyedCall).toMatchObject({ types: ['PRORULE', 'RULE'] });
   });
 
   it('flags a truncated window when keyed as well as unkeyed', async () => {
@@ -109,7 +113,7 @@ describe('listOpenCommentsTool', () => {
     expect(result.results[0]!.commentCount).toBe(12);
   });
 
-  it('degrades without the key: complete list, null counts, and a notice', async () => {
+  it('keeps the Federal Register comment counts without the key, with no notice', async () => {
     hasKey.mockReturnValue(false);
     listOpenComments.mockResolvedValue(response);
     const ctx = handlerContext(listOpenCommentsTool);
@@ -117,10 +121,8 @@ describe('listOpenCommentsTool', () => {
     const result = await listOpenCommentsTool.handler(input, ctx);
 
     expect(result.keyed).toBe(false);
-    expect(result.results).toHaveLength(2);
-    // Counts are suppressed without a key — but the list itself is complete.
-    expect(result.results.every((r) => r.commentCount === null)).toBe(true);
-    expect(getEnrichment(ctx).notice).toMatch(/comment counts are unavailable/i);
+    expect(result.results.map((r) => r.commentCount)).toEqual([12, 50]);
+    expect(getEnrichment(ctx).notice).toBeUndefined();
   });
 
   it('treats nothing being open as a successful empty result with a notice', async () => {
@@ -154,14 +156,19 @@ describe('listOpenCommentsTool', () => {
           commentsCloseOn: '2025-06-20',
           daysRemaining: 7,
           docketIds: ['EPA-2025-1'],
+          regulationsGovDocketId: 'EPA-2025-1',
+          regulationsGovDocumentId: 'EPA-2025-1-0001',
           commentCount: 12,
+          commentUrl: 'http://www.regulations.gov/commenton/EPA-2025-1-0001',
         },
       ],
     });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(text).toContain('Closes sooner');
-    expect(text).toContain('EPA-2025-1');
-    expect(text).toContain('12');
+    expect(text).toContain('| 7 | 12 | EPA-2025-1 |');
+    expect(text).toContain(
+      '| docket EPA-2025-1 · document EPA-2025-1-0001 · comment at http://www.regulations.gov/commenton/EPA-2025-1-0001 |',
+    );
   });
 
   it('closing_before rejects a date that is not a real calendar day', () => {
@@ -187,7 +194,10 @@ describe('listOpenCommentsTool', () => {
       commentsCloseOn: '2026-11-01',
       daysRemaining: 40,
       docketIds: ['Docket ID OCC-2026-0012', 'R-1850', 'RIN 3064-AG12'],
+      regulationsGovDocketId: null,
+      regulationsGovDocumentId: null,
       commentCount: null,
+      commentUrl: null,
     };
 
     function row(results: unknown[]): string[] {
@@ -206,7 +216,9 @@ describe('listOpenCommentsTool', () => {
       expect(cells[2]).toBe(
         'Treasury Department (treasury-department); Comptroller of the Currency (comptroller-of-the-currency); Office of the Secretary',
       );
-      expect(cells[7]).toBe('Docket ID OCC-2026-0012; R-1850; RIN 3064-AG12 |');
+      expect(cells[7]).toBe('Docket ID OCC-2026-0012; R-1850; RIN 3064-AG12');
+      // No Regulations.gov handle at all renders as an em dash, never a guess.
+      expect(cells[8]).toBe('— |');
     });
 
     it('keeps a comma-bearing docket ID distinguishable from its neighbors', () => {
@@ -216,9 +228,7 @@ describe('listOpenCommentsTool', () => {
           docketIds: ['FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1', 'R-1850'],
         },
       ]);
-      expect(cells[7]).toBe(
-        'FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1; R-1850 |',
-      );
+      expect(cells[7]).toBe('FAR Case 2026-003, Docket No. FAR-2026-0003, Sequence No. 1; R-1850');
     });
 
     it('escapes a pipe in a docket ID so the row keeps its columns', () => {
@@ -237,7 +247,7 @@ describe('listOpenCommentsTool', () => {
     it('renders an em dash for an empty agency or docket list', () => {
       const cells = row([{ ...jointRow, agencies: [], docketIds: [] }]);
       expect(cells[2]).toBe('—');
-      expect(cells[7]).toBe('— |');
+      expect(cells[7]).toBe('—');
     });
   });
 });

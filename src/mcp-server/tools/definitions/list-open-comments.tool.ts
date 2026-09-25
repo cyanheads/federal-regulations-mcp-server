@@ -3,15 +3,15 @@
  * public comment (proposed rules and comment-requesting final rules by default,
  * notices on request), filterable by agency and topic. "What can I still weigh in
  * on?" Runs on the Federal Register's open-comment window (keyless), fetched
- * whole, sorted by closing date, and paged locally; the comment count is read
- * from each FR document's own embedded Regulations.gov info when a key is
- * present. Degrades gracefully — fully functional without the key.
+ * whole, sorted by closing date, and paged locally. Each row's Regulations.gov
+ * IDs, comment count, and comment URL come from the FR document's own embedded
+ * Regulations.gov info, so the tool is fully functional without a key.
  * @module mcp-server/tools/definitions/list-open-comments.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { today } from '@/services/ecfr/ecfr-service.js';
+import { easternToday } from '@/services/federal-register/comment-period.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import type { OpenCommentType } from '@/services/federal-register/types.js';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
@@ -35,7 +35,7 @@ function daysBetween(asOf: string, close: string): number {
 export const listOpenCommentsTool = tool('regulations_list_open_comments', {
   title: 'regulations_list_open_comments',
   description:
-    'List Federal Register documents currently open for public comment, sorted by closing date (soonest first) across the whole open window, filterable by document type, agency slug, and topic. "What can I still weigh in on?" Covers proposed rules and the final rules that take comment (direct final and interim final rules) by default; add NOTICE for the much larger set of notices with comment periods. Runs on the Federal Register\'s open-comment window and is fully functional without a key. When REGULATIONS_GOV_API_KEY is configured, each row is enriched with the comment count from the Federal Register document\'s embedded Regulations.gov info (no extra rate-limited call). Open one row with regulations_get_document for the full document, or pull the comments with regulations_find_comments.',
+    'List Federal Register documents currently open for public comment, sorted by closing date (soonest first) across the whole open window, filterable by document type, agency slug, and topic. "What can I still weigh in on?" Covers proposed rules and the final rules that take comment (direct final and interim final rules) by default; add NOTICE for the much larger set of notices with comment periods. Runs on the Federal Register\'s open-comment window and needs no key: each row carries its Regulations.gov docket and document IDs, comment count, and comment URL from the Federal Register document\'s embedded Regulations.gov info. Open one row with regulations_get_document for the full document, or pull the comments with regulations_find_comments (which, like regulations_get_docket, needs REGULATIONS_GOV_API_KEY).',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     query: z
@@ -82,10 +82,16 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       ),
   }),
   output: z.object({
-    asOf: z.string().describe('The "today" the open-window filter used (ISO 8601).'),
+    asOf: z
+      .string()
+      .describe(
+        'The "today" the open window was computed from — the current date in US Eastern time (ISO 8601). A comment period stays open through 11:59 PM Eastern on its close date.',
+      ),
     keyed: z
       .boolean()
-      .describe('Whether comment counts were enriched (REGULATIONS_GOV_API_KEY present).'),
+      .describe(
+        'Whether REGULATIONS_GOV_API_KEY is set, which decides whether regulations_get_docket and regulations_find_comments can follow up on a row. Every row field is filled either way.',
+      ),
     results: z
       .array(
         z
@@ -115,18 +121,42 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
               )
               .describe('Issuing agencies.'),
             publicationDate: z.string().describe('Publication date (ISO 8601).'),
-            commentsCloseOn: z.string().describe('Comment-period close date (ISO 8601).'),
+            commentsCloseOn: z
+              .string()
+              .describe('Last day of the comment period (ISO 8601), inclusive, in Eastern time.'),
             daysRemaining: z
               .number()
-              .describe('Whole days from asOf until the comment period closes.'),
+              .describe(
+                'Whole days from asOf to commentsCloseOn; 0 means comments close at the end of today.',
+              ),
             docketIds: z
               .array(z.string())
-              .describe('Docket IDs — chain into regulations_get_docket / find_comments.'),
+              .describe(
+                'Docket numbers as the Federal Register prints them — an agency\'s own number ("REG-101355-26"), or an ID inside a wrapper ("Docket No. FAA-2026-8449"). Pass one to regulations_search_rules as docket_id. Not always a Regulations.gov ID: for regulations_get_docket / regulations_find_comments use regulationsGovDocketId.',
+              ),
+            regulationsGovDocketId: z
+              .string()
+              .nullable()
+              .describe(
+                "Regulations.gov docket ID — chains into regulations_get_docket / regulations_find_comments(docket_id). Null when the document is not on Regulations.gov. An <AGENCY>_FRDOC_0001 docket (EPA_FRDOC_0001 holds 3,451 documents) is Regulations.gov's catch-all for Federal Register documents outside a rulemaking docket, so this document's comments come from regulationsGovDocumentId instead.",
+              ),
+            regulationsGovDocumentId: z
+              .string()
+              .nullable()
+              .describe(
+                'Regulations.gov document ID — pass as document_object_id to regulations_find_comments for the comments filed on this document. Null when absent.',
+              ),
             commentCount: z
               .number()
               .nullable()
               .describe(
-                "Comment count from the FR document's Regulations.gov info; null when unkeyed or not on Regulations.gov.",
+                'Comments Regulations.gov received on this document, as the Federal Register reports it; null when not on Regulations.gov. Can exceed the comment records regulations_find_comments lists.',
+              ),
+            commentUrl: z
+              .string()
+              .nullable()
+              .describe(
+                'Regulations.gov page for submitting a comment on this document, as the Federal Register lists it; null when it lists none.',
               ),
           })
           .describe('One document open for comment.'),
@@ -156,7 +186,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       .string()
       .optional()
       .describe(
-        'Guidance when nothing matched, when the page is past the end, when the window was truncated, or that comment counts are unavailable without a key.',
+        'Guidance when nothing matched, when the page is past the end, or when the window was truncated.',
       ),
   },
   enrichmentTrailer: {
@@ -184,7 +214,9 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
   async handler(input, ctx) {
     const fr = getFederalRegisterService();
     const keyed = getRegulationsGovService().hasKey();
-    const asOf = today();
+    // A period runs through its close day in Eastern time, so the window opens on
+    // the Eastern date: the UTC one drops close-day documents from 8 PM EDT on.
+    const asOf = easternToday();
     const types = input.type?.length ? [...new Set(input.type)] : DEFAULT_TYPES;
 
     const window = await fr.listOpenComments(
@@ -193,7 +225,6 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
         agencies: input.agencies?.length ? input.agencies : undefined,
         closingBefore: input.closing_before || undefined,
         types,
-        includeCommentCounts: keyed,
       },
       asOf,
       ctx,
@@ -226,11 +257,6 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
         `The Federal Register returned its ${FR_ITEM_LIMIT.toLocaleString('en-US')}-document maximum, so this window holds only the ${FR_ITEM_LIMIT.toLocaleString('en-US')} most recently published matches, sorted by closing date — documents closing sooner may be missing. Narrow by type, agency, query, or closing_before.`,
       );
     }
-    if (!keyed) {
-      notices.push(
-        `Comment counts are unavailable without REGULATIONS_GOV_API_KEY (free at https://api.data.gov/signup/).${window.truncated ? '' : ' The open-document list itself is complete.'}`,
-      );
-    }
     const notice = notices.join(' ');
     if (window.truncated) {
       ctx.enrich.truncated({ shown: page.length, cap: FR_ITEM_LIMIT, guidance: notice });
@@ -239,34 +265,32 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
     }
 
     const results = page.map((r) => ({
-      documentNumber: r.documentNumber,
-      title: r.title,
-      type: r.type,
-      agencies: r.agencies,
-      publicationDate: r.publicationDate,
-      commentsCloseOn: r.commentsCloseOn,
+      ...r,
       daysRemaining: daysBetween(asOf, r.commentsCloseOn),
-      docketIds: r.docketIds,
-      // Counts come from the FR document's own regulations_dot_gov_info block;
-      // only surfaced when a key is configured (the degrade contract).
-      commentCount: keyed ? r.commentCount : null,
     }));
     return { asOf, keyed, results };
   },
 
   format: (result) => {
     const lines = [
-      `**Documents open for comment** (as of ${result.asOf} · keyed: ${result.keyed ? 'yes' : 'no — comment counts unavailable'})`,
+      `**Documents open for comment** (as of ${result.asOf} · keyed: ${result.keyed ? 'yes' : 'no — regulations_get_docket and regulations_find_comments need REGULATIONS_GOV_API_KEY'})`,
       '',
     ];
-    lines.push('| Title | Type | Agency | Published | Closes | Days Left | Comments | Docket |');
-    lines.push('|---|---|---|---|---|---|---|---|');
+    lines.push(
+      '| Title | Type | Agency | Published | Closes | Days Left | Comments | Docket | Regulations.gov |',
+    );
+    lines.push('|---|---|---|---|---|---|---|---|---|');
     for (const r of result.results) {
       // `; ` because one docket ID can itself carry commas ("FAR Case 2026-003, Docket No. …").
       const docket = r.docketIds.length ? r.docketIds.join('; ') : '—';
       const count = r.commentCount != null ? String(r.commentCount) : '—';
+      const regulationsGov = [
+        r.regulationsGovDocketId && `docket ${r.regulationsGovDocketId}`,
+        r.regulationsGovDocumentId && `document ${r.regulationsGovDocumentId}`,
+        r.commentUrl && `comment at ${r.commentUrl}`,
+      ].filter(Boolean);
       lines.push(
-        `| ${escapePipes(r.title)} [FR ${r.documentNumber}] | ${r.type} | ${escapePipes(formatAgencies(r.agencies))} | ${r.publicationDate} | ${r.commentsCloseOn} | ${r.daysRemaining} | ${count} | ${escapePipes(docket)} |`,
+        `| ${escapePipes(r.title)} [FR ${r.documentNumber}] | ${r.type} | ${escapePipes(formatAgencies(r.agencies))} | ${r.publicationDate} | ${r.commentsCloseOn} | ${r.daysRemaining} | ${count} | ${escapePipes(docket)} | ${escapePipes(regulationsGov.join(' · ') || '—')} |`,
       );
     }
     return [{ type: 'text', text: lines.join('\n') }];

@@ -34,7 +34,7 @@ await createApp({
   resources: allResourceDefinitions,
   prompts: [],
   instructions:
-    'US federal regulatory law over three official sources. The Federal Register (regulations_search_rules, regulations_get_document, regulations_list_open_comments) and eCFR (regulations_browse_cfr, regulations_get_cfr_section) tools are keyless. The Regulations.gov tools (regulations_get_docket, regulations_find_comments) need REGULATIONS_GOV_API_KEY (free at https://api.data.gov/signup/) and return an actionable auth_required error without it; regulations_list_open_comments runs keyless and only adds comment counts when the key is present. Trace a rule end to end: search_rules → get_document (yields docket ID + CFR parts) → find_comments → get_cfr_section.',
+    "US federal regulatory law over three official sources. The Federal Register (regulations_search_rules, regulations_get_document, regulations_list_open_comments) and eCFR (regulations_browse_cfr, regulations_get_cfr_section) tools are keyless. The Regulations.gov tools (regulations_get_docket, regulations_find_comments) need REGULATIONS_GOV_API_KEY (free at https://api.data.gov/signup/) and return an actionable auth_required error without it; comment counts and Regulations.gov IDs on the Federal Register tools need no key. Trace a rule end to end: search_rules → get_document (yields docket ID + CFR parts) → find_comments → get_cfr_section, and back from a section's source-note cite with search_rules citation + citation_date.",
   setup(core) {
     initFederalRegisterService(core.config, core.storage);
     initEcfrService(core.config, core.storage);

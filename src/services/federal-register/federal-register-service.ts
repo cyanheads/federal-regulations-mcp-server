@@ -1,8 +1,8 @@
 /**
  * @fileoverview FederalRegisterService — keyless client for the Federal Register
- * API v1 (federalregister.gov/api/v1). Backs the document search, single-document
- * fetch (with the cross-source docket/CFR handles), and the open-comment-window
- * tools. Each method runs the full fetch + parse pipeline through `runUpstream`,
+ * API v1 (federalregister.gov/api/v1). Backs the document search (and resolving a
+ * page cite on its publication day), single-document fetch (with the
+ * cross-source docket/CFR handles), and the open-comment-window tools. Each method runs the full fetch + parse pipeline through `runUpstream`,
  * which bounds every attempt by the request's shared budget and retries inside
  * it; `fetchWithTimeout` throws a classified `McpError` on a non-OK response, the
  * response parser detects HTML error pages and re-throws them as transient, and
@@ -29,10 +29,15 @@ import { decodeNumericReference } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
 import { type TextWindow, windowText } from '@/services/text-window.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
+import { commentPeriodOpen, easternToday } from './comment-period.js';
 import type {
   CfrReference,
   FrAgency,
+  FrCitationParams,
+  FrCitationResponse,
   FrDocumentDetail,
+  FrFilters,
+  FrPrintedPages,
   FrSearchParams,
   FrSearchResponse,
   FrSearchResult,
@@ -41,6 +46,7 @@ import type {
   OpenCommentsResponse,
   RawFrDocument,
   RawFrSearchResponse,
+  RegulationsGovHandles,
 } from './types.js';
 
 const TIMEOUT_MS = 15_000;
@@ -61,6 +67,10 @@ const SEARCH_FIELDS = [
   'effective_on',
   'html_url',
   'regulations_dot_gov_info',
+  'comment_url',
+  'citation',
+  'start_page',
+  'end_page',
 ] as const;
 
 /** Detects an HTML error page returned with a non-error HTTP status. */
@@ -74,7 +84,7 @@ const FR_MAX_PER_PAGE = 2000;
 /** The most items the Federal Register serves for one query; a page reaching past it is a 400. */
 const FR_MAX_ITEMS = 10_000;
 
-/** The fields the open-comment window renders; the Regulations.gov block is added only when keyed. */
+/** The fields the open-comment window renders. */
 const OPEN_COMMENT_FIELDS = [
   'document_number',
   'title',
@@ -83,6 +93,8 @@ const OPEN_COMMENT_FIELDS = [
   'publication_date',
   'comments_close_on',
   'docket_ids',
+  'regulations_dot_gov_info',
+  'comment_url',
 ] as const;
 
 /** Orders document numbers by their numeric parts, so 2026-9999 sorts before 2026-17211. */
@@ -173,14 +185,12 @@ export class FederalRegisterService {
     this.baseUrl = getServerConfig().federalRegisterBaseUrl.replace(/\/$/, '');
   }
 
-  /** Search Federal Register documents by query, type, agency, and date window, in the given order. */
+  /**
+   * Search Federal Register documents by query, type, agency, date window, CFR
+   * title/part, printed docket number, and RIN — all ANDed — in the given order.
+   */
   async search(params: FrSearchParams, ctx: Context): Promise<FrSearchResponse> {
-    const search = new URLSearchParams();
-    if (params.query) search.set('conditions[term]', params.query);
-    for (const type of params.types ?? []) search.append('conditions[type][]', type);
-    for (const agency of params.agencies ?? []) {
-      search.append('conditions[agencies][]', agency);
-    }
+    const search = filterConditions(params);
     if (params.publishedAfter) {
       search.set('conditions[publication_date][gte]', params.publishedAfter);
     }
@@ -205,18 +215,69 @@ export class FederalRegisterService {
     ).catch((err: unknown) => {
       throw (
         filterRejection(err, {
-          agencies: ['agencies'],
+          ...filterParameterNames(params),
           publication_date: dateParams.length
             ? dateParams
             : ['published_after', 'published_before'],
-          term: ['query'],
         }) ?? err
       );
     });
 
+    const today = easternToday();
     return {
       totalCount: raw.count ?? 0,
-      results: (raw.results ?? []).map((doc) => normalizeSearchResult(doc)),
+      results: (raw.results ?? []).map((doc) => normalizeSearchResult(doc, today)),
+    };
+  }
+
+  /**
+   * The documents published on one day that are printed on `frPage`, ordered by
+   * start page — how a CFR source-note cite ("89 FR 49102", with its date)
+   * resolves to its rulemaking. The API has no citation or page condition and
+   * full-text search does not match a cite, so this lists the whole day — one
+   * request, since no day from 1994 on exceeds a few hundred documents — and
+   * matches the page against each document's printed range. A document with no
+   * recorded range (most of 1994) never matches.
+   */
+  async searchCitation(params: FrCitationParams, ctx: Context): Promise<FrCitationResponse> {
+    const search = filterConditions(params);
+    search.set('conditions[publication_date][is]', params.publicationDate);
+    search.set('per_page', String(FR_MAX_PER_PAGE));
+    search.set('order', 'oldest');
+    for (const field of SEARCH_FIELDS) search.append('fields[]', field);
+
+    const raw = await this.fetchJson<RawFrSearchResponse>(
+      `${this.baseUrl}/documents.json?${search.toString()}`,
+      ctx,
+      'FederalRegisterService.searchCitation',
+      [400],
+    ).catch((err: unknown) => {
+      throw (
+        filterRejection(err, {
+          ...filterParameterNames(params),
+          publication_date: ['citation_date'],
+        }) ?? err
+      );
+    });
+
+    const today = easternToday();
+    const day = (raw.results ?? []).map((doc) => normalizeSearchResult(doc, today));
+    const paged = day.filter(
+      (d): d is FrSearchResult & { startPage: number; endPage: number } =>
+        d.startPage !== null && d.endPage !== null,
+    );
+    const results = paged
+      .filter((d) => d.startPage <= params.frPage && params.frPage <= d.endPage)
+      .sort(
+        (a, b) =>
+          a.startPage - b.startPage || documentNumberOrder(a.documentNumber, b.documentNumber),
+      );
+    return {
+      results,
+      dayCount: day.length,
+      pagedCount: paged.length,
+      firstPage: paged.length ? Math.min(...paged.map((d) => d.startPage)) : null,
+      lastPage: paged.length ? Math.max(...paged.map((d) => d.endPage)) : null,
     };
   }
 
@@ -259,7 +320,7 @@ export class FederalRegisterService {
       }
       throw err;
     }
-    const detail = normalizeDocumentDetail(raw);
+    const detail = normalizeDocumentDetail(raw, easternToday());
 
     if (fullText && raw.raw_text_url) {
       const body = await this.fetchText(
@@ -300,7 +361,6 @@ export class FederalRegisterService {
     search.set('per_page', String(FR_MAX_PER_PAGE));
     search.set('order', 'newest');
     for (const field of OPEN_COMMENT_FIELDS) search.append('fields[]', field);
-    if (params.includeCommentCounts) search.append('fields[]', 'regulations_dot_gov_info');
 
     const fetchPage = (page: number): Promise<RawFrSearchResponse> => {
       const pageSearch = new URLSearchParams(search);
@@ -421,12 +481,46 @@ function rethrowBodyFailure(error: unknown): never {
   throw error;
 }
 
+/**
+ * The search conditions every document query shares — full text, type, agency,
+ * CFR title and part, printed docket number, and RIN — as a fresh query string
+ * for the caller to add its date, paging, and field parameters to.
+ */
+function filterConditions(params: FrFilters): URLSearchParams {
+  const search = new URLSearchParams();
+  if (params.query) search.set('conditions[term]', params.query);
+  for (const type of params.types ?? []) search.append('conditions[type][]', type);
+  for (const agency of params.agencies ?? []) search.append('conditions[agencies][]', agency);
+  if (params.cfrTitle !== undefined) search.set('conditions[cfr][title]', String(params.cfrTitle));
+  if (params.cfrPart) search.set('conditions[cfr][part]', params.cfrPart);
+  if (params.docketId) search.set('conditions[docket_id]', params.docketId);
+  if (params.rin) search.set('conditions[regulation_id_number]', params.rin);
+  return search;
+}
+
+/**
+ * The tool parameter behind each condition {@link filterConditions} sends, keyed
+ * by the field name a Federal Register 400 reports it under. The FR reports
+ * title and part errors both as `cfr`; the title is range-checked before it is
+ * sent, so a `cfr` rejection with a part set is about the part.
+ */
+function filterParameterNames(params: FrFilters): Record<string, string[]> {
+  return {
+    agencies: ['agencies'],
+    term: ['query'],
+    cfr: params.cfrPart ? ['cfr_part'] : ['cfr_title'],
+    docket_id: ['docket_id'],
+    regulation_id_number: ['rin'],
+  };
+}
+
 /** What to do about a rejected Federal Register field, keyed by the FR's own name. */
 const FIELD_RECOVERY: Record<string, string> = {
   agencies:
     'Each `agencies` value must be a Federal Register agency slug — lowercase kebab-case such as "environmental-protection-agency", not a name or acronym. Read one off agencies[].slug in any regulations_search_rules or regulations_list_open_comments result (search by query without the agencies filter to find it). One unrecognized slug fails the whole request.',
   publication_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
   comment_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
+  cfr: '`cfr_part` takes a whole part number or a range of them ("141", "140-143"). A part with a letter in it ("1203a") cannot be filtered on — drop cfr_part to filter on cfr_title alone, or search by query.',
 };
 
 /**
@@ -509,17 +603,46 @@ function normalizeAgencies(raw: RawFrDocument['agencies']): FrAgency[] {
   return agencies;
 }
 
-/** Map raw FR `cfr_references` (sparse) → domain `CfrReference[]`. */
+/**
+ * Map raw FR `cfr_references` (sparse) → domain `CfrReference[]`. The FR serves
+ * the part as a string on documents from 2020 on and as a number on most older
+ * ones (every one from 2001 through 2019); both become the string eCFR takes.
+ */
 function normalizeCfrReferences(raw: RawFrDocument['cfr_references']): CfrReference[] {
-  return (raw ?? [])
-    .filter(
-      (ref): ref is { title: number; part: string } =>
-        typeof ref?.title === 'number' && typeof ref?.part === 'string' && ref.part.length > 0,
-    )
-    .map((ref) => ({ title: ref.title, part: ref.part }));
+  const refs: CfrReference[] = [];
+  for (const ref of raw ?? []) {
+    const part = typeof ref?.part === 'number' ? String(ref.part) : ref?.part;
+    if (typeof ref?.title === 'number' && typeof part === 'string' && part.length > 0) {
+      refs.push({ title: ref.title, part });
+    }
+  }
+  return refs;
 }
 
-function normalizeSearchResult(doc: RawFrDocument): FrSearchResult {
+/** The Regulations.gov IDs, comment count, and comment URL a document carries, null when absent. */
+function regulationsGovHandles(doc: RawFrDocument): RegulationsGovHandles {
+  const rdg = doc.regulations_dot_gov_info ?? {};
+  return {
+    regulationsGovDocketId: rdg.docket_id ?? null,
+    regulationsGovDocumentId: rdg.document_id ?? null,
+    commentCount: typeof rdg.comments_count === 'number' ? rdg.comments_count : null,
+    commentUrl: doc.comment_url ?? null,
+  };
+}
+
+/** The citation and page range a document is printed at; the FR writes 0 for an unrecorded page. */
+function printedPages(doc: RawFrDocument): FrPrintedPages {
+  const page = (n: number | null | undefined) => (typeof n === 'number' && n > 0 ? n : null);
+  return {
+    citation: doc.citation ?? null,
+    startPage: page(doc.start_page),
+    endPage: page(doc.end_page),
+  };
+}
+
+/** `today` is the Eastern date `commentPeriodOpen` is judged against. */
+function normalizeSearchResult(doc: RawFrDocument, today: string): FrSearchResult {
+  const commentsCloseOn = doc.comments_close_on ?? null;
   return {
     documentNumber: doc.document_number ?? '',
     title: doc.title ?? '(untitled)',
@@ -528,17 +651,22 @@ function normalizeSearchResult(doc: RawFrDocument): FrSearchResult {
     publicationDate: doc.publication_date ?? '',
     agencies: normalizeAgencies(doc.agencies),
     docketIds: doc.docket_ids ?? [],
+    ...regulationsGovHandles(doc),
     regulationIdNumbers: doc.regulation_id_numbers ?? [],
     cfrReferences: normalizeCfrReferences(doc.cfr_references),
-    commentsCloseOn: doc.comments_close_on ?? null,
+    commentsCloseOn,
+    commentPeriodOpen: commentPeriodOpen(commentsCloseOn, today),
     effectiveOn: doc.effective_on ?? null,
+    ...printedPages(doc),
     htmlUrl: doc.html_url ?? '',
   };
 }
 
-function normalizeDocumentDetail(doc: RawFrDocument): FrDocumentDetail {
-  const rdg = doc.regulations_dot_gov_info ?? {};
-  const supportingDocuments = (rdg.supporting_documents ?? [])
+/** `today` is the Eastern date `commentPeriodOpen` is judged against. */
+function normalizeDocumentDetail(doc: RawFrDocument, today: string): FrDocumentDetail {
+  const commentsCloseOn = doc.comments_close_on ?? null;
+  const { regulationsGovDocketId, ...handles } = regulationsGovHandles(doc);
+  const supportingDocuments = (doc.regulations_dot_gov_info?.supporting_documents ?? [])
     .filter(
       (d): d is { title: string; document_id: string } =>
         typeof d?.document_id === 'string' && d.document_id.length > 0,
@@ -553,14 +681,16 @@ function normalizeDocumentDetail(doc: RawFrDocument): FrDocumentDetail {
     action: doc.action ?? null,
     dates: doc.dates ?? null,
     publicationDate: doc.publication_date ?? '',
+    ...printedPages(doc),
     effectiveOn: doc.effective_on ?? null,
-    commentsCloseOn: doc.comments_close_on ?? null,
+    commentsCloseOn,
+    commentPeriodOpen: commentPeriodOpen(commentsCloseOn, today),
     agencies: normalizeAgencies(doc.agencies),
     regulationIdNumbers: doc.regulation_id_numbers ?? [],
     cfrReferences: normalizeCfrReferences(doc.cfr_references),
-    docketId: rdg.docket_id ?? null,
-    regulationsGovDocumentId: rdg.document_id ?? null,
-    commentCount: typeof rdg.comments_count === 'number' ? rdg.comments_count : null,
+    docketIds: doc.docket_ids ?? [],
+    docketId: regulationsGovDocketId,
+    ...handles,
     supportingDocuments,
     bodyHtmlUrl: doc.body_html_url ?? '',
     rawTextUrl: doc.raw_text_url ?? '',
@@ -569,7 +699,6 @@ function normalizeDocumentDetail(doc: RawFrDocument): FrDocumentDetail {
 }
 
 function normalizeOpenCommentRule(doc: RawFrDocument): OpenCommentRule {
-  const rdg = doc.regulations_dot_gov_info ?? {};
   return {
     documentNumber: doc.document_number ?? '',
     title: doc.title ?? '(untitled)',
@@ -578,7 +707,7 @@ function normalizeOpenCommentRule(doc: RawFrDocument): OpenCommentRule {
     publicationDate: doc.publication_date ?? '',
     commentsCloseOn: doc.comments_close_on ?? '',
     docketIds: doc.docket_ids ?? [],
-    commentCount: typeof rdg.comments_count === 'number' ? rdg.comments_count : null,
+    ...regulationsGovHandles(doc),
   };
 }
 

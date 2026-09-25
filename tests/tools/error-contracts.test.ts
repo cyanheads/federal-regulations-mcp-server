@@ -858,6 +858,37 @@ describe('invalid_filter reaches the caller', () => {
     expect(text).toMatch(/^Recovery: .+YYYY-MM-DD.+$/m);
   });
 
+  it('names cfr_part when the Federal Register rejects a part it cannot filter on', async () => {
+    // Probed live: title 14 part "1203a" answers exactly this 400.
+    serveEverything(() =>
+      rejected({ cfr: 'CFR part must be an integer or a range (eg "1" or "1-200")' }),
+    );
+    const { error, text } = surfaces(
+      await runToolContract(searchRulesTool, { cfr_title: 14, cfr_part: '1203a' }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.message).toMatch(/`cfr_part`: CFR part must be an integer or a range/);
+    expect(error.message).not.toMatch(/`cfr`|cfr_title/);
+    expect(error.data?.parameters).toEqual(['cfr_part']);
+    expect(text).toMatch(/^Recovery: .*cfr_part.+$/m);
+    expect(http.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['regulation_id_number', 'rin', { rin: '2040-AG18' }],
+    ['docket_id', 'docket_id', { docket_id: 'EPA-HQ-OW-2022-0114' }],
+    ['cfr', 'cfr_title', { cfr_title: 40 }],
+  ])('maps a rejected %s to the %s parameter', async (field, parameter, input) => {
+    serveEverything(() => rejected({ [field]: 'invalid value' }));
+    const { error } = surfaces(await runToolContract(searchRulesTool, input));
+
+    expect(error.data?.reason).toBe('invalid_filter');
+    expect(error.data?.parameters).toEqual([parameter]);
+    expect(error.message).toContain(`\`${parameter}\`: invalid value`);
+  });
+
   it('reads the array form of a field report too', async () => {
     serveEverything(() => rejected({ agencies: ['invalid value'] }));
     const { error } = surfaces(await runToolContract(searchRulesTool, { agencies: ['EPA'] }));

@@ -24,11 +24,19 @@ const sampleRow = {
   type: 'Proposed Rule',
   abstract: 'A proposal.',
   publicationDate: '2025-06-01',
+  citation: '90 FR 23001',
+  startPage: 23001,
+  endPage: 23050,
   agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
   docketIds: ['EPA-HQ-OAR-2025-0194'],
+  regulationsGovDocketId: 'EPA-HQ-OAR-2025-0194',
+  regulationsGovDocumentId: 'EPA-HQ-OAR-2025-0194-0001',
+  commentCount: 12,
+  commentUrl: 'http://www.regulations.gov/commenton/EPA-HQ-OAR-2025-0194-0001',
   regulationIdNumbers: ['2060-AV12'],
   cfrReferences: [{ title: 40, part: '50' }],
   commentsCloseOn: '2025-08-01',
+  commentPeriodOpen: false,
   effectiveOn: null,
   htmlUrl: 'https://www.federalregister.gov/d/2025-14555',
 };
@@ -219,12 +227,12 @@ describe('searchRulesTool', () => {
       const structured = result.structuredContent as Record<string, unknown>;
       expect(structured.totalCount).toBe(0);
       expect(structured.notice).toBe(
-        'No Federal Register documents matched. Broaden the query, widen the date range, or drop an agency filter.',
+        'No Federal Register documents matched query "zzqqxx". Broaden or drop a filter, or widen the date range.',
       );
       expect(structured).not.toHaveProperty('truncated');
       const text = contentText(result);
       expect(text).toContain('**0 total**');
-      expect(text).toContain('> No Federal Register documents matched.');
+      expect(text).toContain('> No Federal Register documents matched query "zzqqxx".');
     });
 
     it('returns a single short page with no notice and no truncation', async () => {
@@ -279,7 +287,7 @@ describe('searchRulesTool', () => {
       });
       // Order: reachable count, then per_page, then the narrowing filters.
       expect(structured.notice).toBe(
-        '4,429 documents matched, but the Federal Register serves 50 pages, so only the first 1,000 are reachable at per_page 20. Raise per_page to 89 or more (max 100) to reach all 4,429. Or narrow with published_after / published_before (or type, agencies, query) to bring the rest within reach.',
+        '4,429 documents matched, but the Federal Register serves 50 pages, so only the first 1,000 are reachable at per_page 20. Raise per_page to 89 or more (max 100) to reach all 4,429. Or narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin) to bring the rest within reach.',
       );
       const text = contentText(result);
       expect(text).toContain('**Total pages:** 50');
@@ -331,7 +339,7 @@ describe('searchRulesTool', () => {
       expect(structured).toMatchObject({ truncated: true, totalPages: 50, cap: 5000 });
       expect(structured).not.toHaveProperty('nextPage');
       expect(structured.notice).toBe(
-        'At least 10,000 documents matched (the Federal Register stops counting at 10,000), but it serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query) to bring the rest within reach.',
+        'At least 10,000 documents matched (the Federal Register stops counting at 10,000), but it serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin) to bring the rest within reach.',
       );
       // Live: an unfiltered search reports count 10,000. A capped count is a
       // floor, so no surface may state it as the number of matches.
@@ -385,6 +393,114 @@ describe('searchRulesTool', () => {
       const result = await runToolContract(searchRulesTool, { query: 'PFAS', ...dates });
       expect(result.isError).toBeFalsy();
       expect(searchFn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('CFR, docket, and RIN filters', () => {
+    beforeEach(() =>
+      searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse),
+    );
+
+    async function sent(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+      await runToolContract(searchRulesTool, args);
+      return searchFn.mock.calls.at(-1)![0] as Record<string, unknown>;
+    }
+
+    it('passes each filter through with the others', async () => {
+      expect(
+        await sent({
+          query: 'PFAS',
+          cfr_title: 40,
+          cfr_part: '141',
+          docket_id: 'EPA-HQ-OW-2022-0114',
+          rin: '2040-AG18',
+        }),
+      ).toMatchObject({
+        query: 'PFAS',
+        cfrTitle: 40,
+        cfrPart: '141',
+        docketId: 'EPA-HQ-OW-2022-0114',
+        rin: '2040-AG18',
+      });
+    });
+
+    it.each([
+      ['Part 141', '141'],
+      ['part 140-143', '140-143'],
+      ['pt. 141', '141'],
+      ['Pts. 141', '141'],
+      [' 141 ', '141'],
+    ])(
+      'drops the prefix from cfr_part %j the way regulations_browse_cfr does',
+      async (part, bare) => {
+        expect((await sent({ cfr_title: 40, cfr_part: part })).cfrPart).toBe(bare);
+      },
+    );
+
+    it('treats empty form-client values as unset', async () => {
+      const params = await sent({ cfr_part: '', docket_id: '', rin: '' });
+      expect(params.cfrPart).toBeUndefined();
+      expect(params.docketId).toBeUndefined();
+      expect(params.rin).toBeUndefined();
+    });
+
+    it('rejects cfr_part without cfr_title before any request, as regulations_browse_cfr does', async () => {
+      const result = await runToolContract(searchRulesTool, { cfr_part: 'Part 141' });
+      const error = (
+        result.structuredContent as {
+          error?: { code: number; data?: { reason?: string; recovery?: { hint?: string } } };
+        }
+      ).error;
+      expect(error?.code).toBe(-32007);
+      expect(error?.data?.reason).toBe('title_required_for_part');
+      expect(error?.data?.recovery?.hint).toMatch(/cfr_title/);
+      const text = (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('');
+      expect(text).toMatch(/^Recovery: .*cfr_title/m);
+      expect(searchFn).not.toHaveBeenCalled();
+    });
+
+    it('accepts cfr_title in 1–50 only', () => {
+      expect(searchRulesTool.input.safeParse({ cfr_title: 0 }).success).toBe(false);
+      expect(searchRulesTool.input.safeParse({ cfr_title: 51 }).success).toBe(false);
+      expect(searchRulesTool.input.safeParse({ cfr_title: 50 }).success).toBe(true);
+    });
+
+    it('names the active filters when nothing matched', async () => {
+      const result = await runToolContract(searchRulesTool, {
+        cfr_title: 40,
+        cfr_part: '99999',
+        rin: '9999-ZZ99',
+      });
+      const notice = String((result.structuredContent as Record<string, unknown>).notice);
+      expect(notice).toBe(
+        "No Federal Register documents matched cfr_title 40, cfr_part 99999, rin 9999-ZZ99. Broaden or drop a filter, or widen the date range. docket_id and rin match a complete docket number or RIN, and docket_id takes the numbers the Federal Register prints (a result's docketIds), which are not always Regulations.gov docket IDs.",
+      );
+      const text = (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('');
+      expect(text).toContain('> No Federal Register documents matched cfr_title 40');
+    });
+
+    it('names every kind of filter it was given', async () => {
+      const result = await runToolContract(searchRulesTool, {
+        query: 'PFAS',
+        type: ['PRORULE', 'RULE'],
+        agencies: ['environmental-protection-agency'],
+        published_after: '2024-01-01',
+        published_before: '2024-12-31',
+        docket_id: 'EPA-HQ-OW-2022-0114',
+      });
+      expect(String((result.structuredContent as Record<string, unknown>).notice)).toMatch(
+        /^No Federal Register documents matched query "PFAS", type PRORULE\/RULE, agencies environmental-protection-agency, published_after 2024-01-01, published_before 2024-12-31, docket_id EPA-HQ-OW-2022-0114\. /,
+      );
+    });
+
+    it('names each chain in the filter descriptions', () => {
+      const shape = searchRulesTool.input.shape;
+      expect(shape.cfr_title.description).toMatch(/regulations_get_cfr_section/);
+      expect(shape.cfr_part.description).toMatch(/regulations_get_cfr_section/);
+      expect(shape.rin.description).toMatch(/regulationIdNumbers/);
+      expect(shape.docket_id.description).toMatch(/docketIds/);
+      expect(shape.docket_id.description).toMatch(/complete/);
+      expect(shape.rin.description).toMatch(/complete/);
     });
   });
 

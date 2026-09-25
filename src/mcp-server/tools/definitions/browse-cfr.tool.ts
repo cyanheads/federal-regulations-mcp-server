@@ -35,6 +35,7 @@ import {
   mirrorScope,
   mirrorSearch,
 } from '@/services/ecfr-mirror/ecfr-mirror.js';
+import { normalizePart } from './cfr-part.js';
 import { isoDate } from './date-input.js';
 
 /** Restriction clause naming the caller's own title (and part) filter, if any. */
@@ -64,29 +65,6 @@ function describeLiveScope(
   part: string | undefined,
 ): string {
   return `Live eCFR search — all CFR titles${filterClause(title, part)}, text in effect on ${date}.`;
-}
-
-/**
- * Canonicalize a caller-supplied part identifier, or `undefined` when nothing is
- * left of it. eCFR matches `hierarchy[part]` exactly, and the mirror matches its
- * `part` column exactly, so "Part 58" and "58 " both return zero rather than an
- * error — strip the spelled-out prefix and the surrounding whitespace that
- * produce that silent miss. A value that is blank to begin with, or blank once
- * stripped, is no filter at all: returning it as one would put "part " in
- * `sourceScope` and claim a restriction the query never carried.
- *
- * Deliberately conservative beyond that: case and leading zeros are left alone.
- * Real part identifiers include an uppercase one (26 CFR 16A) and lowercase
- * suffixes (14 CFR 1203a), and none begin with a zero, so folding either would
- * rewrite a caller's part into a different one.
- */
-function normalizePart(part: string | undefined): string | undefined {
-  return (
-    part
-      ?.trim()
-      .replace(/^(?:parts?|pts?\.?)\s+/i, '')
-      .trim() || undefined
-  );
 }
 
 /** Largest `per_page` the tool accepts — a truncation notice only suggests raising it below this. */

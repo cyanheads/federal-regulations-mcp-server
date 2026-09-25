@@ -44,12 +44,37 @@ function textResponse(text: string): Response {
 
 let service: InstanceType<typeof FederalRegisterService>;
 
-/** The open-comment window of proposed rules, unkeyed. */
-const openParams = { types: ['PRORULE'], includeCommentCounts: false } as const;
+/** The open-comment window of proposed rules. */
+const openParams = { types: ['PRORULE'] } as const;
+
+/**
+ * The Regulations.gov handles as the Federal Register served them for
+ * 2026-16314 on 2026-09-25: the printed docket number is the IRS's own, the
+ * Regulations.gov docket is a different ID, and `comment_url` is top-level.
+ */
+const irsProposal = {
+  document_number: '2026-16314',
+  title: 'Employer Contributions to Trump Accounts',
+  type: 'Proposed Rule',
+  publication_date: '2026-08-27',
+  comments_close_on: '2026-09-25',
+  docket_ids: ['REG-101355-26'],
+  cfr_references: [{ chapter: null, citation_url: null, part: '1', title: 26 }],
+  comment_url: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+  regulations_dot_gov_info: {
+    supporting_documents: [],
+    comments_count: 41,
+    agency_id: 'IRS',
+    docket_id: 'IRS-2026-0925',
+    document_id: 'IRS-2026-0925-0001',
+  },
+  html_url: 'https://www.federalregister.gov/d/2026-16314',
+};
 
 describe('FederalRegisterService', () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    fetchMock.mockRejectedValue(new Error('unmocked fetch'));
     // The FR service does not use storage; a stub satisfies the constructor.
     service = new FederalRegisterService({} as AppConfig, {} as StorageService);
   });
@@ -446,6 +471,223 @@ describe('FederalRegisterService', () => {
     );
   });
 
+  describe('CFR, docket, and RIN filters', () => {
+    it('sends each filter as its Federal Register condition', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ count: 0, results: [] }));
+      await service.search(
+        {
+          query: 'PFAS',
+          cfrTitle: 40,
+          cfrPart: '140-143',
+          docketId: 'EPA-HQ-OW-2022-0114',
+          rin: '2040-AG18',
+          order: 'relevance',
+          perPage: 20,
+          page: 1,
+        },
+        createMockContext(),
+      );
+      const url = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(url.searchParams.get('conditions[term]')).toBe('PFAS');
+      expect(url.searchParams.get('conditions[cfr][title]')).toBe('40');
+      expect(url.searchParams.get('conditions[cfr][part]')).toBe('140-143');
+      expect(url.searchParams.get('conditions[docket_id]')).toBe('EPA-HQ-OW-2022-0114');
+      expect(url.searchParams.get('conditions[regulation_id_number]')).toBe('2040-AG18');
+    });
+
+    it('sends none of them when they are not set, and a title without a part', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
+      await service.search({ order: 'newest', perPage: 20, page: 1 }, createMockContext());
+      await service.search(
+        { cfrTitle: 49, order: 'newest', perPage: 20, page: 1 },
+        createMockContext(),
+      );
+      const [control, titleOnly] = fetchMock.mock.calls.map(
+        ([url]) => new URL(url as string).searchParams,
+      );
+      for (const key of [
+        'conditions[cfr][title]',
+        'conditions[cfr][part]',
+        'conditions[docket_id]',
+        'conditions[regulation_id_number]',
+      ]) {
+        expect(control!.has(key)).toBe(false);
+      }
+      expect(titleOnly!.get('conditions[cfr][title]')).toBe('49');
+      expect(titleOnly!.has('conditions[cfr][part]')).toBe(false);
+    });
+  });
+
+  it('keeps a CFR reference whose part the Federal Register serves as a number', async () => {
+    // 2019-27282 as served: pre-2020 documents carry numeric parts, and dropping
+    // them left cfrReferences empty for most older rules.
+    const doc = {
+      document_number: '2019-27282',
+      title: 'National Primary Drinking Water Regulations',
+      type: 'Rule',
+      publication_date: '2019-12-27',
+      cfr_references: [
+        { chapter: null, citation_url: null, part: 141, title: 40 },
+        { chapter: null, citation_url: null, part: 142, title: 40 },
+      ],
+    };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ count: 1, results: [doc] }))
+      .mockResolvedValueOnce(jsonResponse(doc));
+    const ctx = createMockContext();
+    const expected = [
+      { title: 40, part: '141' },
+      { title: 40, part: '142' },
+    ];
+    const search = await service.search({ order: 'newest', perPage: 20, page: 1 }, ctx);
+    expect(search.results[0]!.cfrReferences).toEqual(expected);
+    const detail = await service.getDocument('2019-27282', undefined, ctx);
+    expect(detail.cfrReferences).toEqual(expected);
+  });
+
+  describe('citation, start page, and end page', () => {
+    /** A day's document as the Federal Register serves it (live shapes, 2024-06-11 and 1994-01-13). */
+    function dayDoc(documentNumber: string, start: number, end: number, volume = 89) {
+      return {
+        document_number: documentNumber,
+        title: `Document ${documentNumber}`,
+        type: 'Rule',
+        publication_date: '2024-06-11',
+        citation: start > 0 ? `${volume} FR ${start}` : null,
+        start_page: start,
+        end_page: end,
+        html_url: `https://www.federalregister.gov/d/${documentNumber}`,
+      };
+    }
+
+    it('requests and normalizes them, with an unrecorded range as null', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          count: 2,
+          results: [dayDoc('2024-12645', 49101, 49104), dayDoc('X94-90113', 0, 0, 59)],
+        }),
+      );
+      const { results } = await service.search(
+        { order: 'newest', perPage: 20, page: 1 },
+        createMockContext(),
+      );
+      const fields = new URL(fetchMock.mock.calls[0]![0] as string).searchParams.getAll('fields[]');
+      expect(fields).toEqual(expect.arrayContaining(['citation', 'start_page', 'end_page']));
+      expect(results.map((r) => [r.citation, r.startPage, r.endPage])).toEqual([
+        ['89 FR 49101', 49101, 49104],
+        [null, null, null],
+      ]);
+    });
+
+    it('carries them on a single document', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(dayDoc('2024-12645', 49101, 49104)));
+      const detail = await service.getDocument('2024-12645', undefined, createMockContext());
+      expect(detail).toMatchObject({ citation: '89 FR 49101', startPage: 49101, endPage: 49104 });
+    });
+
+    it('resolves a page to the documents printed on it, in one request for that day', async () => {
+      // 2001-01-22: page 6451 is shared by 01-1234 (6449–6451) and 01-1586 (6451–6452).
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          count: 5,
+          results: [
+            dayDoc('01-1586', 6451, 6452, 66),
+            dayDoc('01-1600', 6453, 6460, 66),
+            dayDoc('01-1234', 6449, 6451, 66),
+            dayDoc('X01-0001', 0, 0, 66),
+            dayDoc('01-1100', 6400, 6448, 66),
+          ],
+        }),
+      );
+      const day = await service.searchCitation(
+        { publicationDate: '2001-01-22', frPage: 6451, agencies: ['x-agency'], rin: '2040-AG18' },
+        createMockContext(),
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const url = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(url.searchParams.get('conditions[publication_date][is]')).toBe('2001-01-22');
+      expect(url.searchParams.getAll('conditions[agencies][]')).toEqual(['x-agency']);
+      expect(url.searchParams.get('conditions[regulation_id_number]')).toBe('2040-AG18');
+      expect(Number(url.searchParams.get('per_page'))).toBeGreaterThanOrEqual(344);
+      expect(url.searchParams.has('conditions[publication_date][gte]')).toBe(false);
+
+      expect(day.results.map((r) => r.documentNumber)).toEqual(['01-1234', '01-1586']);
+      expect(day).toMatchObject({ dayCount: 5, pagedCount: 4, firstPage: 6400, lastPage: 6460 });
+    });
+
+    it('matches a page inside a document, and never a document without a page range', async () => {
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse({
+            count: 3,
+            results: [
+              dayDoc('2024-07773', 32532, 32757),
+              dayDoc('2024-07774', 32758, 32760),
+              dayDoc('X94-0', 0, 0),
+            ],
+          }),
+        ),
+      );
+      const ctx = createMockContext();
+      const mid = await service.searchCitation(
+        { publicationDate: '2024-04-26', frPage: 32744 },
+        ctx,
+      );
+      expect(mid.results.map((r) => r.documentNumber)).toEqual(['2024-07773']);
+      const zero = await service.searchCitation({ publicationDate: '2024-04-26', frPage: 0 }, ctx);
+      expect(zero.results).toEqual([]);
+      const gap = await service.searchCitation(
+        { publicationDate: '2024-04-26', frPage: 40000 },
+        ctx,
+      );
+      expect(gap).toMatchObject({ results: [], pagedCount: 2, firstPage: 32532, lastPage: 32760 });
+    });
+
+    it('reports a day whose documents carry no page ranges, and a day with none at all', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          jsonResponse({
+            count: 2,
+            results: [dayDoc('X94-1', 0, 0, 59), dayDoc('X94-2', 0, 0, 59)],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ count: 0, results: [] }));
+      const ctx = createMockContext();
+      const unpaged = await service.searchCitation(
+        { publicationDate: '1994-01-13', frPage: 2000 },
+        ctx,
+      );
+      expect(unpaged).toMatchObject({
+        results: [],
+        dayCount: 2,
+        pagedCount: 0,
+        firstPage: null,
+        lastPage: null,
+      });
+      const empty = await service.searchCitation(
+        { publicationDate: '2024-06-09', frPage: 49000 },
+        ctx,
+      );
+      expect(empty).toMatchObject({ results: [], dayCount: 0, pagedCount: 0 });
+    });
+
+    it('names citation_date when the Federal Register rejects the day', async () => {
+      fetchMock.mockRejectedValueOnce(
+        new McpError(JsonRpcErrorCode.InvalidParams, 'Status: 400', {
+          status: 400,
+          body: JSON.stringify({ errors: { publication_date: 'is not a valid date' } }),
+        }),
+      );
+      const err = (await service
+        .searchCitation({ publicationDate: '2024-06-11', frPage: 1 }, createMockContext())
+        .catch((e: unknown) => e)) as McpError;
+      expect(err).toBeInstanceOf(McpError);
+      expect(err.data?.reason).toBe('invalid_filter');
+      expect(err.message).toMatch(/`citation_date`/);
+    });
+  });
+
   it('builds the open-comment request over the whole window of every requested type', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ count: 0, results: [] }));
     const ctx = createMockContext();
@@ -455,7 +697,6 @@ describe('FederalRegisterService', () => {
         agencies: ['environmental-protection-agency'],
         closingBefore: '2025-07-01',
         types: ['PRORULE', 'RULE', 'NOTICE'],
-        includeCommentCounts: false,
       },
       '2025-06-13',
       ctx,
@@ -472,39 +713,104 @@ describe('FederalRegisterService', () => {
     expect(url.searchParams.get('conditions[comment_date][lte]')).toBe('2025-07-01');
     expect(url.searchParams.get('per_page')).toBe('2000');
     expect(url.searchParams.get('page')).toBe('1');
-    expect(url.searchParams.getAll('fields[]')).not.toContain('regulations_dot_gov_info');
   });
 
-  it('requests the Regulations.gov block only when comment counts are wanted', async () => {
-    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
-    const ctx = createMockContext();
-    await service.listOpenComments(
-      { ...openParams, includeCommentCounts: true },
-      '2025-06-13',
-      ctx,
-    );
-    await service.listOpenComments(openParams, '2025-06-13', ctx);
-    const fields = fetchMock.mock.calls.map(([url]) =>
-      new URL(url as string).searchParams.getAll('fields[]').includes('regulations_dot_gov_info'),
-    );
-    expect(fields).toEqual([true, false]);
-  });
+  describe('Regulations.gov handles', () => {
+    it('requests the Regulations.gov block and comment URL on every open-comment window', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
+      await service.listOpenComments(openParams, '2025-06-13', createMockContext());
+      const fields = new URL(fetchMock.mock.calls[0]![0] as string).searchParams.getAll('fields[]');
+      expect(fields).toContain('regulations_dot_gov_info');
+      expect(fields).toContain('comment_url');
+    });
 
-  it('flags the window truncated at the 10,000-item count whatever the key state', async () => {
-    for (const includeCommentCounts of [false, true]) {
-      fetchMock.mockReset();
-      fetchMock.mockImplementation(() =>
-        Promise.resolve(jsonResponse({ count: 10_000, results: [] })),
+    it('requests the comment URL on a search and a single document', async () => {
+      fetchMock.mockImplementation((url: string) =>
+        Promise.resolve(
+          jsonResponse(url.includes('/documents.json') ? { count: 0, results: [] } : irsProposal),
+        ),
       );
       const ctx = createMockContext();
-      const window = await service.listOpenComments(
-        { ...openParams, includeCommentCounts },
-        '2025-06-13',
-        ctx,
+      await service.search({ perPage: 20, page: 1, order: 'newest' }, ctx);
+      await service.getDocument('2026-16314', undefined, ctx);
+      for (const [url] of fetchMock.mock.calls) {
+        const fields = new URL(url as string).searchParams.getAll('fields[]');
+        expect(fields).toContain('comment_url');
+        expect(fields).toContain('regulations_dot_gov_info');
+      }
+    });
+
+    it('reads a search row’s Regulations.gov IDs, count, and comment URL beside the printed docket', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ count: 1, results: [irsProposal] }));
+      const { results } = await service.search(
+        { perPage: 20, page: 1, order: 'newest' },
+        createMockContext(),
       );
-      expect(window.truncated).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(5);
-    }
+      expect(results[0]).toMatchObject({
+        docketIds: ['REG-101355-26'],
+        regulationsGovDocketId: 'IRS-2026-0925',
+        regulationsGovDocumentId: 'IRS-2026-0925-0001',
+        commentCount: 41,
+        commentUrl: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+      });
+    });
+
+    it('reads an open-comment row’s handles the same way', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ count: 1, results: [irsProposal] }));
+      const { results } = await service.listOpenComments(
+        openParams,
+        '2026-09-25',
+        createMockContext(),
+      );
+      expect(results[0]).toMatchObject({
+        docketIds: ['REG-101355-26'],
+        regulationsGovDocketId: 'IRS-2026-0925',
+        regulationsGovDocumentId: 'IRS-2026-0925-0001',
+        commentCount: 41,
+        commentUrl: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+      });
+    });
+
+    it('reads a single document’s comment URL and printed docket numbers', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(irsProposal));
+      const detail = await service.getDocument('2026-16314', undefined, createMockContext());
+      expect(detail).toMatchObject({
+        docketId: 'IRS-2026-0925',
+        docketIds: ['REG-101355-26'],
+        commentUrl: 'http://www.regulations.gov/commenton/IRS-2026-0925-0001',
+      });
+    });
+
+    it('leaves every handle null when the Federal Register lists none', async () => {
+      // A closed period drops comment_url; a document outside Regulations.gov has no block.
+      const bare = { ...irsProposal, comment_url: null, regulations_dot_gov_info: undefined };
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ count: 1, results: [bare] }))
+        .mockResolvedValueOnce(jsonResponse({ count: 1, results: [bare] }))
+        .mockResolvedValueOnce(jsonResponse(bare));
+      const ctx = createMockContext();
+      const nulls = {
+        regulationsGovDocketId: null,
+        regulationsGovDocumentId: null,
+        commentCount: null,
+        commentUrl: null,
+      };
+      const search = await service.search({ perPage: 20, page: 1, order: 'newest' }, ctx);
+      expect(search.results[0]).toMatchObject(nulls);
+      const open = await service.listOpenComments(openParams, '2026-09-25', ctx);
+      expect(open.results[0]).toMatchObject(nulls);
+      const detail = await service.getDocument('2026-16314', undefined, ctx);
+      expect(detail).toMatchObject({ docketId: null, commentUrl: null, commentCount: null });
+    });
+  });
+
+  it('flags the window truncated at the 10,000-item count', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ count: 10_000, results: [] })),
+    );
+    const window = await service.listOpenComments(openParams, '2025-06-13', createMockContext());
+    expect(window.truncated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it('lists a document once when a publication between page requests repeats it', async () => {
@@ -556,11 +862,7 @@ describe('FederalRegisterService', () => {
     );
 
     const ctx = createMockContext();
-    const result = await service.listOpenComments(
-      { ...openParams, includeCommentCounts: true },
-      '2025-06-13',
-      ctx,
-    );
+    const result = await service.listOpenComments(openParams, '2025-06-13', ctx);
     expect(result.results).toHaveLength(1);
     expect(result.results[0]!.documentNumber).toBe('2025-1');
     expect(result.results[0]!.commentCount).toBe(12);
