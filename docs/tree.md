@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-09-25 10:14:51
+Generated on: 2026-09-25 12:26:32
 
 ```text
 federal-regulations-mcp-server/
@@ -154,7 +154,6 @@ federal-regulations-mcp-server/
 │   │   └── tools/
 │   │       └── definitions/
 │   │           ├── browse-cfr.tool.ts
-│   │           ├── cfr-part.ts
 │   │           ├── date-input.ts
 │   │           ├── document-number.ts
 │   │           ├── find-comments.tool.ts
@@ -191,9 +190,14 @@ federal-regulations-mcp-server/
 │   └── index.ts
 ├── tests/
 │   ├── fixtures/
+│   │   ├── ecfr-10-20-part-notes.xml
+│   │   ├── ecfr-10-205-part-notes.xml
+│   │   ├── ecfr-10-622.xml
 │   │   ├── ecfr-14-241-25.xml
+│   │   ├── ecfr-40-141-part-notes.xml
 │   │   ├── ecfr-40-141.61.xml
 │   │   ├── ecfr-search-lead-service-line-t40.json
+│   │   ├── ecfr-structure-14-part-241.json
 │   │   ├── ecfr-structure-40-parts-50-141.json
 │   │   ├── ecfr-structure-42-part-22.json
 │   │   ├── ecfr-structure-7-part-1955.json

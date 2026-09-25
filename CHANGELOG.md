@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.2](changelog/0.5.x/0.5.2.md) — 2026-09-25
+
+eCFR text renders superscripts, subscripts, footnote markers, and diacritics; whole-part reads return the part's heading, Authority, Source, and notes; the cfrCite the server returns reads back as section input; and a mirrored title behind eCFR's latest issue is read live. Existing mirrors need a mirror:refresh.
+
 ## [0.5.1](changelog/0.5.x/0.5.1.md) — 2026-09-25
 
 regulations_search_rules filters by CFR part, printed docket number, and RIN and resolves a CFR source-note cite to its document; Federal Register rows carry keyless Regulations.gov IDs, comment counts, and comment URLs, plus whether the comment period is open.
