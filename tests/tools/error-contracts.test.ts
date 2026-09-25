@@ -662,6 +662,39 @@ describe('not_found reaches the caller', () => {
   });
 });
 
+describe('conflicting_title reaches the caller', () => {
+  it('refuses a cite naming another title on the read tool, before any request', async () => {
+    serveEverything(() => new Response('unexpected', { status: 500 }));
+    const { error, text } = surfaces(
+      await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: '141',
+        section: '21 CFR 141.61',
+      }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('conflicting_title');
+    expect(error.message).toContain('21');
+    expect(error.message).toContain('40');
+    expect(text).toMatch(/Recovery: Set title to the title the cite names/);
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('carries the same reason through the cfr-section resource', async () => {
+    serveEverything(() => new Response('unexpected', { status: 500 }));
+    const ctx = handlerContext(cfrSectionResource);
+    const err = (await Promise.resolve(
+      cfrSectionResource.handler({ title: '40', part: '141', section: '21 CFR 141.61' }, ctx),
+    ).catch((e: unknown) => e)) as McpError;
+
+    expect(err.code).toBe(-32007);
+    expect(err.data?.reason).toBe('conflicting_title');
+    expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/Put the title the cite names/);
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
 describe('regulations_find_comments filter validation never reaches Regulations.gov', () => {
   it('answers an inverted posted-date window with date_range_inverted', async () => {
     serveEverything(() => Response.json({ data: [], meta: { totalElements: 0 } }));

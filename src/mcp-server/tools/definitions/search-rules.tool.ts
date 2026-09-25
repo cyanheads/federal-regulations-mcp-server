@@ -10,13 +10,13 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { normalizePart } from '@/services/ecfr/cite.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import type {
   FrCitationResponse,
   FrSearchParams,
   FrSearchResult,
 } from '@/services/federal-register/types.js';
-import { normalizePart } from './cfr-part.js';
 import { isoDate } from './date-input.js';
 import {
   escapePipes,

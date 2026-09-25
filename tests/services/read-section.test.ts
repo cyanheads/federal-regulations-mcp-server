@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  citedTitle,
   MAX_EXTRA_LOOKUPS,
   sectionCandidates,
   stripCitePrefix,
@@ -30,25 +31,64 @@ describe('stripCitePrefix', () => {
 
   for (const [input, prefix] of stripped) {
     it(`removes "${prefix}" from ${JSON.stringify(input)}`, () => {
-      const out = stripCitePrefix(input);
+      const out = stripCitePrefix(input, 40, '141');
       expect(out.prefix).toBe(prefix);
       expect(out.value).toMatch(/^(141\.61|25)$/);
     });
   }
 
   it('leaves an identifier with no marker untouched', () => {
-    expect(stripCitePrefix('141.61')).toEqual({ value: '141.61' });
-    expect(stripCitePrefix('1-1')).toEqual({ value: '1-1' });
+    expect(stripCitePrefix('141.61', 40, '141')).toEqual({ value: '141.61' });
+    expect(stripCitePrefix('1-1', 40, '141')).toEqual({ value: '1-1' });
   });
 
   it('leaves a word that only starts with "sec" alone', () => {
-    expect(stripCitePrefix('Secretary')).toEqual({ value: 'Secretary' });
-    expect(stripCitePrefix('Sections 1')).toEqual({ value: 'Sections 1' });
+    expect(stripCitePrefix('Secretary', 40, '141')).toEqual({ value: 'Secretary' });
+    expect(stripCitePrefix('Sections 1', 40, '141')).toEqual({ value: 'Sections 1' });
   });
 
   it('keeps a bare marker rather than looking up nothing', () => {
-    expect(stripCitePrefix('§')).toEqual({ value: '§' });
-    expect(stripCitePrefix('Sec. ')).toEqual({ value: 'Sec. ' });
+    expect(stripCitePrefix('§', 40, '141')).toEqual({ value: '§' });
+    expect(stripCitePrefix('Sec. ', 40, '141')).toEqual({ value: 'Sec. ' });
+  });
+});
+
+describe('stripCitePrefix on a full cite (#53)', () => {
+  it.each([
+    ['40 CFR 141.61', 40, '141', '40 CFR', '141.61'],
+    ['40 C.F.R. 141.61', 40, '141', '40 C.F.R.', '141.61'],
+    ['40 CFR § 141.61', 40, '141', '40 CFR §', '141.61'],
+    ['40 CFR 141.61(c)', 40, '141', '40 CFR', '141.61(c)'],
+    ['14 CFR 241 § 25', 14, '241', '14 CFR 241 §', '25'],
+    ['14 CFR 241 §§ 1-1', 14, '241', '14 CFR 241 §§', '1-1'],
+    ['14 CFR § 25', 14, '241', '14 CFR §', '25'],
+  ] as const)('removes the lead of %j', (input, title, part, prefix, value) => {
+    expect(stripCitePrefix(input, title, part)).toEqual({ prefix, value });
+  });
+
+  it('leaves a cite naming another title in place', () => {
+    expect(stripCitePrefix('21 CFR 141.61', 40, '141')).toEqual({ value: '21 CFR 141.61' });
+  });
+
+  it("removes a dotless cite's part only when it is this part", () => {
+    expect(stripCitePrefix('14 CFR 242 § 25', 14, '241')).toEqual({
+      prefix: '14 CFR',
+      value: '242 § 25',
+    });
+  });
+
+  it('keeps a title cite with nothing after it rather than looking up nothing', () => {
+    expect(stripCitePrefix('40 CFR', 40, '141')).toEqual({ value: '40 CFR' });
+    expect(stripCitePrefix('40 CFR ', 40, '141')).toEqual({ value: '40 CFR ' });
+  });
+
+  it('reads a title only from a number followed by CFR', () => {
+    expect(citedTitle('21 CFR 141.61')).toBe(21);
+    expect(citedTitle('40 c.f.r. 141.61')).toBe(40);
+    expect(citedTitle('141.61')).toBeUndefined();
+    expect(citedTitle('25')).toBeUndefined();
+    expect(citedTitle('1-1')).toBeUndefined();
+    expect(citedTitle('40 CFRX 1')).toBeUndefined();
   });
 });
 

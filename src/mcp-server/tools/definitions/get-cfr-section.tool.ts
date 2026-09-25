@@ -2,8 +2,9 @@
  * @fileoverview regulations_get_cfr_section — read the codified text at a CFR
  * location via eCFR, current or as of a past date: one section, a whole part, or
  * one appendix. Mirror row lookup is the primary path for a current single
- * section; historical dates, whole-part fetches, appendix reads, and a cold
- * mirror fall back to the live eCFR versioner. Keyless.
+ * section; historical dates, whole-part fetches, appendix reads, a title the
+ * mirror holds at an older issue than eCFR's latest, and a cold mirror fall back
+ * to the live eCFR versioner. Keyless.
  *
  * An appendix is a location in the same hierarchy as a section, reached the same
  * way and answered in the same shape, so it is an input to this tool rather than
@@ -11,7 +12,8 @@
  * free-form prose, not a letter — which is what regulations_browse_cfr emits.
  *
  * A section cite is resolved the way people write one ("61", "§ 141.61",
- * "141.61(c)") by `readSection`, and every read returns its text as one bounded
+ * "141.61(c)", "40 CFR 141.61") by `readSection`, a part the way `normalizePart`
+ * reads one ("Part 141"), and every read returns its text as one bounded
  * character window, on the same paging contract as regulations_get_document's
  * full text. A date is checked against the title's up-to-date date before any
  * text request goes out.
@@ -20,13 +22,18 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { appendixCite, sectionCite } from '@/services/ecfr/cite.js';
+import {
+  appendixCite,
+  describePartRewrite,
+  normalizePart,
+  sectionCite,
+} from '@/services/ecfr/cite.js';
 import {
   ECFR_EARLIEST_DATE,
   getEcfrService,
   outsideCoverageMessage,
 } from '@/services/ecfr/ecfr-service.js';
-import { readSection } from '@/services/ecfr/read-section.js';
+import { citedTitle, readSection } from '@/services/ecfr/read-section.js';
 import type { EcfrSectionIndexEntry } from '@/services/ecfr/types.js';
 import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS, windowText } from '@/services/text-window.js';
 import { isoDate } from './date-input.js';
@@ -34,7 +41,7 @@ import { isoDate } from './date-input.js';
 export const getCfrSectionTool = tool('regulations_get_cfr_section', {
   title: 'regulations_get_cfr_section',
   description:
-    'Read the codified text at a CFR location via eCFR — current or as of a past date. Answers "what does 40 CFR 50.1 say today?" and "...as of 2019-01-01?". Three locations: title + part + section for one section; title + part alone for the whole part, with an index of its sections and the names of its appendices; title + appendix for one appendix, passing the identifier exactly as regulations_browse_cfr emits it. A section can be written as people cite it — "61", "§ 141.61", or "141.61(c)" in part 141 all read 40 CFR 141.61, and the response names the identifier it read. Text comes back as a window of up to 64,000 characters (max_chars raises it to 200,000) with the total length and, when text remains, the offset to resume from; whole parts run to millions of characters, so page with offset or read a single section. eCFR retains historical versions from 2017 through the title\'s up-to-date date; a date outside that window is rejected with the window named. Current single-section reads are served from a synced local mirror when available; the source is reported.',
+    'Read the codified text at a CFR location via eCFR — current or as of a past date. Answers "what does 40 CFR 50.1 say today?" and "...as of 2019-01-01?". Three locations: title + part + section for one section; title + part alone for the whole part, with its Authority and Source notes, an index of its sections, and the names of its appendices; title + appendix for one appendix, passing the identifier exactly as regulations_browse_cfr emits it. A section can be written as people cite it — "61", "§ 141.61", "141.61(c)", or the full cite "40 CFR 141.61" in part 141 all read 40 CFR 141.61 — and a part as "Part 141"; the response names the identifier it read. Text comes back as a window of up to 64,000 characters (max_chars raises it to 200,000) with the total length and, when text remains, the offset to resume from; whole parts run to millions of characters, so page with offset or read a single section. eCFR retains historical versions from 2017 through the title\'s up-to-date date; a date outside that window is rejected with the window named. Current single-section reads are served from a synced local mirror when it holds the title\'s latest eCFR issue; the source is reported.',
   annotations: { readOnlyHint: true, idempotentHint: true },
   input: z.object({
     title: z
@@ -47,13 +54,13 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .string()
       .optional()
       .describe(
-        'CFR part within the title (e.g. "50"). Parts can be alphanumeric. Required unless appendix is given, where it is optional but recommended: an appendix identifier is unique within a part, not within a title, so without a part eCFR picks one of the matches. Obtain from regulations_browse_cfr or a Federal Register document\'s cfrReferences.',
+        'CFR part within the title (e.g. "50"). Parts can be alphanumeric; a leading "Part" or "Pt." is dropped ("Part 141" reads part 141). Required unless appendix is given, where it is optional but recommended: an appendix identifier is unique within a part, not within a title, so without a part eCFR picks one of the matches. Obtain from regulations_browse_cfr or a Federal Register document\'s cfrReferences.',
       ),
     section: z
       .union([z.literal(''), z.string().describe('Section identifier (e.g. "50.1").')])
       .optional()
       .describe(
-        'Section within the part, normally written part.section as eCFR identifies it ("141.61"). Also accepted: the number alone ("61" in part 141), a leading "§" or "Sec.", and a paragraph cite ("141.61(c)"), which reads the whole section. Identifiers eCFR writes differently are read as given — 14 CFR 241 numbers its sections "25" and "1-1". Omit to fetch the entire part. Cannot be combined with appendix.',
+        'Section within the part, normally written part.section as eCFR identifies it ("141.61"). Also accepted: the number alone ("61" in part 141), a leading "§" or "Sec.", a paragraph cite ("141.61(c)"), which reads the whole section, and the full cite this tool returns as cfrCite ("40 CFR 141.61", "14 CFR 241 § 25"), whose title has to match title. Identifiers eCFR writes differently are read as given — 14 CFR 241 numbers its sections "25" and "1-1". Omit to fetch the entire part. Cannot be combined with appendix.',
       ),
     appendix: z
       .union([
@@ -109,16 +116,40 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .string()
       .nullable()
       .describe('Appendix identifier; null when a section or whole part was fetched.'),
-    heading: z.string().describe('Section, part, or appendix heading.'),
+    heading: z
+      .string()
+      .describe(
+        'Section, part, or appendix heading — for a whole part, the part\'s own ("PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS").',
+      ),
     hierarchyPath: z.string().describe('Human-readable hierarchy path.'),
     date: z.string().describe('The issue/point-in-time date the text reflects (ISO 8601).'),
     source: z
       .enum(['mirror', 'live'])
       .describe('Provenance: the synced mirror, or the live eCFR API.'),
+    authority: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'The part\'s Authority — the statutes it is issued under, without the "Authority:" label; null when the part states none. Present only on a whole-part read. A subpart or subject group that states its own carries it on its sections[] entries; a single-section or appendix read carries no part- or subpart-level notes, so read the whole part for them.',
+      ),
+    sourceNote: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'The part\'s Source note — the Federal Register document it was issued in, without the "Source:" label ("40 FR 59570, Dec. 24, 1975, unless otherwise noted."), which holds for every section with no source citation of its own; null when the part states none. Not to be confused with source, which names the corpus that answered. Present only on a whole-part read; subpart and subject-group Source notes ride on sections[] entries.',
+      ),
+    notes: z
+      .array(z.string().describe('One note, its label dropped.'))
+      .optional()
+      .describe(
+        "The part's editorial, general, and OMB control-number notes, in document order; empty when it has none. Present only on a whole-part read.",
+      ),
     bodyText: z
       .string()
       .describe(
-        'One window of the location\'s text, starting at bodyTextOffset, XML stripped to plain text. A whole part\'s text is each section\'s heading and body in order. Paragraphs, subheadings, editorial notes, tables (one pipe-delimited line per row), figure references ("[Figure: /graphics/…]"), and each section\'s trailing source citation are kept in document order. The source citation is the bracketed Federal Register history a section ends in ("[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]") — to reach the rulemaking that produced this text, pass one of its cites from 1994 on to regulations_search_rules as citation ("81 FR 68276") with the date printed beside it as citation_date ("2016-10-03"). Empty when the offset is at or past the end, or where the location is a placeholder carrying nothing but its heading ("[Reserved]").',
+        'One window of the location\'s text, starting at bodyTextOffset, XML stripped to plain text. A whole part\'s text is each section\'s heading and body in order. Paragraphs, subheadings, editorial notes, tables (one pipe-delimited line per row), figure references ("[Figure: /graphics/…]"), a section\'s own statutory authority and OMB control-number note, and its trailing source citation are kept in document order; part-, subpart-, and subject-group-level Authority and Source are not (see authority, sourceNote, and sections[]). Superscripts read ^x and subscripts _x, braced where the run would otherwise be ambiguous (3 × 10^−8, SO_2, CO_{2}e); a footnote reference or label reads [n]; diacritics and overlines are Unicode combining marks on their base character (x̄, R̅M̅). The source citation is the bracketed Federal Register history a section ends in ("[36 FR 22384, Nov. 25, 1971, as amended at 81 FR 68276, Oct. 3, 2016]") — to reach the rulemaking that produced this text, pass one of its cites from 1994 on to regulations_search_rules as citation ("81 FR 68276") with the date printed beside it as citation_date ("2016-10-03"). Empty when the offset is at or past the end, or where the location is a placeholder carrying nothing but its heading ("[Reserved]").',
       ),
     bodyTextOffset: z.number().describe('Character offset bodyText starts at.'),
     bodyTextLength: z.number().describe("Characters in the location's whole text."),
@@ -139,6 +170,18 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
               .number()
               .describe(
                 "Offset in the whole part's text where this section starts — pass as offset to read from it.",
+              ),
+            authority: z
+              .string()
+              .optional()
+              .describe(
+                "The Authority its subpart or subject group states for this section; absent when the part's authority applies.",
+              ),
+            sourceNote: z
+              .string()
+              .optional()
+              .describe(
+                "The Source note its subpart or subject group states for this section; absent when the part's sourceNote applies.",
               ),
           })
           .describe('One section of the part, without its text.'),
@@ -166,7 +209,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .string()
       .optional()
       .describe(
-        'How a section written another way was resolved, and guidance when the offset is at or past the end of the text.',
+        'How a part or section written another way was resolved, and guidance when the offset is at or past the end of the text.',
       ),
   },
   errors: [
@@ -190,6 +233,13 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       recovery: 'Send section or appendix, not both; make two calls to read both.',
     },
     {
+      reason: 'conflicting_title',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'section is written as a full cite ("21 CFR 141.61") naming a different title than title.',
+      recovery:
+        'Set title to the title the cite names, or pass the section without its title prefix ("141.61").',
+    },
+    {
       reason: 'date_out_of_range',
       code: JsonRpcErrorCode.ValidationError,
       when: "The requested date precedes eCFR historical coverage (2017-01-01) or is past the title's up-to-date date.",
@@ -206,7 +256,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
 
   async handler(input, ctx) {
     const service = getEcfrService();
-    const part = input.part?.trim() || undefined;
+    const part = normalizePart(input.part);
     const section = input.section?.trim() || undefined;
     const appendix = input.appendix?.trim() || undefined;
     const requestedDate = input.date?.trim() || undefined;
@@ -217,6 +267,14 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         'conflicting_target',
         `A section (${section}) and an appendix (${appendix}) name two different locations.`,
         { ...ctx.recoveryFor('conflicting_target') },
+      );
+    }
+    const cited = section ? citedTitle(section) : undefined;
+    if (cited !== undefined && cited !== input.title) {
+      throw ctx.fail(
+        'conflicting_title',
+        `Section "${section}" cites title ${cited}, but title is ${input.title}.`,
+        { ...ctx.recoveryFor('conflicting_title') },
       );
     }
     if (requestedDate && requestedDate < ECFR_EARLIEST_DATE) {
@@ -243,6 +301,8 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
     }
 
     const notices: string[] = [];
+    const partRewrite = describePartRewrite(input.part, part);
+    if (partRewrite) notices.push(partRewrite);
     const cutWindow = (text: string) => {
       const cut = windowText(text, paging);
       if (cut.text === '' && cut.length > 0) {
@@ -367,6 +427,9 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       hierarchyPath,
       date: result.date,
       source: 'live' as const,
+      authority: result.authority ?? null,
+      sourceNote: result.sourceNote ?? null,
+      notes: result.notes ?? [],
       ...bodyFields(cut),
       sections: sectionsInWindow(result.sections ?? [], cut.offset, cut.offset + cut.text.length),
       ...(result.appendices ? { appendices: result.appendices } : {}),
@@ -381,6 +444,15 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
     const whole = section || appendix ? '' : ' (whole part)';
     lines.push(`Title ${result.title} · Part ${result.part ?? 'n/a'}${section}${appendix}${whole}`);
     lines.push(`_${result.hierarchyPath}_ · as of ${result.date} · source: ${result.source}`);
+    // A whole part's own notes: the three fields ride together, and only there.
+    if (result.notes) {
+      lines.push(`Authority: ${result.authority ?? 'none stated for the part'}`);
+      lines.push(`Source: ${result.sourceNote ?? 'none stated for the part'}`);
+      if (result.notes.length > 0) {
+        lines.push('Notes:');
+        for (const note of result.notes) lines.push(`- ${note}`);
+      }
+    }
 
     const start = result.bodyTextOffset;
     const end = start + result.bodyText.length;
@@ -403,7 +475,11 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       );
       if (result.sections.length === 0) lines.push('- none');
       for (const s of result.sections) {
-        lines.push(`- \`${s.section}\` · ${s.cfrCite} · offset ${s.offset} — ${s.heading}`);
+        const authority = s.authority ? ` · Authority: ${s.authority}` : '';
+        const source = s.sourceNote ? ` · Source: ${s.sourceNote}` : '';
+        lines.push(
+          `- \`${s.section}\` · ${s.cfrCite} · offset ${s.offset} — ${s.heading}${authority}${source}`,
+        );
       }
     }
     if (result.appendices) {

@@ -1,0 +1,777 @@
+{
+  "identifier": "14",
+  "label": "Title 14—Aeronautics and Space",
+  "label_level": "Title 14",
+  "label_description": "Aeronautics and Space",
+  "reserved": false,
+  "type": "title",
+  "size": 16962686,
+  "children": [
+    {
+      "identifier": "II",
+      "label": " Chapter II—Office of the Secretary, Department of Transportation (Aviation Proceedings)",
+      "label_level": " Chapter II",
+      "label_description": "Office of the Secretary, Department of Transportation (Aviation Proceedings)",
+      "reserved": false,
+      "type": "chapter",
+      "size": 2442363,
+      "children": [
+        {
+          "identifier": "A",
+          "label": "Subchapter A—Economic Regulations",
+          "label_level": "Subchapter A",
+          "label_description": "Economic Regulations",
+          "reserved": false,
+          "type": "subchapter",
+          "size": 1387074,
+          "children": [
+            {
+              "identifier": "241",
+              "label": "Part 241—Uniform System of Accounts and Reports for Large Certificated Air Carriers",
+              "label_level": "Part 241",
+              "label_description": "Uniform System of Accounts and Reports for Large Certificated Air Carriers",
+              "reserved": false,
+              "type": "part",
+              "volumes": ["4"],
+              "size": 493460,
+              "children": [
+                {
+                  "identifier": "01",
+                  "label": "Section 01 [Reserved]",
+                  "label_level": "Section 01",
+                  "label_description": "Section 01 [Reserved]",
+                  "reserved": true,
+                  "type": "section",
+                  "volumes": ["4"],
+                  "received_on": "2019-05-17T22:00:04-0400",
+                  "size": 264
+                },
+                {
+                  "identifier": "02",
+                  "label": "Section 02 [Reserved]",
+                  "label_level": "Section 02",
+                  "label_description": "Section 02 [Reserved]",
+                  "reserved": true,
+                  "type": "section",
+                  "volumes": ["4"],
+                  "received_on": "2017-01-07T00:00:00-0500",
+                  "size": 264
+                },
+                {
+                  "identifier": "03",
+                  "label": "Section 03 Definitions for Purposes of This System of Accounts and Reports",
+                  "label_level": "Section 03",
+                  "label_description": "Definitions for Purposes of This System of Accounts and Reports",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["4"],
+                  "received_on": "2023-04-03T21:50:06-0400",
+                  "size": 44665
+                },
+                {
+                  "identifier": "04",
+                  "label": "Section 04 Air Carrier Groupings",
+                  "label_level": "Section 04",
+                  "label_description": "Air Carrier Groupings",
+                  "reserved": false,
+                  "type": "section",
+                  "volumes": ["4"],
+                  "received_on": "2024-06-10T18:40:24-0400",
+                  "size": 2693
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFRa1e3d3d65a1a610",
+                  "label": "General Accounting Provisions",
+                  "label_level": "General Accounting Provisions",
+                  "label_description": "General Accounting Provisions",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 24455,
+                  "children": [
+                    {
+                      "identifier": "1",
+                      "label": "Section 1 Introduction to System of Accounts and Reports",
+                      "label_level": "Section 1",
+                      "label_description": "Introduction to System of Accounts and Reports",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 295
+                    },
+                    {
+                      "identifier": "1-1",
+                      "label": "Sec. 1-1 Applicability of system of accounts and reports.",
+                      "label_level": "Sec. 1-1",
+                      "label_description": "Applicability of system of accounts and reports.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 784
+                    },
+                    {
+                      "identifier": "1-2",
+                      "label": "Sec. 1-2 Waivers from this system of accounts and reports.",
+                      "label_level": "Sec. 1-2",
+                      "label_description": "Waivers from this system of accounts and reports.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1252
+                    },
+                    {
+                      "identifier": "1-3",
+                      "label": "Sec. 1-3 General description of system of accounts and reports.",
+                      "label_level": "Sec. 1-3",
+                      "label_description": "General description of system of accounts and reports.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2964
+                    },
+                    {
+                      "identifier": "1-4",
+                      "label": "Sec. 1-4 System of accounts coding.",
+                      "label_level": "Sec. 1-4",
+                      "label_description": "System of accounts coding.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1557
+                    },
+                    {
+                      "identifier": "1-5",
+                      "label": "Sec. 1-5 Records.",
+                      "label_level": "Sec. 1-5",
+                      "label_description": "Records.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1962
+                    },
+                    {
+                      "identifier": "1-6",
+                      "label": "Sec. 1-6 Accounting entities.",
+                      "label_level": "Sec. 1-6",
+                      "label_description": "Accounting entities.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2507
+                    },
+                    {
+                      "identifier": "1-7",
+                      "label": "Sec. 1-7 Interpretation of accounts.",
+                      "label_level": "Sec. 1-7",
+                      "label_description": "Interpretation of accounts.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 699
+                    },
+                    {
+                      "identifier": "1-8",
+                      "label": "Sec. 1-8 Address for reports and correspondence.",
+                      "label_level": "Sec. 1-8",
+                      "label_description": "Address for reports and correspondence.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 619
+                    },
+                    {
+                      "identifier": "2",
+                      "label": "Section 2 General Accounting Policies",
+                      "label_level": "Section 2",
+                      "label_description": "General Accounting Policies",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 276
+                    },
+                    {
+                      "identifier": "2-1",
+                      "label": "Sec. 2-1 Generally accepted accounting principles.",
+                      "label_level": "Sec. 2-1",
+                      "label_description": "Generally accepted accounting principles.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1882
+                    },
+                    {
+                      "identifier": "2-2",
+                      "label": "Sec. 2-2 Basis of allocation between entities.",
+                      "label_level": "Sec. 2-2",
+                      "label_description": "Basis of allocation between entities.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2740
+                    },
+                    {
+                      "identifier": "2-3",
+                      "label": "Sec. 2-3 Distribution of revenues and expenses within entities.",
+                      "label_level": "Sec. 2-3",
+                      "label_description": "Distribution of revenues and expenses within entities.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1468
+                    },
+                    {
+                      "identifier": "2-4",
+                      "label": "Sec. 2-4 Accounting period.",
+                      "label_level": "Sec. 2-4",
+                      "label_description": "Accounting period.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1815
+                    },
+                    {
+                      "identifier": "2-5",
+                      "label": "Sec. 2-5 Revenue and accounting practices.",
+                      "label_level": "Sec. 2-5",
+                      "label_description": "Revenue and accounting practices.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 3635
+                    }
+                  ],
+                  "descendant_range": "1 – 2-5"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFR1d656ca66112169",
+                  "label": "Balance Sheet Classifications",
+                  "label_level": "Balance Sheet Classifications",
+                  "label_description": "Balance Sheet Classifications",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 66210,
+                  "children": [
+                    {
+                      "identifier": "3",
+                      "label": "Section 3 Chart of Balance Sheet Accounts",
+                      "label_level": "Section 3",
+                      "label_description": "Chart of Balance Sheet Accounts",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 16052
+                    },
+                    {
+                      "identifier": "4",
+                      "label": "Section 4 General",
+                      "label_level": "Section 4",
+                      "label_description": "General",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 892
+                    },
+                    {
+                      "identifier": "5",
+                      "label": "Section 5 [Reserved]",
+                      "label_level": "Section 5",
+                      "label_description": "Section 5 [Reserved]",
+                      "reserved": true,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 259
+                    },
+                    {
+                      "identifier": "6",
+                      "label": "Section 6 Objective Classification of Balance Sheet Elements",
+                      "label_level": "Section 6",
+                      "label_description": "Objective Classification of Balance Sheet Elements",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 49007
+                    }
+                  ],
+                  "descendant_range": "3 – 6"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFRd1647f2613d1290",
+                  "label": "Profit and Loss Classification",
+                  "label_level": "Profit and Loss Classification",
+                  "label_description": "Profit and Loss Classification",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 162793,
+                  "children": [
+                    {
+                      "identifier": "7",
+                      "label": "Section 7 Chart of Profit and Loss Accounts",
+                      "label_level": "Section 7",
+                      "label_description": "Chart of Profit and Loss Accounts",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 51373
+                    },
+                    {
+                      "identifier": "8",
+                      "label": "Section 8 General",
+                      "label_level": "Section 8",
+                      "label_description": "General",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 4419
+                    },
+                    {
+                      "identifier": "9",
+                      "label": "Section 9 Functional Classification—Operating Revenues",
+                      "label_level": "Section 9",
+                      "label_description": "Functional Classification—Operating Revenues",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 2404
+                    },
+                    {
+                      "identifier": "10",
+                      "label": "Section 10 Functional Classification—Operating Expenses of Group I Air Carriers",
+                      "label_level": "Section 10",
+                      "label_description": "Functional Classification—Operating Expenses of Group I Air Carriers",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 10032
+                    },
+                    {
+                      "identifier": "11",
+                      "label": "Section 11 Functional Classification—Operating Expenses of Group II and Group III Air Carriers",
+                      "label_level": "Section 11",
+                      "label_description": "Functional Classification—Operating Expenses of Group II and Group III Air Carriers",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 18065
+                    },
+                    {
+                      "identifier": "12",
+                      "label": "Section 12 Objective Classification—Operating Revenues and Expenses",
+                      "label_level": "Section 12",
+                      "label_description": "Objective Classification—Operating Revenues and Expenses",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 57908
+                    },
+                    {
+                      "identifier": "14",
+                      "label": "Section 14 Objective Classification—Nonoperating Income and Expense",
+                      "label_level": "Section 14",
+                      "label_description": "Objective Classification—Nonoperating Income and Expense",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 11070
+                    },
+                    {
+                      "identifier": "15",
+                      "label": "Section 15 Objective Classification—Income Taxes for Current Period",
+                      "label_level": "Section 15",
+                      "label_description": "Objective Classification—Income Taxes for Current Period",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 3958
+                    },
+                    {
+                      "identifier": "16",
+                      "label": "Section 16 Objective Classification—Discontinued Operations",
+                      "label_level": "Section 16",
+                      "label_description": "Objective Classification—Discontinued Operations",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 1343
+                    },
+                    {
+                      "identifier": "17",
+                      "label": "Section 17 Objective Classification—Extraordinary Items",
+                      "label_level": "Section 17",
+                      "label_description": "Objective Classification—Extraordinary Items",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 1337
+                    },
+                    {
+                      "identifier": "18",
+                      "label": "Section 18 Objective Classification—Cumulative Effect of Changes in Accounting Principles",
+                      "label_level": "Section 18",
+                      "label_description": "Objective Classification—Cumulative Effect of Changes in Accounting Principles",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 884
+                    }
+                  ],
+                  "descendant_range": "7 – 18"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFRb6240d0cae7da08",
+                  "label": "Operating Statistics Classifications",
+                  "label_level": "Operating Statistics Classifications",
+                  "label_description": "Operating Statistics Classifications",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 110936,
+                  "children": [
+                    {
+                      "identifier": "19",
+                      "label": "Section 19 Uniform Classification of Operating Statistics",
+                      "label_level": "Section 19",
+                      "label_description": "Uniform Classification of Operating Statistics",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 300
+                    },
+                    {
+                      "identifier": "19-1",
+                      "label": "Sec. 19-1 Applicability.",
+                      "label_level": "Sec. 19-1",
+                      "label_description": "Applicability.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 1599
+                    },
+                    {
+                      "identifier": "19-2",
+                      "label": "Sec. 19-2 Maintenance of data.",
+                      "label_level": "Sec. 19-2",
+                      "label_description": "Maintenance of data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 2437
+                    },
+                    {
+                      "identifier": "19-3",
+                      "label": "Sec. 19-3 Accessibility and transmittal of data.",
+                      "label_level": "Sec. 19-3",
+                      "label_description": "Accessibility and transmittal of data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2017-01-07T00:00:00-0500",
+                      "size": 966
+                    },
+                    {
+                      "identifier": "19-4",
+                      "label": "Sec. 19-4 Service classes.",
+                      "label_level": "Sec. 19-4",
+                      "label_description": "Service classes.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 2391
+                    },
+                    {
+                      "identifier": "19-5",
+                      "label": "Sec. 19-5 Air transport traffic and capacity elements.",
+                      "label_level": "Sec. 19-5",
+                      "label_description": "Air transport traffic and capacity elements.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 19242
+                    },
+                    {
+                      "identifier": "19-6",
+                      "label": "Sec. 19-6 Public disclosure of traffic data.",
+                      "label_level": "Sec. 19-6",
+                      "label_description": "Public disclosure of traffic data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 2919
+                    },
+                    {
+                      "identifier": "19-7",
+                      "label": "Sec. 19-7 Passenger origin-destination survey.",
+                      "label_level": "Sec. 19-7",
+                      "label_description": "Passenger origin-destination survey.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 46008
+                    },
+                    {
+                      "identifier": "19-8",
+                      "label": "Sec. 19-8 Passenger Origin—Destination",
+                      "label_level": "Sec. 19-8",
+                      "label_description": "Passenger Origin—Destination",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 291
+                    },
+                    {
+                      "identifier": "19-8.1",
+                      "label": "19-8.1 Purpose.",
+                      "label_level": "19-8.1",
+                      "label_description": "Purpose.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 587
+                    },
+                    {
+                      "identifier": "19-8.2",
+                      "label": "19-8.2 Definitions.",
+                      "label_level": "19-8.2",
+                      "label_description": "Definitions.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 12052
+                    },
+                    {
+                      "identifier": "19-8.3",
+                      "label": "§ 19-8.3 Applicability.",
+                      "label_level": "§ 19-8.3",
+                      "label_description": "Applicability.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 1941
+                    },
+                    {
+                      "identifier": "19-8.4",
+                      "label": "§ 19-8.4 Reporting of O&amp;D data.",
+                      "label_level": "§ 19-8.4",
+                      "label_description": "Reporting of O&amp;D data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 7440
+                    },
+                    {
+                      "identifier": "19-8.5",
+                      "label": "§ 19-8.5 Form of reports.",
+                      "label_level": "§ 19-8.5",
+                      "label_description": "Form of reports.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 1158
+                    },
+                    {
+                      "identifier": "19-8.6",
+                      "label": "§ 19-8.6 Dissemination.",
+                      "label_level": "§ 19-8.6",
+                      "label_description": "Dissemination.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 2038
+                    },
+                    {
+                      "identifier": "19-8.7",
+                      "label": "§ 19-8.7 Submission of data.",
+                      "label_level": "§ 19-8.7",
+                      "label_description": "Submission of data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 5824
+                    },
+                    {
+                      "identifier": "19-8.8",
+                      "label": "§ 19-8.8 Editing data.",
+                      "label_level": "§ 19-8.8",
+                      "label_description": "Editing data.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 1600
+                    },
+                    {
+                      "identifier": "19-8.9",
+                      "label": "§ 19-8.9 Control of sample selection and data recording.",
+                      "label_level": "§ 19-8.9",
+                      "label_description": "Control of sample selection and data recording.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 1555
+                    },
+                    {
+                      "identifier": "19-8.10",
+                      "label": "§ 19-8.10 Staff review.",
+                      "label_level": "§ 19-8.10",
+                      "label_description": "Staff review.",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-03-03T20:40:06-0500",
+                      "size": 588
+                    }
+                  ],
+                  "descendant_range": "19 – 19-8.10"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFR8d5b7151b2eb8bc",
+                  "label": "General Reporting Provisions—Large Certificated Air Carriers",
+                  "label_level": "General Reporting Provisions—Large Certificated Air Carriers",
+                  "label_description": "General Reporting Provisions—Large Certificated Air Carriers",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 26012,
+                  "children": [
+                    {
+                      "identifier": "21",
+                      "label": "Section 21 Introduction to System of Reports",
+                      "label_level": "Section 21",
+                      "label_description": "Introduction to System of Reports",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2019-05-17T22:00:04-0400",
+                      "size": 6041
+                    },
+                    {
+                      "identifier": "22",
+                      "label": "Section 22 General Reporting Instructions",
+                      "label_level": "Section 22",
+                      "label_description": "General Reporting Instructions",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2024-06-10T18:40:24-0400",
+                      "size": 19971
+                    }
+                  ],
+                  "descendant_range": "21 – 22"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFR0cc98e631c4eca2",
+                  "label": "Financial Reporting Requirements",
+                  "label_level": "Financial Reporting Requirements",
+                  "label_description": "Financial Reporting Requirements",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 50873,
+                  "children": [
+                    {
+                      "identifier": "23",
+                      "label": "Section 23 Certification and Balance Sheet Elements",
+                      "label_level": "Section 23",
+                      "label_description": "Certification and Balance Sheet Elements",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 21162
+                    },
+                    {
+                      "identifier": "24",
+                      "label": "Section 24 Profit and Loss Elements",
+                      "label_level": "Section 24",
+                      "label_description": "Profit and Loss Elements",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 29711
+                    }
+                  ],
+                  "descendant_range": "23 – 24"
+                },
+                {
+                  "generated_id": true,
+                  "identifier": "ECFR5092393aaea23ae",
+                  "label": "Traffic Reporting Requirements",
+                  "label_level": "Traffic Reporting Requirements",
+                  "label_description": "Traffic Reporting Requirements",
+                  "reserved": false,
+                  "type": "subject_group",
+                  "size": 4295,
+                  "children": [
+                    {
+                      "identifier": "25",
+                      "label": "Section 25 Traffic and Capacity Elements",
+                      "label_level": "Section 25",
+                      "label_description": "Traffic and Capacity Elements",
+                      "reserved": false,
+                      "type": "section",
+                      "volumes": ["4"],
+                      "received_on": "2023-04-03T21:50:06-0400",
+                      "size": 4295
+                    }
+                  ],
+                  "descendant_range": "25"
+                }
+              ],
+              "descendant_range": "01 – 25"
+            }
+          ],
+          "descendant_range": "200 – 298"
+        }
+      ],
+      "descendant_range": "200 – 399"
+    }
+  ]
+}

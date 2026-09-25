@@ -25,11 +25,12 @@ import { handlerContext } from '../helpers/handler-context.js';
 
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorGetSection = vi.hoisted(() => vi.fn());
+const mirrorScope = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
   mirrorReady,
   mirrorGetSection,
-  mirrorScope: () => Promise.resolve(null),
+  mirrorScope,
   mirrorSearch: () => Promise.resolve({ totalCount: 0, results: [] }),
 }));
 
@@ -72,6 +73,13 @@ const TITLES = {
       number: 1,
       name: 'General Provisions',
       latest_issue_date: '2026-08-10',
+      up_to_date_as_of: '2026-09-18',
+      reserved: false,
+    },
+    {
+      number: 10,
+      name: 'Energy',
+      latest_issue_date: '2026-09-15',
       up_to_date_as_of: '2026-09-18',
       reserved: false,
     },
@@ -183,7 +191,19 @@ beforeEach(() => {
   initEcfrService(stub, stub);
   mirrorReady.mockReset().mockResolvedValue(false);
   mirrorGetSection.mockReset().mockResolvedValue(null);
+  // When a test makes the mirror ready, it holds title 40 at its latest issue.
+  mirrorScope.mockReset().mockResolvedValue(mirrorHolding({ 40: '2026-09-17' }));
 });
+
+/** A mirror scope holding each title at the issue date given for it. */
+function mirrorHolding(issueDates: Record<number, string>) {
+  const titles = Object.keys(issueDates).map(Number);
+  return {
+    complete: false,
+    titles,
+    issueDates: new Map(titles.map((t) => [t, issueDates[t]!])),
+  };
+}
 
 afterEach(() => {
   http.reset();
@@ -213,13 +233,15 @@ describe('characterization: reads that already resolve', () => {
       date: '2026-09-17',
       source: 'live',
     });
-    // Pinned against the text this read returned before bodyText was windowed:
-    // a section under the window has to come back byte-identical.
+    // Pinned to the extractor's full text for this section: a section under the
+    // window has to come back byte-identical, with its exponents and table
+    // markers in the `^` notation (`3 × 10^−8`, `1 (unitless) ^1`).
     const body = out.bodyText as string;
     expect(body.length).toBe(8_956);
     expect(createHash('sha256').update(body).digest('hex')).toBe(
-      '7f3258b440e1a8357aa1edc888edc6ba0c0f384b71a1d5b1661a12571c0af3dc',
+      '8b95ac9a391a695bab0ee6fce7b7b203c4af39625ca9aac6702d94347fc6099e',
     );
+    expect(body).toContain('3 × 10^−8');
     expect(body.startsWith('(a) The following maximum contaminant levels')).toBe(true);
     expect(fullRequests()).toEqual([
       { date: '2026-09-17', title: '40', part: '141', section: '141.61', appendix: null },
@@ -315,6 +337,119 @@ function sectionXml(section: string, heading: string, body: string): string {
 function notice(out: Record<string, unknown>): string {
   return String(out.notice ?? '');
 }
+
+/** A verbatim cut of a real whole-part versioner response, from `tests/fixtures/`. */
+function partFixture(name: string): string {
+  return readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf-8');
+}
+
+describe('part heading, Authority, Source, and notes (#52)', () => {
+  it('returns them on a whole-part read, on both surfaces, above the body', async () => {
+    serveVersioner((req) =>
+      req.part === '141' && !req.section ? xml(partFixture('ecfr-40-141-part-notes.xml')) : null,
+    );
+    const result = await runToolContract(getCfrSectionTool, { title: 40, part: '141' });
+    const out = structured(result);
+
+    expect(out.heading).toBe('PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS');
+    expect(out.authority).toMatch(/^42 U\.S\.C\. 300f, 300g-1/);
+    expect(out.sourceNote).toBe('40 FR 59570, Dec. 24, 1975, unless otherwise noted.');
+    expect(out.notes).toHaveLength(2);
+    // `source` still names the corpus that answered, not the Source note.
+    expect(out.source).toBe('live');
+
+    const rendered = text(result);
+    expect(rendered).toContain(
+      '# 40 CFR 141 — PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS',
+    );
+    const body = rendered.indexOf('\n---\n');
+    for (const line of [
+      'Authority: 42 U.S.C. 300f, 300g-1',
+      'Source: 40 FR 59570, Dec. 24, 1975, unless otherwise noted.',
+      '- Nomenclature changes to part 141 appear at 69 FR 18803, Apr. 9, 2004.',
+      '- For community water systems serving 75,000 or more persons',
+    ]) {
+      const at = rendered.indexOf(line);
+      expect(at).toBeGreaterThan(-1);
+      expect(at).toBeLessThan(body);
+    }
+  });
+
+  it('says so when the part states no Authority or Source (10 CFR 622)', async () => {
+    serveVersioner(() => xml(partFixture('ecfr-10-622.xml')));
+    const result = await runToolContract(getCfrSectionTool, { title: 10, part: '622' });
+    expect(structured(result)).toMatchObject({ authority: null, sourceNote: null, notes: [] });
+    expect(text(result)).toContain('Authority: none stated for the part');
+    expect(text(result)).toContain('Source: none stated for the part');
+  });
+
+  it('puts a subpart’s Source on the section entries it governs (10 CFR 20)', async () => {
+    serveVersioner(() => xml(partFixture('ecfr-10-20-part-notes.xml')));
+    const result = await runToolContract(getCfrSectionTool, { title: 10, part: '20' });
+    const out = structured(result) as { sourceNote: unknown; sections: Record<string, unknown>[] };
+
+    expect(out.sourceNote).toBeNull();
+    expect(out.sections.map((s) => [s.section, s.sourceNote, s.authority])).toEqual([
+      ['20.1001', '56 FR 23391, May 21, 1991, unless otherwise noted.', undefined],
+      ['20.1002', '56 FR 23391, May 21, 1991, unless otherwise noted.', undefined],
+      ['20.1101', '56 FR 23396, May 21, 1991, unless otherwise noted.', undefined],
+    ]);
+    expect(text(result)).toContain(
+      '- `20.1001` · 10 CFR 20.1001 · offset 0 — § 20.1001 Purpose. · Source: 56 FR 23391, May 21, 1991, unless otherwise noted.',
+    );
+  });
+
+  it('carries a subject group’s Authority on its entries, beside a later part-level Source (10 CFR 205)', async () => {
+    serveVersioner(() => xml(partFixture('ecfr-10-205-part-notes.xml')));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 10, part: '205' }),
+    ) as {
+      notes: string[];
+      sections: Record<string, unknown>[];
+    };
+    const byId = new Map(out.sections.map((s) => [s.section, s]));
+    expect(byId.get('205.300')?.sourceNote).toMatch(/^45 FR 71560, Oct\. 28, 1980/);
+    expect(byId.get('205.350')?.authority).toMatch(/^Department of Energy Organization Act/);
+    expect(out.notes).toEqual([
+      '(Approved by the Office of Management and Budget under Control No. 1901-0245)',
+    ]);
+  });
+
+  it('returns none of the part fields on a single-section read', async () => {
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const result = await runToolContract(getCfrSectionTool, {
+      title: 40,
+      part: '141',
+      section: '141.61',
+    });
+    const out = structured(result);
+    for (const key of ['authority', 'sourceNote', 'notes', 'sections']) {
+      expect(out).not.toHaveProperty(key);
+    }
+    expect(text(result)).not.toMatch(/^(Authority|Source):/m);
+  });
+
+  it('returns none of the part fields on an appendix read', async () => {
+    serveVersioner((req) => (req.appendix ? xml(APPENDIX_XML) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, appendix: 'Appendix A-1 to Part 50' }),
+    );
+    for (const key of ['authority', 'sourceNote', 'notes']) expect(out).not.toHaveProperty(key);
+  });
+
+  it('keeps the part fields on a window past the end', async () => {
+    serveVersioner(() => xml(partFixture('ecfr-10-622.xml')));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 10, part: '622', offset: 1_000_000 }),
+    );
+    expect(out).toMatchObject({
+      bodyText: '',
+      sections: [],
+      authority: null,
+      heading: 'PART 622—CONTRACTUAL PROVISIONS',
+    });
+  });
+});
 
 describe('a section cite written the way people write it (#22)', () => {
   const cases = [
@@ -539,6 +674,366 @@ describe('a section cite written the way people write it (#22)', () => {
     await expect(cfrSectionResource.handler(params, ctx)).rejects.toMatchObject({
       data: { reason: 'not_found' },
     });
+  });
+});
+
+describe('characterization: the notices inputs that resolve today carry', () => {
+  it.each([
+    { section: '141.61', part: '141', resolved: '141.61', notice: undefined },
+    {
+      section: '61',
+      part: '141',
+      resolved: '141.61',
+      notice:
+        'Section "61" was read as 141.61: no section in part 141 is numbered without its part, so it was joined to it.',
+    },
+    {
+      section: '§ 141.61',
+      part: '141',
+      resolved: '141.61',
+      notice: 'Section "§ 141.61" was read as 141.61: removed the leading "§".',
+    },
+  ])(
+    'reads $section in part $part as $resolved with its notice',
+    async ({ section, part, resolved, notice }) => {
+      serveVersioner((req) =>
+        req.section === resolved
+          ? xml(sectionXml(resolved, `§ ${resolved} Heading.`, 'Text.'))
+          : null,
+      );
+      const out = structured(
+        await runToolContract(getCfrSectionTool, { title: 40, part, section }),
+      );
+
+      expect(out.section).toBe(resolved);
+      expect(out.notice).toBe(notice);
+    },
+  );
+
+  it('reads 14 CFR 241 "25" with no notice', async () => {
+    serveVersioner((req) => (req.section === '25' ? xml(XML_241_25) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 14, part: '241', section: '25' }),
+    );
+
+    expect(out.section).toBe('25');
+    expect(out.notice).toBeUndefined();
+  });
+});
+
+describe('a full cite or a spelled-out part reads back (#53)', () => {
+  /** Answer the one section `resolved` in `part`, and nothing else. */
+  const serveOne = (part: string, resolved: string) =>
+    serveVersioner((req) =>
+      req.part === part && req.section === resolved
+        ? xml(sectionXml(resolved, `§ ${resolved} Heading.`, 'Section text.'))
+        : null,
+    );
+
+  it('strips "40 CFR " before the first lookup, and says so', async () => {
+    serveOne('141', '141.61');
+    const result = await runToolContract(getCfrSectionTool, {
+      title: 40,
+      part: '141',
+      section: '40 CFR 141.61',
+    });
+    const out = structured(result);
+
+    expect(out).toMatchObject({ section: '141.61', cfrCite: '40 CFR 141.61' });
+    expect(notice(out)).toBe(
+      'Section "40 CFR 141.61" was read as 141.61: removed the leading "40 CFR".',
+    );
+    expect(text(result)).toContain(notice(out));
+    // Stripped before the first lookup: one request, never the cite itself.
+    expect(fullRequests().map((r) => r.section)).toEqual(['141.61']);
+  });
+
+  it('reads a spelled-out part as the part, and says so', async () => {
+    serveOne('141', '141.61');
+    const result = await runToolContract(getCfrSectionTool, {
+      title: 40,
+      part: 'Part 141',
+      section: '141.61',
+    });
+    const out = structured(result);
+
+    expect(out).toMatchObject({ part: '141', section: '141.61', cfrCite: '40 CFR 141.61' });
+    expect(notice(out)).toBe('Part "Part 141" was read as 141.');
+    expect(text(result)).toContain(notice(out));
+    expect(fullRequests().map((r) => r.part)).toEqual(['141']);
+  });
+
+  it('reads back the dotless cite this tool returns (14 CFR 241 § 25)', async () => {
+    serveVersioner((req) => (req.part === '241' && req.section === '25' ? xml(XML_241_25) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, {
+        title: 14,
+        part: '241',
+        section: '14 CFR 241 § 25',
+      }),
+    );
+
+    expect(out).toMatchObject({ section: '25', cfrCite: '14 CFR 241 § 25' });
+    expect(notice(out)).toBe(
+      'Section "14 CFR 241 § 25" was read as 25: removed the leading "14 CFR 241 §".',
+    );
+    expect(fullRequests().map((r) => r.section)).toEqual(['25']);
+  });
+
+  it.each([
+    { section: '40 C.F.R. 141.61', lead: '40 C.F.R.' },
+    { section: '40 CFR § 141.61', lead: '40 CFR §' },
+    { section: '40 cfr 141.61', lead: '40 cfr' },
+  ])('reads $section as 141.61', async ({ section, lead }) => {
+    serveOne('141', '141.61');
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section }),
+    );
+
+    expect(out.section).toBe('141.61');
+    expect(notice(out)).toBe(
+      `Section "${section}" was read as 141.61: removed the leading "${lead}".`,
+    );
+    expect(fullRequests().map((r) => r.section)).toEqual(['141.61']);
+  });
+
+  it('reads "40 CFR 141.61(c)" as 141.61, naming both rewrites', async () => {
+    serveOne('141', '141.61');
+    const out = structured(
+      await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: '141',
+        section: '40 CFR 141.61(c)',
+      }),
+    );
+
+    expect(out.section).toBe('141.61');
+    expect(notice(out)).toMatch(/removed the leading "40 CFR"/);
+    expect(notice(out)).toMatch(/dropped the paragraph designator "\(c\)"/);
+    expect(fullRequests().map((r) => r.section)).toEqual(['141.61(c)', '141.61']);
+  });
+
+  it('carries the part rewrite and the section rewrite together in one notice', async () => {
+    serveOne('141', '141.61');
+    const out = structured(
+      await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: 'pt. 141',
+        section: '40 CFR 141.61',
+      }),
+    );
+
+    expect(notice(out)).toBe(
+      'Part "pt. 141" was read as 141. Section "40 CFR 141.61" was read as 141.61: removed the leading "40 CFR".',
+    );
+  });
+
+  it('refuses a cite naming another title as conflicting_title, before any request', async () => {
+    serveOne('141', '141.61');
+    for (const date of [undefined, '2026-09-01']) {
+      const result = await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: '141',
+        section: '21 CFR 141.61',
+        ...(date && { date }),
+      });
+      const error = failure(result);
+
+      expect(error.code).toBe(-32007);
+      expect(error.data?.reason).toBe('conflicting_title');
+      expect(error.message).toBe('Section "21 CFR 141.61" cites title 21, but title is 40.');
+      expect(text(result)).toMatch(/^Recovery: .+$/m);
+    }
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('reads a whole part named "Part 141"', async () => {
+    serveVersioner((req) =>
+      req.part === '141' && req.section === null
+        ? xml(partFixture('ecfr-40-141-part-notes.xml'))
+        : null,
+    );
+    const result = await runToolContract(getCfrSectionTool, { title: 40, part: 'Part 141' });
+    const out = structured(result);
+
+    expect(out).toMatchObject({ part: '141', section: null, cfrCite: '40 CFR 141' });
+    expect(notice(out)).toBe('Part "Part 141" was read as 141.');
+    // The part's own heading and notes survive the rewritten part, on both surfaces.
+    expect(out).toMatchObject({
+      heading: 'PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS',
+      sourceNote: '40 FR 59570, Dec. 24, 1975, unless otherwise noted.',
+    });
+    expect(out.authority).toMatch(/^42 U\.S\.C\. 300f/);
+    expect(out.notes).toHaveLength(2);
+    expect(text(result)).toContain('Source: 40 FR 59570, Dec. 24, 1975, unless otherwise noted.');
+  });
+
+  it('resolves the same forms through the cfr-section resource', async () => {
+    serveOne('141', '141.61');
+    const ctx = handlerContext(cfrSectionResource);
+    const read = (part: string, section: string) =>
+      cfrSectionResource.handler(
+        cfrSectionResource.params!.parse({ title: '40', part, section }),
+        ctx,
+      ) as Promise<Record<string, unknown>>;
+
+    const byPart = await read('Part%20141', '141.61');
+    expect(byPart).toMatchObject({ part: '141', section: '141.61', cfrCite: '40 CFR 141.61' });
+    expect(byPart.notice).toBe('Part "Part 141" was read as 141.');
+
+    const byCite = await read('141', '40%20CFR%20141.61');
+    expect(byCite).toMatchObject({ section: '141.61' });
+    expect(byCite.notice).toBe(
+      'Section "40 CFR 141.61" was read as 141.61: removed the leading "40 CFR".',
+    );
+  });
+
+  it('refuses a cite naming another title through the resource as conflicting_title', async () => {
+    serveOne('141', '141.61');
+    const ctx = handlerContext(cfrSectionResource);
+    const params = cfrSectionResource.params!.parse({
+      title: '40',
+      part: '141',
+      section: '21 CFR 141.61',
+    });
+
+    await expect(cfrSectionResource.handler(params, ctx)).rejects.toMatchObject({
+      code: -32007,
+      data: { reason: 'conflicting_title' },
+      message: 'Section "21 CFR 141.61" cites title 21, but title is 40.',
+    });
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe('a mirror title older than its latest issue is read live (#55)', () => {
+  /** A mirror row for `section`, taken at `date`. */
+  const mirrorRow = (title: number, part: string, section: string, date: string) => ({
+    title,
+    part,
+    section,
+    heading: `§ ${section} Mirror heading.`,
+    date,
+    bodyText: 'Mirror text.',
+  });
+
+  beforeEach(() => {
+    mirrorReady.mockResolvedValue(true);
+    mirrorGetSection.mockImplementation((title: number, part: string, section: string) =>
+      Promise.resolve(mirrorRow(title, part, section, title === 14 ? '2026-06-08' : '2026-09-17')),
+    );
+  });
+
+  it('reads 14 CFR 1.1 live at the latest issue when the mirror holds an older one', async () => {
+    mirrorScope.mockResolvedValue(mirrorHolding({ 14: '2026-06-08', 40: '2026-09-17' }));
+    serveVersioner((req) =>
+      req.section === '1.1'
+        ? xml(sectionXml('1.1', '§ 1.1 General definitions.', 'Live text.'))
+        : null,
+    );
+    const result = await runToolContract(getCfrSectionTool, {
+      title: 14,
+      part: '1',
+      section: '1.1',
+    });
+    const out = structured(result);
+
+    expect(out).toMatchObject({ source: 'live', date: '2026-09-15', bodyText: 'Live text.' });
+    expect(text(result)).toContain('as of 2026-09-15 · source: live');
+    expect(mirrorGetSection).not.toHaveBeenCalled();
+    expect(fullRequests()).toEqual([
+      { date: '2026-09-15', title: '14', part: '1', section: '1.1', appendix: null },
+    ]);
+  });
+
+  it('answers not_found live for a section the newer issue removed', async () => {
+    mirrorScope.mockResolvedValue(mirrorHolding({ 14: '2026-06-08' }));
+    serveVersioner(() => null);
+    const error = failure(
+      await runToolContract(getCfrSectionTool, { title: 14, part: '1216', section: '1216.102' }),
+    );
+
+    expect(error.data?.reason).toBe('not_found');
+    expect(error.message).toContain('as of 2026-09-15');
+    expect(mirrorGetSection).not.toHaveBeenCalled();
+  });
+
+  it('keeps answering from the mirror when it holds the latest issue', async () => {
+    serveVersioner(() => null);
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61' }),
+    );
+
+    expect(out).toMatchObject({ source: 'mirror', date: '2026-09-17', bodyText: 'Mirror text.' });
+    expect(fullRequests()).toEqual([]);
+  });
+
+  it("reads a title live on its own rows' date, whatever the other titles hold", async () => {
+    // Title 1's latest issue is 2026-08-10; its rows date from 2024-05-17 even
+    // though every other title in the index reached 2026-09-17.
+    mirrorScope.mockResolvedValue(mirrorHolding({ 1: '2024-05-17', 40: '2026-09-17' }));
+    serveVersioner((req) =>
+      req.section === '17.2' ? xml(sectionXml('17.2', '§ 17.2 Definitions.', 'Live.')) : null,
+    );
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 1, part: '17', section: '17.2' }),
+    );
+
+    expect(out).toMatchObject({ source: 'live', date: '2026-08-10' });
+  });
+
+  it('reads live a title the titles document does not name', async () => {
+    mirrorScope.mockResolvedValue(mirrorHolding({ 11: '2026-06-08' }));
+    serveVersioner((req) =>
+      req.section === '1.1' ? xml(sectionXml('1.1', '§ 1.1 Scope.', 'Live.')) : null,
+    );
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 11, part: '1', section: '1.1' }),
+    );
+
+    expect(out.source).toBe('live');
+    expect(mirrorGetSection).not.toHaveBeenCalled();
+  });
+
+  it('reads live a title whose rows carry no issue date', async () => {
+    mirrorScope.mockResolvedValue({ complete: false, titles: [40], issueDates: new Map() });
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61' }),
+    );
+
+    expect(out.source).toBe('live');
+    expect(mirrorGetSection).not.toHaveBeenCalled();
+  });
+
+  it('does not answer from the mirror when the titles document cannot be read', async () => {
+    http.route({
+      match: /versioner\/v1\/titles\.json/,
+      respond: () => new Response('down', { status: 503, headers: { 'retry-after': '120' } }),
+    });
+    const error = failure(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61' }),
+    );
+
+    expect(error.data?.reason).toBe('upstream_unavailable');
+    expect(mirrorGetSection).not.toHaveBeenCalled();
+  });
+
+  it('routes the cfr-section resource the same way', async () => {
+    mirrorScope.mockResolvedValue(mirrorHolding({ 14: '2026-06-08' }));
+    serveVersioner((req) =>
+      req.section === '1.1'
+        ? xml(sectionXml('1.1', '§ 1.1 General definitions.', 'Live text.'))
+        : null,
+    );
+    const ctx = handlerContext(cfrSectionResource);
+    const out = (await cfrSectionResource.handler(
+      cfrSectionResource.params!.parse({ title: '14', part: '1', section: '1.1' }),
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(out).toMatchObject({ source: 'live', date: '2026-09-15' });
+    expect(mirrorGetSection).not.toHaveBeenCalled();
   });
 });
 

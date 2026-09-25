@@ -21,11 +21,13 @@ import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mirrorReady = vi.hoisted(() => vi.fn());
+const mirrorScope = vi.hoisted(() => vi.fn());
+const mirrorSearch = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
   mirrorReady,
-  mirrorScope: () => Promise.resolve(null),
-  mirrorSearch: () => Promise.reject(new Error('the mirror is not ready in these tests')),
+  mirrorScope,
+  mirrorSearch,
 }));
 
 const { initEcfrService } = await import('@/services/ecfr/ecfr-service.js');
@@ -46,6 +48,11 @@ const STRUCTURE_40 = fixture<object>('ecfr-structure-40-parts-50-141.json');
 const STRUCTURE_42 = fixture<object>('ecfr-structure-42-part-22.json');
 /** Title 7's, pruned to part 1955: reserved ranges, appendices inside subject groups. */
 const STRUCTURE_7 = fixture<object>('ecfr-structure-7-part-1955.json');
+/**
+ * Title 14's at its 2026-09-15 issue, pruned to part 241, whose sections carry no
+ * part prefix ("01", "1-1", "19-8.1", "25").
+ */
+const STRUCTURE_14 = fixture<object>('ecfr-structure-14-part-241.json');
 
 /**
  * `GET /search/v1/results?query=lead+service+line&hierarchy[title]=40&date=2026-09-18&per_page=5000`:
@@ -56,7 +63,7 @@ const LEAD_HITS = fixture<{ results: RawHit[] }>('ecfr-search-lead-service-line-
 
 const TITLES = {
   meta: { date: '2026-09-18' },
-  titles: [7, 40, 42].map((number) => ({
+  titles: [7, 14, 40, 42].map((number) => ({
     number,
     name: `Title ${number}`,
     latest_issue_date: '2026-09-17',
@@ -87,7 +94,12 @@ function serveEcfr(corpus: RawHit[] = LEAD_HITS): void {
       match: /versioner\/v1\/structure\//,
       respond: (request) => {
         const title = new URL(request.url).pathname.match(/title-(\d+)\.json$/)?.[1];
-        const doc = { '7': STRUCTURE_7, '40': STRUCTURE_40, '42': STRUCTURE_42 }[title ?? ''];
+        const doc = {
+          '7': STRUCTURE_7,
+          '14': STRUCTURE_14,
+          '40': STRUCTURE_40,
+          '42': STRUCTURE_42,
+        }[title ?? ''];
         return doc
           ? Response.json(doc)
           : new Response('{"error":"No matching content found."}', { status: 404 });
@@ -155,6 +167,10 @@ beforeEach(() => {
   const stub = {} as AppConfig & StorageService;
   initEcfrService(stub, stub);
   mirrorReady.mockReset().mockResolvedValue(false);
+  mirrorScope.mockReset();
+  mirrorSearch
+    .mockReset()
+    .mockRejectedValue(new Error('the mirror is not asked unless a test makes it ready'));
   serveEcfr();
 });
 
@@ -199,6 +215,279 @@ describe('characterization: structure mode', () => {
     expect(nodes.map((n) => n.type)).toEqual(['chapter']);
     expect(nodes[0]).toMatchObject({ identifier: 'I', cfrCite: null, appendix: null });
     expect(structured(result).date).toBe('2026-09-17');
+  });
+});
+
+describe('structure mode cites a dotless section inside its part (#59)', () => {
+  it('cites 14 CFR 241 sections as the read tool does, "14 CFR 241 § <identifier>"', async () => {
+    const result = await runToolContract(browseCfrTool, {
+      mode: 'structure',
+      title: 14,
+      part: '241',
+      per_page: 50,
+    });
+    const nodes = structured(result).nodes ?? [];
+    const cite = (identifier: string) => nodes.find((n) => n.identifier === identifier)?.cfrCite;
+
+    expect(nodes.every((n) => n.type === 'section')).toBe(true);
+    expect(cite('01')).toBe('14 CFR 241 § 01');
+    expect(cite('1-1')).toBe('14 CFR 241 § 1-1');
+    // A dot in the identifier is not the part's: 19-8.1 is still dotless in part terms.
+    expect(cite('19-8.1')).toBe('14 CFR 241 § 19-8.1');
+    expect(nodes.every((n) => String(n.cfrCite).startsWith('14 CFR 241 § '))).toBe(true);
+    expect(text(result)).toContain('`14 CFR 241 § 01` → regulations_get_cfr_section');
+    expect(text(result)).not.toContain('`14 CFR 01`');
+  });
+
+  it('keeps the dotted cite, the appendix cite, and the part cite unchanged', async () => {
+    const part = structured(
+      await runToolContract(browseCfrTool, {
+        mode: 'structure',
+        title: 40,
+        part: '141',
+        per_page: 50,
+      }),
+    ).nodes;
+    expect(part?.find((n) => n.identifier === '141.1')?.cfrCite).toBe('40 CFR 141.1');
+
+    const appendices = structured(
+      await runToolContract(browseCfrTool, {
+        mode: 'structure',
+        title: 40,
+        part: '50',
+        per_page: 50,
+      }),
+    ).nodes;
+    expect(appendices?.find((n) => n.identifier === 'Appendix A-1 to Part 50')?.cfrCite).toBe(
+      'Appendix A-1 to Part 50, Title 40',
+    );
+  });
+});
+
+describe('structure mode reads a title document once across pages (#44)', () => {
+  /** Title 40 as one part 63 of 3,120 sections — the size of the real part at the 2026-09-22 issue. */
+  const PART_63 = {
+    type: 'title',
+    identifier: '40',
+    children: [
+      {
+        type: 'chapter',
+        identifier: 'I',
+        label: 'Chapter I—Environmental Protection Agency',
+        children: [
+          {
+            type: 'part',
+            identifier: '63',
+            label: 'Part 63—National Emission Standards for Hazardous Air Pollutants',
+            children: Array.from({ length: 3_120 }, (_, i) => ({
+              type: 'section',
+              identifier: `63.${i + 1}`,
+              label: `§ 63.${i + 1} Section ${i + 1}.`,
+            })),
+          },
+        ],
+      },
+    ],
+  };
+
+  /** Serve the titles document with title 40 at `issue()`, and PART_63 at any date. */
+  function servePart63(issue: () => string): void {
+    http.reset();
+    http.route(
+      {
+        match: /versioner\/v1\/titles\.json/,
+        respond: () =>
+          Response.json({
+            meta: { date: '2026-09-23' },
+            titles: [
+              {
+                number: 40,
+                name: 'Protection of Environment',
+                latest_issue_date: issue(),
+                up_to_date_as_of: '2026-09-23',
+                reserved: false,
+              },
+            ],
+          }),
+      },
+      { match: /versioner\/v1\/structure\//, respond: () => Response.json(PART_63) },
+    );
+  }
+
+  /** The structure documents requested so far, by the date in their path. */
+  const structureDates = () =>
+    http.calls
+      .map((c) => new URL(c.request.url).pathname)
+      .filter((p) => p.includes('/structure/'))
+      .map((p) => p.match(/structure\/([^/]+)\//)?.[1]);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('pages 1, 2, and 63 of 40 CFR 63 and lists the title from one structure request', async () => {
+    servePart63(() => '2026-09-22');
+    const page = (n: number) =>
+      runToolContract(browseCfrTool, {
+        mode: 'structure',
+        title: 40,
+        part: '63',
+        page: n,
+        per_page: 50,
+      });
+
+    const first = structured(await page(1));
+    const second = structured(await page(2));
+    const last = structured(await page(63));
+    const title = structured(
+      await runToolContract(browseCfrTool, { mode: 'structure', title: 40 }),
+    );
+
+    expect(first.nodes?.[0]?.identifier).toBe('63.1');
+    expect(second.nodes?.[0]?.identifier).toBe('63.51');
+    expect(last.nodes?.map((n) => n.identifier)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `63.${3_101 + i}`),
+    );
+    expect(last.totalCount).toBe(3_120);
+    expect(title.nodes?.map((n) => n.identifier)).toEqual(['I']);
+    expect(structureDates()).toEqual(['2026-09-22']);
+  });
+
+  it('reads the new issue fresh once the titles document names one', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-25T12:00:00Z'));
+    let issue = '2026-09-22';
+    servePart63(() => issue);
+    const browse = () =>
+      runToolContract(browseCfrTool, { mode: 'structure', title: 40, part: '63', per_page: 50 });
+
+    expect(structured(await browse()).date).toBe('2026-09-22');
+    issue = '2026-09-24';
+    // Inside the titles horizon the cached titles document still names the old issue.
+    expect(structured(await browse()).date).toBe('2026-09-22');
+    vi.setSystemTime(new Date('2026-09-25T12:16:00Z'));
+    expect(structured(await browse()).date).toBe('2026-09-24');
+
+    expect(structureDates()).toEqual(['2026-09-22', '2026-09-24']);
+  });
+
+  it('reads a caller-given date as its own document', async () => {
+    servePart63(() => '2026-09-22');
+    await runToolContract(browseCfrTool, { mode: 'structure', title: 40, part: '63' });
+    await runToolContract(browseCfrTool, {
+      mode: 'structure',
+      title: 40,
+      part: '63',
+      date: '2026-01-02',
+    });
+
+    expect(structureDates()).toEqual(['2026-09-22', '2026-01-02']);
+  });
+});
+
+describe('search mode answers from the mirror only for titles at their latest issue (#55)', () => {
+  /** A ready mirror holding each title at the issue date given for it. */
+  function readyMirror(issueDates: Record<number, string>, complete: boolean) {
+    const titles = Object.keys(issueDates).map(Number);
+    mirrorReady.mockResolvedValue(true);
+    mirrorScope.mockResolvedValue({
+      complete,
+      titles,
+      issueDates: new Map(titles.map((t) => [t, issueDates[t]!])),
+    });
+    mirrorSearch.mockResolvedValue({
+      results: [
+        {
+          title: 40,
+          part: '141',
+          section: '141.84',
+          appendix: null,
+          heading: '§ 141.84 Lead service line inventory.',
+          hierarchyPath: 'Title 40 › Part 141 › § 141.84',
+          excerpt: 'lead service line',
+          cfrCite: '40 CFR 141.84',
+        },
+      ],
+      totalCount: 1,
+      countBasis: 'sections',
+      hasMore: false,
+      windowCapped: false,
+      windowEnd: false,
+    });
+  }
+  const CURRENT = { 7: '2026-09-17', 14: '2026-09-17', 40: '2026-09-17', 42: '2026-09-17' };
+
+  it('answers a title-scoped search from a current title, reporting the day it reflects', async () => {
+    readyMirror({ 40: '2026-09-17' }, false);
+    const result = await runToolContract(browseCfrTool, {
+      mode: 'search',
+      query: 'lead service line',
+      title: 40,
+    });
+    const out = structured(result);
+
+    expect(out).toMatchObject({ source: 'mirror', date: '2026-09-18' });
+    expect(out.sourceScope).toBe(
+      'Local mirror index — CFR titles 40, filtered to title 40, section text in effect on 2026-09-18; appendices are not indexed, so no result here is evidence about them.',
+    );
+    expect(text(result)).toContain(String(out.sourceScope));
+    expect(searchRequests()).toEqual([]);
+  });
+
+  it('searches live for a title the mirror holds at an older issue', async () => {
+    readyMirror({ 14: '2026-06-08', 40: '2026-09-17' }, false);
+    const out = structured(
+      await runToolContract(browseCfrTool, {
+        mode: 'search',
+        query: 'light-sport aircraft',
+        title: 14,
+      }),
+    );
+
+    expect(out).toMatchObject({ source: 'live', date: '2026-09-18' });
+    expect(mirrorSearch).not.toHaveBeenCalled();
+    expect(searchRequests()[0]?.get('hierarchy[title]')).toBe('14');
+  });
+
+  it('answers an all-titles search from a complete mirror whose every title is current', async () => {
+    readyMirror(CURRENT, true);
+    const out = structured(
+      await runToolContract(browseCfrTool, { mode: 'search', query: 'lead service line' }),
+    );
+
+    expect(out).toMatchObject({ source: 'mirror', date: '2026-09-18' });
+    expect(out.sourceScope).toMatch(
+      /^Local mirror index — all CFR titles, section text in effect on 2026-09-18;/,
+    );
+    expect(searchRequests()).toEqual([]);
+  });
+
+  it('searches every title live when one title of a complete mirror is older', async () => {
+    readyMirror({ ...CURRENT, 14: '2026-06-08' }, true);
+    const out = structured(
+      await runToolContract(browseCfrTool, { mode: 'search', query: 'lead service line' }),
+    );
+
+    expect(out.source).toBe('live');
+    expect(mirrorSearch).not.toHaveBeenCalled();
+    expect(searchRequests()[0]?.get('hierarchy[title]')).toBeNull();
+  });
+
+  it('names the day in the empty-result notice too', async () => {
+    readyMirror({ 40: '2026-09-17' }, false);
+    mirrorSearch.mockResolvedValue({
+      results: [],
+      totalCount: 0,
+      countBasis: 'sections',
+      hasMore: false,
+      windowCapped: false,
+      windowEnd: false,
+    });
+    const out = structured(
+      await runToolContract(browseCfrTool, { mode: 'search', query: 'zzzz', title: 40 }),
+    );
+
+    expect(out.notice).toContain('section text in effect on 2026-09-18');
   });
 });
 

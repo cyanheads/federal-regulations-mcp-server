@@ -19,6 +19,7 @@ const liveSearch = vi.hoisted(() => vi.fn());
 const latestIssueDate = vi.hoisted(() => vi.fn());
 const currentDate = vi.hoisted(() => vi.fn());
 const upToDateAsOf = vi.hoisted(() => vi.fn());
+const isLatestIssue = vi.hoisted(() => vi.fn());
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorScope = vi.hoisted(() => vi.fn());
 const mirrorSearch = vi.hoisted(() => vi.fn());
@@ -31,6 +32,7 @@ vi.mock('@/services/ecfr/ecfr-service.js', () => ({
     latestIssueDate,
     currentDate,
     upToDateAsOf,
+    isLatestIssue,
   }),
   today: () => '2026-06-13',
   ECFR_SEARCH_WINDOW: 10_000,
@@ -66,9 +68,14 @@ const appendixHit = {
   cfrCite: 'Appendix C to Part 58, Title 40',
 };
 
+/** A mirror scope holding `titles`, each at one issue date. */
+function heldAt(complete: boolean, titles: number[]) {
+  return { complete, titles, issueDates: new Map(titles.map((t) => [t, '2026-08-05'])) };
+}
+
 /** The repo's own partial mirror: Titles 1, 11, and 14 only. */
-const PARTIAL_MIRROR = { complete: false, titles: [1, 11, 14] };
-const FULL_MIRROR = { complete: true, titles: [1, 2, 3] };
+const PARTIAL_MIRROR = heldAt(false, [1, 11, 14]);
+const FULL_MIRROR = heldAt(true, [1, 2, 3]);
 
 /**
  * A mirror index holding one section per title/part pair, which honors the title
@@ -112,6 +119,11 @@ describe('browseCfrTool', () => {
     currentDate.mockResolvedValue('2026-08-06');
     upToDateAsOf.mockReset();
     upToDateAsOf.mockResolvedValue('2026-08-06');
+    // Every title the mirror holds is at its latest issue unless a test says otherwise.
+    isLatestIssue.mockReset();
+    isLatestIssue.mockImplementation((_title: number, issueDate: string | undefined) =>
+      Promise.resolve(issueDate !== undefined),
+    );
     mirrorReady.mockReset();
     mirrorScope.mockReset();
     mirrorSearch.mockReset();

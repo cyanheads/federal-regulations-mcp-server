@@ -1,10 +1,12 @@
 /**
  * @fileoverview regulations_browse_cfr — navigate the CFR hierarchy (structure
  * mode) or full-text-search the codified CFR (search mode) via eCFR. Search runs
- * against the local mirror's FTS5 index only when the mirror's title coverage can
- * answer the request; a scoped mirror, an unscoped (all-titles) query it cannot
- * answer completely, a historical date, or a cold deploy all route to the live
- * eCFR search API. Keyless. Feeds regulations_get_cfr_section.
+ * against the local mirror's FTS5 index only when the mirror holds every title
+ * the request covers at that title's latest eCFR issue; a title it does not
+ * hold, a title eCFR has re-issued since the mirror took it, an all-titles query
+ * against a partial mirror or one with any title behind, a historical date, or a
+ * cold deploy all route to the live eCFR search API. Keyless. Feeds
+ * regulations_get_cfr_section.
  *
  * `title` and `part` scope both modes; a part with no title is refused rather
  * than dropped, since part numbers repeat across titles and eCFR rejects the
@@ -20,8 +22,9 @@
  * @module mcp-server/tools/definitions/browse-cfr.tool
  */
 
-import { tool, z } from '@cyanheads/mcp-ts-core';
+import { type Context, tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { normalizePart } from '@/services/ecfr/cite.js';
 import {
   ECFR_SEARCH_WINDOW,
   getEcfrService,
@@ -35,7 +38,6 @@ import {
   mirrorScope,
   mirrorSearch,
 } from '@/services/ecfr-mirror/ecfr-mirror.js';
-import { normalizePart } from './cfr-part.js';
 import { isoDate } from './date-input.js';
 
 /** Restriction clause naming the caller's own title (and part) filter, if any. */
@@ -46,16 +48,43 @@ function filterClause(title: number | undefined, part: string | undefined): stri
     : `, filtered to title ${title} part ${part}`;
 }
 
-/** Human-readable coverage of the mirror index, for the `sourceScope` field. */
+/**
+ * Human-readable coverage of the mirror index, for the `sourceScope` field. The
+ * mirror answers only for titles at their latest issue, so its text is the text
+ * in effect on the day the live index serves as current — the same `date` a
+ * live search reports.
+ */
 function describeMirrorScope(
   scope: MirrorScope,
+  date: string,
   title: number | undefined,
   part: string | undefined,
 ): string {
   const held = scope.complete ? 'all CFR titles' : `CFR titles ${scope.titles.join(', ')}`;
   // The index holds section text alone, so an appendix match cannot come back
   // from it — which is indistinguishable from no such appendix unless said.
-  return `Local mirror index — ${held}${filterClause(title, part)}, current section text only; appendices are not indexed, so no result here is evidence about them.`;
+  return `Local mirror index — ${held}${filterClause(title, part)}, section text in effect on ${date}; appendices are not indexed, so no result here is evidence about them.`;
+}
+
+/**
+ * Whether the mirror can answer a current search: it holds the title asked for
+ * at that title's latest eCFR issue, or, for an all-titles query, it holds every
+ * title and each of them is at its latest issue. A mirror built once and never
+ * refreshed keeps its rows, and a title eCFR has re-issued since would answer
+ * with superseded text.
+ */
+async function mirrorAnswers(
+  scope: MirrorScope,
+  title: number | undefined,
+  ctx: Context,
+): Promise<boolean> {
+  const service = getEcfrService();
+  if (title !== undefined) return service.isLatestIssue(title, scope.issueDates.get(title), ctx);
+  if (!scope.complete) return false;
+  for (const held of scope.titles) {
+    if (!(await service.isLatestIssue(held, scope.issueDates.get(held), ctx))) return false;
+  }
+  return true;
 }
 
 /** Human-readable coverage of the live eCFR search index, for `sourceScope`. */
@@ -90,7 +119,7 @@ const structureNode = z
       .string()
       .nullable()
       .describe(
-        'Assembled cite → regulations_get_cfr_section: "40 CFR 50.1" for a section, "Appendix A-1 to Part 50, Title 40" for an appendix. Null on a level with no read path (title, subtitle, chapter).',
+        'Assembled cite → regulations_get_cfr_section: "40 CFR 50.1" for a section ("14 CFR 241 § 25" for one numbered without its part), "Appendix A-1 to Part 50, Title 40" for an appendix. Null on a level with no read path (title, subtitle, chapter).',
       ),
     appendix: z
       .string()
@@ -170,7 +199,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .string()
       .optional()
       .describe(
-        'CFR part within the title, in both modes — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly, so pass the identifier as eCFR writes it — "58", not "Part 58" or "058".',
+        'CFR part within the title, in both modes — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly once a leading "Part" or "Pt." is dropped, so pass the identifier as eCFR writes it — "58" ("Part 58" also reads as 58), not "058".',
       ),
     query: z
       .union([z.literal(''), z.string().min(2).describe('Search phrase, at least 2 characters.')])
@@ -210,7 +239,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .string()
       .optional()
       .describe(
-        'Resolved point-in-time date — the hierarchy snapshot (structure mode), or the day whose section text was searched (search mode, live source only).',
+        'Resolved point-in-time date — the hierarchy snapshot (structure mode), or the day whose section text was searched (search mode).',
       ),
     nodes: z
       .array(structureNode)
@@ -390,26 +419,24 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       throw ctx.fail('query_required', undefined, { ...ctx.recoveryFor('query_required') });
     }
 
-    // The mirror answers only what it actually holds. A title outside its scope,
-    // or an all-titles query against a scoped mirror, would come back empty from
-    // a corpus that never contained the answer — so those go to live eCFR, as
-    // section reads already do on a mirror miss.
+    // The mirror answers only what it actually holds, as of the issue eCFR serves
+    // now. A title outside its scope, or an all-titles query against a scoped
+    // mirror, would come back empty from a corpus that never contained the
+    // answer, and a title behind its latest issue would match superseded text —
+    // so those go to live eCFR, as section reads already do on a mirror miss.
     const scope = !input.date && (await mirrorReady()) ? await mirrorScope() : null;
-    const answering =
-      scope && (input.title === undefined ? scope.complete : scope.titles.includes(input.title))
-        ? scope
-        : null;
+    const answering = scope && (await mirrorAnswers(scope, input.title, ctx)) ? scope : null;
 
     const { page, per_page: perPage } = input;
-    let provenance:
-      | { source: 'mirror'; sourceScope: string }
-      | { source: 'live'; sourceScope: string; date: string };
+    let provenance: { source: 'mirror' | 'live'; sourceScope: string; date: string };
     let response: EcfrSearchPage;
 
     if (answering) {
+      const date = await service.currentDate(ctx);
       provenance = {
         source: 'mirror',
-        sourceScope: describeMirrorScope(answering, input.title, part),
+        sourceScope: describeMirrorScope(answering, date, input.title, part),
+        date,
       };
       response = await mirrorSearch(query, input.title, part, perPage, (page - 1) * perPage);
     } else {

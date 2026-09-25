@@ -1,16 +1,18 @@
 /**
  * @fileoverview Read one CFR section from a cite written the way people write
  * it. The versioner and the mirror both match a section identifier exactly
- * ("141.61"), while callers write "61", "§ 141.61", "Sec. 141.61", or
- * "141.61(c)". This module turns the second into the first, one lookup at a
- * time and only after the form before it missed, so an identifier that resolves
- * as given is never rewritten. Shared by regulations_get_cfr_section and the
- * cfr-section resource so both resolve the same inputs the same way.
+ * ("141.61"), while callers write "61", "§ 141.61", "Sec. 141.61", "141.61(c)",
+ * or the whole cite this server hands out ("40 CFR 141.61", "14 CFR 241 § 25").
+ * This module turns the second into the first: markers no identifier carries
+ * are removed before the first lookup, and every other rewrite runs one lookup
+ * at a time, only after the form before it missed, so an identifier that
+ * resolves as given is never rewritten. Shared by regulations_get_cfr_section
+ * and the cfr-section resource so both resolve the same inputs the same way.
  * @module services/ecfr/read-section
  */
 
 import type { Context } from '@cyanheads/mcp-ts-core';
-import { mirrorGetSection, mirrorReady } from '@/services/ecfr-mirror/ecfr-mirror.js';
+import { mirrorGetSection, mirrorReady, mirrorScope } from '@/services/ecfr-mirror/ecfr-mirror.js';
 import { getEcfrService } from './ecfr-service.js';
 import type { EcfrSectionResult } from './types.js';
 
@@ -30,6 +32,17 @@ export const MAX_EXTRA_LOOKUPS = 3;
  */
 const CITE_PREFIX = /^(?:§+|sec(?:tion)?\.?(?=[\s\d]))\s*/i;
 
+/**
+ * A leading title cite — `40 CFR `, `40 C.F.R. `, in any case — with the title
+ * number in group 1. Safe to strip before the first lookup for the same reason
+ * as {@link CITE_PREFIX}: none of the 59,771 section identifiers in titles 7,
+ * 14, 40, and 48 contains "CFR" or begins with digits and a space.
+ */
+const TITLE_PREFIX = /^(\d+)\s*(?:CFR|C\.F\.R\.)(?=[\s§\d])\s*/i;
+
+/** The `§` a dotless cite writes after its part ("241 § 25"), read just past the part. */
+const PART_MARKER = /^\s*§+\s*/;
+
 /** One trailing paragraph designator: `(c)`, `(ii)`, or eCFR's own ` (Rule 1)`. */
 const PARAGRAPH = /\s*\([^()]*\)$/;
 
@@ -42,13 +55,38 @@ export interface SectionCandidate {
   section: string;
 }
 
-/** Remove a leading section marker; `prefix` is what was removed, if anything. */
-export function stripCitePrefix(section: string): { prefix?: string; value: string } {
-  const match = section.match(CITE_PREFIX);
-  const value = match ? section.slice(match[0].length).trim() : section;
-  // A marker with nothing after it leaves nothing to look up; keep the input.
-  if (!match || !value) return { value: section };
-  return { prefix: match[0].trim(), value };
+/** The title a section written as a full cite names ("21 CFR 141.61" → 21), if any. */
+export function citedTitle(section: string): number | undefined {
+  const match = section.match(TITLE_PREFIX);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * Remove what leads a section identifier without being part of it: a title cite
+ * naming `title` ("40 CFR "), then the part a dotless cite names before its `§`
+ * ("241 §" in "14 CFR 241 § 25", the form `sectionCite` writes), then a
+ * section marker (`§`, `Sec.`). `prefix` is everything removed, if anything. A
+ * title cite naming another title is left in place — the caller refuses it
+ * before reading.
+ */
+export function stripCitePrefix(
+  section: string,
+  title: number,
+  part: string,
+): { prefix?: string; value: string } {
+  let rest = section;
+  const titleCite = rest.match(TITLE_PREFIX);
+  if (titleCite && Number(titleCite[1]) === title) {
+    rest = rest.slice(titleCite[0].length);
+    const partMarker = rest.startsWith(part) && rest.slice(part.length).match(PART_MARKER);
+    if (partMarker) rest = rest.slice(part.length + partMarker[0].length);
+  }
+  const marker = rest.match(CITE_PREFIX);
+  if (marker) rest = rest.slice(marker[0].length);
+  const value = rest.trim();
+  // Nothing removed, or nothing left to look up once it was: keep the input.
+  if (rest === section || !value) return { value: section };
+  return { prefix: section.slice(0, section.length - rest.length).trim(), value };
 }
 
 /**
@@ -137,9 +175,13 @@ export interface SectionMiss {
 
 /**
  * Read one section, resolving the identifier through {@link sectionCandidates}.
- * Each form is tried against the mirror first when the read is current and the
- * mirror is ready, then live at `date` (the title's latest issue date when none
- * is given). The first form that resolves is returned; later forms never run.
+ * Each form is tried against the mirror first when the read is current, the
+ * mirror is ready, and it holds the title at the title's latest eCFR issue, then
+ * live at `date` (the title's latest issue date when none is given). A mirror
+ * built from an older issue would answer with superseded text — a definition
+ * since amended, a section since removed — under the older date, so a title
+ * eCFR has re-issued is read live until a refresh catches it up. The first form
+ * that resolves is returned; later forms never run.
  */
 export async function readSection(
   title: number,
@@ -149,9 +191,12 @@ export async function readSection(
   ctx: Context,
 ): Promise<SectionHit | SectionMiss> {
   const service = getEcfrService();
-  const { prefix, value } = stripCitePrefix(section);
+  const { prefix, value } = stripCitePrefix(section, title, part);
   const candidates = sectionCandidates(value, part);
-  const useMirror = !date && (await mirrorReady());
+  const useMirror =
+    !date &&
+    (await mirrorReady()) &&
+    (await service.isLatestIssue(title, (await mirrorScope()).issueDates.get(title), ctx));
 
   let liveDate = date;
   const readDate = async () => (liveDate ??= await service.latestIssueDate(title, ctx));

@@ -17,6 +17,10 @@ const latestIssueDate = vi.hoisted(() => vi.fn());
 const upToDateAsOf = vi.hoisted(() => vi.fn());
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorGetSection = vi.hoisted(() => vi.fn());
+const isLatestIssue = vi.hoisted(() => vi.fn());
+/** A mirror holding title 40 at its latest issue. */
+const mirrorScope = () =>
+  Promise.resolve({ complete: false, titles: [40], issueDates: new Map([[40, '2025-06-01']]) });
 
 vi.mock('@/services/ecfr/ecfr-service.js', () => ({
   getEcfrService: () => ({
@@ -25,11 +29,16 @@ vi.mock('@/services/ecfr/ecfr-service.js', () => ({
     hierarchyPath,
     latestIssueDate,
     upToDateAsOf,
+    isLatestIssue,
   }),
   ECFR_EARLIEST_DATE: '2017-01-01',
   today: () => '2026-06-13',
 }));
-vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({ mirrorReady, mirrorGetSection }));
+vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
+  mirrorReady,
+  mirrorGetSection,
+  mirrorScope,
+}));
 
 const { getCfrSectionTool } = await import(
   '@/mcp-server/tools/definitions/get-cfr-section.tool.js'
@@ -43,6 +52,7 @@ describe('getCfrSectionTool', () => {
     latestIssueDate.mockReset();
     mirrorReady.mockReset();
     mirrorGetSection.mockReset();
+    isLatestIssue.mockReset().mockResolvedValue(true);
     hierarchyPath.mockResolvedValue('Title 40 › Part 50');
     upToDateAsOf.mockReset();
     upToDateAsOf.mockResolvedValue('2026-09-18');
