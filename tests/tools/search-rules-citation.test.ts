@@ -370,7 +370,6 @@ describe('the citation pattern stays linear on hostile input', () => {
   ])('%s', (_label, build) => {
     const t5k = Math.max(time(build(5_000)), 0.01);
     const t80k = time(build(80_000));
-    time(build(20_000));
     expect(t80k / t5k).toBeLessThan(64);
     expect(t80k).toBeLessThan(50);
   });
