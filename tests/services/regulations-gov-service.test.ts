@@ -140,6 +140,53 @@ describe('RegulationsGovService', () => {
     expect(result.documents[0]!.frDocNum).toBe('2025-14555');
   });
 
+  it('relays each docket document’s openForComment as commentPeriodOpen, null when absent', async () => {
+    // EPA-HQ-OW-2022-0114-0027 and IRS-2026-0925-0001 as Regulations.gov served them
+    // on 2026-09-25; the third omits the attribute entirely.
+    const doc = (id: string, objectId: string, attributes: Record<string, unknown>) => ({
+      id,
+      type: 'documents',
+      attributes: {
+        documentType: 'Proposed Rule',
+        title: id,
+        postedDate: '2023-03-29T04:00:00Z',
+        objectId,
+        withdrawn: false,
+        ...attributes,
+      },
+    });
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonApiResponse({ data: { id: 'X', type: 'dockets', attributes: {} } }),
+      )
+      .mockResolvedValueOnce(
+        jsonApiResponse({
+          data: [
+            doc('EPA-HQ-OW-2022-0114-0027', '0900006485883ec6', {
+              commentEndDate: '2023-05-31T03:59:59Z',
+              openForComment: false,
+            }),
+            doc('IRS-2026-0925-0001', '0900006487000001', {
+              commentEndDate: '2026-09-26T03:59:59Z',
+              openForComment: true,
+            }),
+            doc('IRS-2026-0925-0022', '0900006487000022', { commentEndDate: null }),
+          ],
+          meta: { totalElements: 3 },
+        }),
+      );
+
+    const result = await newService().getDocket(
+      { docketId: 'X', perPage: 25, page: 1 },
+      createMockContext(),
+    );
+    expect(result.documents.map((d) => [d.commentEndDate, d.commentPeriodOpen])).toEqual([
+      ['2023-05-31T03:59:59Z', false],
+      ['2026-09-26T03:59:59Z', true],
+      [null, null],
+    ]);
+  });
+
   it('flags attachmentOnly when the body is a "See Attached" stub and attachments exist', async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonApiResponse({

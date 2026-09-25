@@ -92,7 +92,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
       .string()
       .optional()
       .describe(
-        'Fetch all comments in a docket by docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Broadest scope. Exactly one of docket_id / document_object_id / fr_document_number / comment_id is required — supplying two is rejected, not resolved by precedence.',
+        'Fetch all comments in a docket by Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194") — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document, not an entry of the printed docketIds. Broadest scope. Exactly one of docket_id / document_object_id / fr_document_number / comment_id is required — supplying two is rejected, not resolved by precedence.',
       ),
     document_object_id: z
       .string()
@@ -513,7 +513,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
       const widen = resolved?.docketId
         ? `A rulemaking's comments are often filed on another of its documents, usually the proposed rule — widen to the whole docket with docket_id "${resolved.docketId}".`
         : targetParam === 'docket_id'
-          ? 'Check the docket ID, or that the comment period has opened.'
+          ? "A docket number the Federal Register prints (a row's docketIds) is often not a Regulations.gov docket ID — pass regulationsGovDocketId from a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. Otherwise check that the comment period has opened."
           : "Comments often attach to the docket's primary document — widen to the docket this object ID was listed in with docket_id, or check the comment period has opened.";
       const loosen =
         activeFilters.length > 0

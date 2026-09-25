@@ -39,6 +39,7 @@ const docket: DocketResult = {
       postedDate: '2025-05-01',
       frDocNum: '2025-14555',
       commentEndDate: '2025-08-01',
+      commentPeriodOpen: false,
       withdrawn: false,
     },
   ],
@@ -228,6 +229,64 @@ describe('getDocketTool', () => {
       expect(structured.totalPages).toBe(0);
       expect(structured.notice).toBe('Docket EPA-HQ-OAR-2025-0194 returned no documents.');
     });
+  });
+
+  describe('comment period', () => {
+    beforeEach(() => hasKey.mockReturnValue(true));
+
+    it('relays whether each document is open for comment on both surfaces', async () => {
+      getDocket.mockResolvedValue({
+        ...docket,
+        documentCount: 3,
+        documents: [
+          {
+            ...docket.documents[0]!,
+            documentId: 'EPA-HQ-OW-2022-0114-0027',
+            commentEndDate: '2023-05-31T03:59:59Z',
+            commentPeriodOpen: false,
+          },
+          {
+            ...docket.documents[0]!,
+            documentId: 'IRS-2026-0925-0001',
+            commentEndDate: '2026-09-26T03:59:59Z',
+            commentPeriodOpen: true,
+          },
+          {
+            ...docket.documents[0]!,
+            documentId: 'IRS-2026-0925-0022',
+            commentEndDate: null,
+            commentPeriodOpen: null,
+          },
+        ],
+      });
+      const result = await runToolContract(getDocketTool, { docket_id: 'EPA-HQ-OW-2022-0114' });
+      const docs = (result.structuredContent as { documents: Array<Record<string, unknown>> })
+        .documents;
+      expect(docs.map((d) => d.commentPeriodOpen)).toEqual([false, true, null]);
+
+      const text = (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+      const line = (id: string) => text.split('\n').find((l) => l.includes(id))!;
+      expect(line('EPA-HQ-OW-2022-0114-0027')).toContain('2023-05-31T03:59:59Z (closed)');
+      expect(line('IRS-2026-0925-0001')).toContain('2026-09-26T03:59:59Z (open)');
+      expect(line('IRS-2026-0925-0022')).toContain('| — |');
+    });
+
+    it('describes commentEndDate as the instant the period ends, not as open', () => {
+      const shape = getDocketTool.output.shape.documents.element.shape;
+      expect(shape.commentEndDate.description).not.toMatch(/open for comment/i);
+      expect(shape.commentEndDate.description).toMatch(/UTC/);
+      expect(shape.commentPeriodOpen.description).toMatch(/openForComment/);
+    });
+  });
+
+  it('points docket_id at the Regulations.gov docket ID, not the printed docket numbers', () => {
+    // A row's printed docketIds ("REG-101355-26") are not Regulations.gov IDs and answer not_found.
+    const inputDescription = getDocketTool.input.shape.docket_id.description ?? '';
+    const notFound = getDocketTool.errors?.find((e) => e.reason === 'not_found')?.recovery ?? '';
+    for (const text of [inputDescription, notFound]) {
+      expect(text).toMatch(/regulationsGovDocketId/);
+      expect(text).toMatch(/docketIds/);
+    }
   });
 
   it('format() renders the docket header and each document object ID', () => {

@@ -420,6 +420,7 @@ function normalizeDocument(d: JsonApiResource<RawDocumentAttributes>): RegDocume
     postedDate: a.postedDate ?? '',
     frDocNum: a.frDocNum ?? null,
     commentEndDate: a.commentEndDate ?? null,
+    commentPeriodOpen: a.openForComment ?? null,
     withdrawn: a.withdrawn ?? false,
   };
 }

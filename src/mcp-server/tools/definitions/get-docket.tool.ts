@@ -10,7 +10,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
-import { escapePipes, formatCount } from './format-utils.js';
+import { escapePipes, formatCommentPeriod, formatCount } from './format-utils.js';
 import { pageSpan, REGULATIONS_GOV_PAGE_CEILING, raisePerPageAdvice } from './paging.js';
 
 /** The largest per_page this tool takes. */
@@ -26,7 +26,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       .string()
       .regex(/^[A-Za-z0-9_-]+$/)
       .describe(
-        'Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from a Federal Register document\'s docketId (regulations_get_document) or an agency rulemaking reference.',
+        'Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. The printed docketIds on those tools are not always Regulations.gov IDs ("REG-101355-26" is the IRS\'s own number for docket IRS-2026-0925).',
       ),
     document_types: z
       .array(z.enum(['Proposed Rule', 'Rule', 'Notice', 'Supporting & Related Material', 'Other']))
@@ -90,7 +90,15 @@ export const getDocketTool = tool('regulations_get_docket', {
             commentEndDate: z
               .string()
               .nullable()
-              .describe('Comment-period end date; when set, open for comment.'),
+              .describe(
+                'The UTC instant the comment period ends, or null. Periods end at 11:59 PM Eastern, so "2023-05-31T03:59:59Z" is the close date 2023-05-30 the Federal Register prints.',
+              ),
+            commentPeriodOpen: z
+              .boolean()
+              .nullable()
+              .describe(
+                "Whether the document is open for comment now, as Regulations.gov reports it (its openForComment); null when Regulations.gov doesn't say.",
+              ),
             withdrawn: z.boolean().describe('True when the document was withdrawn.'),
           })
           .describe('One document filed in the docket.'),
@@ -144,7 +152,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No docket exists with that ID.',
       recovery:
-        'Verify the docket ID from a Federal Register document\'s docketId; format is like "EPA-HQ-OAR-2025-0194".',
+        'Pass the Regulations.gov docket ID — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document — not an entry of the printed docketIds; format is like "EPA-HQ-OAR-2025-0194".',
       thrownBy: 'service',
     },
     {
@@ -243,7 +251,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       const fr = d.frDocNum ? ` [FR ${d.frDocNum}]` : '';
       const wd = d.withdrawn ? ' (withdrawn)' : '';
       lines.push(
-        `| ${d.documentType} | ${escapePipes(d.title)}${fr}${wd} | ${d.postedDate} | ${d.commentEndDate ?? '—'} | ${d.documentId} | \`${d.objectId}\` |`,
+        `| ${d.documentType} | ${escapePipes(d.title)}${fr}${wd} | ${d.postedDate} | ${formatCommentPeriod(d.commentEndDate, d.commentPeriodOpen)} | ${d.documentId} | \`${d.objectId}\` |`,
       );
     }
     return [{ type: 'text', text: lines.join('\n') }];

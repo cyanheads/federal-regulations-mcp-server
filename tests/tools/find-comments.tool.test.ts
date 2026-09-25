@@ -229,6 +229,12 @@ describe('findCommentsTool', () => {
     expect(schema.required ?? []).toEqual([]);
   });
 
+  it('points docket_id at the Regulations.gov docket ID, not the printed docket numbers', () => {
+    const description = findCommentsTool.input.shape.docket_id.description ?? '';
+    expect(description).toMatch(/regulationsGovDocketId/);
+    expect(description).toMatch(/docketIds/);
+  });
+
   it('lists comments on a docket (the headline list goal)', async () => {
     listComments.mockResolvedValue(listResult);
     const ctx = handlerContext(findCommentsTool);
@@ -413,6 +419,18 @@ describe('findCommentsTool', () => {
       "No comments found for document 0900006485883ec6. Comments often attach to the docket's primary document — widen to the docket this object ID was listed in with docket_id, or check the comment period has opened.",
     );
     expect(contentText(result)).toContain('widen to the docket this object ID was listed in');
+  });
+
+  it('points an empty docket list at the Regulations.gov docket ID, not a printed docket number', async () => {
+    // Live: "REG-101355-26" is the IRS's printed number for Regulations.gov docket
+    // IRS-2026-0925, which holds the comments; as docket_id it lists nothing.
+    listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+    const result = await runToolContract(findCommentsTool, { docket_id: 'REG-101355-26' });
+    const notice = String((result.structuredContent as { notice?: string }).notice);
+    expect(notice).toBe(
+      "No comments found for docket REG-101355-26. A docket number the Federal Register prints (a row's docketIds) is often not a Regulations.gov docket ID — pass regulationsGovDocketId from a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. Otherwise check that the comment period has opened.",
+    );
+    expect(contentText(result)).toContain('pass regulationsGovDocketId');
   });
 
   it('names the resolved document and its docket when a resolved document has no comments', async () => {

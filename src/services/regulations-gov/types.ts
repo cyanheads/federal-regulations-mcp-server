@@ -94,6 +94,8 @@ export interface RawAttachmentAttributes {
 /** Normalized docket document. */
 export interface RegDocument {
   commentEndDate: string | null;
+  /** Regulations.gov's own `openForComment`; null when it omits the attribute. */
+  commentPeriodOpen: boolean | null;
   documentId: string;
   documentType: string;
   frDocNum: string | null;
