@@ -1,7 +1,12 @@
 /**
- * @fileoverview Shared formatting helpers for tool format() renderers.
+ * @fileoverview Shared formatting helpers for tool format() renderers and notices.
  * @module mcp-server/tools/definitions/format-utils
  */
+
+/** A count with thousands separators (`1608` → `1,608`), as notices print it. */
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-US');
+}
 
 /**
  * Escape a value for a markdown table cell.

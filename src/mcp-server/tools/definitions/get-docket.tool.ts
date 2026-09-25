@@ -10,7 +10,11 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
-import { escapePipes } from './format-utils.js';
+import { escapePipes, formatCount } from './format-utils.js';
+import { pageSpan, REGULATIONS_GOV_PAGE_CEILING, raisePerPageAdvice } from './paging.js';
+
+/** The largest per_page this tool takes. */
+const MAX_PER_PAGE = 250;
 
 export const getDocketTool = tool('regulations_get_docket', {
   title: 'regulations_get_docket',
@@ -34,7 +38,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       .number()
       .int()
       .min(5)
-      .max(250)
+      .max(MAX_PER_PAGE)
       .optional()
       .default(25)
       .describe(
@@ -44,11 +48,11 @@ export const getDocketTool = tool('regulations_get_docket', {
       .number()
       .int()
       .min(1)
-      .max(20)
+      .max(REGULATIONS_GOV_PAGE_CEILING)
       .optional()
       .default(1)
       .describe(
-        'Page number (1-based). Regulations.gov caps a query at 20 pages (5,000 records); beyond that, narrow with document_types.',
+        'Page number (1–40, default 1). Regulations.gov serves 40 pages, so a docket listing reaches 40 × per_page documents (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. Beyond that, narrow with document_types.',
       ),
   }),
   output: z.object({
@@ -94,12 +98,38 @@ export const getDocketTool = tool('regulations_get_docket', {
       .describe('Documents filed in the docket (this page).'),
   }),
   enrichment: {
+    totalPages: z
+      .number()
+      .describe(
+        'Pages of documents at this per_page, at most the 40 Regulations.gov serves; 0 when there are none.',
+      ),
+    nextPage: z
+      .number()
+      .optional()
+      .describe('Page to request next — present only when a later page holds documents.'),
     truncated: z
       .boolean()
       .optional()
-      .describe('True when documentCount exceeds the returned set / 5,000 ceiling.'),
+      .describe(
+        'True when the docket holds more documents than 40 pages reach at this per_page, so some are on no page — set on every page of such a docket.',
+      ),
     shown: z.number().optional().describe('Documents returned on this page.'),
-    notice: z.string().optional().describe('Guidance when the docket has no documents.'),
+    cap: z
+      .number()
+      .optional()
+      .describe(
+        'The most documents 40 pages reach at this per_page (40 × per_page); set with truncated.',
+      ),
+    notice: z
+      .string()
+      .optional()
+      .describe(
+        'Guidance when the docket has no documents, when the page is past the end, or when documents lie beyond the last page.',
+      ),
+  },
+  enrichmentTrailer: {
+    totalPages: { label: 'Total pages' },
+    nextPage: { label: 'Next page' },
   },
   errors: [
     {
@@ -154,16 +184,43 @@ export const getDocketTool = tool('regulations_get_docket', {
       ctx,
     );
 
-    if (result.documents.length === 0) {
+    const total = result.documentCount;
+    const span = pageSpan({
+      total,
+      perPage: input.per_page,
+      page: input.page,
+      ceiling: REGULATIONS_GOV_PAGE_CEILING,
+    });
+    ctx.enrich({
+      totalPages: span.totalPages,
+      ...(span.nextPage !== undefined && { nextPage: span.nextPage }),
+    });
+
+    if (total === 0) {
       ctx.enrich.notice(
-        `Docket ${input.docket_id} returned no documents${input.document_types?.length ? ' for the requested document_types' : ''}. Drop the document_types filter to see all.`,
+        input.document_types?.length
+          ? `Docket ${input.docket_id} returned no documents for the requested document_types. Drop the document_types filter to see all.`
+          : `Docket ${input.docket_id} returned no documents.`,
       );
-    } else if (result.documentCount > result.documents.length) {
-      ctx.enrich.truncated({
-        shown: result.documents.length,
-        cap: input.per_page,
-        guidance: `${result.documentCount} documents total. Raise per_page (max 250), page forward (max 20 pages), or filter document_types.`,
+    } else if (span.pastEnd) {
+      ctx.enrich.notice(
+        `Page ${input.page} is past the end: docket ${input.docket_id} holds ${formatCount(total)} documents${input.document_types?.length ? ' of the requested document_types' : ''}, so the last page is ${span.totalPages} at per_page ${input.per_page}.`,
+      );
+    } else if (span.truncated) {
+      const raise = raisePerPageAdvice({
+        total,
+        perPage: input.per_page,
+        maxPerPage: MAX_PER_PAGE,
+        ceiling: REGULATIONS_GOV_PAGE_CEILING,
       });
+      const guidance = [
+        `Only ${formatCount(span.reachable)} of ${formatCount(total)} documents are reachable: Regulations.gov serves ${REGULATIONS_GOV_PAGE_CEILING} pages of ${input.per_page}.`,
+        raise,
+        `${raise ? 'Or filter' : 'Filter'} document_types to bring the rest within reach.`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      ctx.enrich.truncated({ shown: result.documents.length, cap: span.reachable, guidance });
     }
 
     return result;

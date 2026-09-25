@@ -1,11 +1,12 @@
 /**
  * @fileoverview Tests for regulations_search_rules — headline search path,
- * empty-result notice, truncation disclosure at the FR navigation ceiling, and
- * format() completeness. The FederalRegisterService accessor is mocked.
+ * empty-result notice, the paging contract on both surfaces (totalPages,
+ * nextPage, the past-end page, truncation past 50 pages), date_range_inverted,
+ * and format() completeness. The FederalRegisterService accessor is mocked.
  * @module tests/tools/search-rules.tool.test
  */
 
-import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FrSearchResponse } from '@/services/federal-register/types.js';
 import { handlerContext } from '../helpers/handler-context.js';
@@ -195,6 +196,195 @@ describe('searchRulesTool', () => {
       const text = render([{ ...jointRow, agencies: [] }]);
       const row = text.split('\n').find((line) => line.startsWith('| 2026-18560 '))!;
       expect(row.split(' | ')[3]).toBe('—');
+    });
+  });
+
+  describe('paging surface', () => {
+    /** Every text block of a result, joined — enrichment rides in its own trailing block. */
+    function contentText(result: Awaited<ReturnType<typeof runToolContract>>): string {
+      return (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+    }
+
+    /** `n` distinct rows — a page the fake serves, never an echo of the request. */
+    function rows(n: number) {
+      return Array.from({ length: n }, (_, i) => ({
+        ...sampleRow,
+        documentNumber: `2025-${String(10_000 + i)}`,
+      }));
+    }
+
+    it('answers a query nothing matched with the empty-result notice on both surfaces', async () => {
+      searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { query: 'zzqqxx' });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.totalCount).toBe(0);
+      expect(structured.notice).toBe(
+        'No Federal Register documents matched. Broaden the query, widen the date range, or drop an agency filter.',
+      );
+      expect(structured).not.toHaveProperty('truncated');
+      const text = contentText(result);
+      expect(text).toContain('**0 total**');
+      expect(text).toContain('> No Federal Register documents matched.');
+    });
+
+    it('returns a single short page with no notice and no truncation', async () => {
+      searchFn.mockResolvedValue({ totalCount: 3, results: rows(3) } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { query: 'ozone' });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.totalCount).toBe(3);
+      expect(structured).not.toHaveProperty('notice');
+      expect(structured).not.toHaveProperty('truncated');
+      expect(contentText(result)).toContain('| 2025-10002 |');
+    });
+
+    it('answers a page past the end of a non-empty result by naming the last page', async () => {
+      // Live: PFAS drinking water / EPA holds 100 matches, 5 pages at per_page 20; page 10 is empty.
+      searchFn.mockResolvedValue({ totalCount: 100, results: [] } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, {
+        query: 'PFAS drinking water',
+        agencies: ['environmental-protection-agency'],
+        page: 10,
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.totalPages).toBe(5);
+      expect(structured).not.toHaveProperty('nextPage');
+      expect(structured).not.toHaveProperty('truncated');
+      expect(structured.notice).toBe(
+        'Page 10 is past the end: 100 documents matched, so the last page is 5 at per_page 20.',
+      );
+      const text = contentText(result);
+      expect(text).toContain('**Total pages:** 5');
+      expect(text).toContain('> Page 10 is past the end');
+      expect(text).not.toMatch(/Broaden|drop an agency/);
+      expect(text).not.toContain('**Next page:**');
+    });
+
+    it('flags a set larger than 50 pages at the default per_page as truncated, naming what is reachable', async () => {
+      // Live: "drinking water" final rules — 4,429 matches; 50 pages × 20 reach 1,000.
+      searchFn.mockResolvedValue({
+        totalCount: 4429,
+        results: rows(20),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, {
+        query: 'drinking water',
+        type: ['RULE'],
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured).toMatchObject({
+        truncated: true,
+        totalPages: 50,
+        nextPage: 2,
+        cap: 1000,
+        shown: 20,
+      });
+      // Order: reachable count, then per_page, then the narrowing filters.
+      expect(structured.notice).toBe(
+        '4,429 documents matched, but the Federal Register serves 50 pages, so only the first 1,000 are reachable at per_page 20. Raise per_page to 89 or more (max 100) to reach all 4,429. Or narrow with published_after / published_before (or type, agencies, query) to bring the rest within reach.',
+      );
+      const text = contentText(result);
+      expect(text).toContain('**Total pages:** 50');
+      expect(text).toContain('**Next page:** 2');
+      expect(text).toContain('**truncated:** true');
+    });
+
+    it('does not flag truncation when a larger per_page brings every match within 50 pages', async () => {
+      searchFn.mockResolvedValue({
+        totalCount: 4429,
+        results: rows(100),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, {
+        query: 'drinking water',
+        type: ['RULE'],
+        per_page: 100,
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.totalPages).toBe(45);
+      expect(structured.nextPage).toBe(2);
+      expect(structured).not.toHaveProperty('truncated');
+      expect(structured).not.toHaveProperty('notice');
+    });
+
+    it('serves a short final page with no next page and no notice', async () => {
+      searchFn.mockResolvedValue({
+        totalCount: 4429,
+        results: rows(29),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, {
+        query: 'drinking water',
+        per_page: 100,
+        page: 45,
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured.totalPages).toBe(45);
+      expect(structured).not.toHaveProperty('nextPage');
+      expect(structured).not.toHaveProperty('notice');
+      expect((structured.results as unknown[]).length).toBe(29);
+    });
+
+    it('stops per_page advice at its maximum and notes the Federal Register count cap', async () => {
+      searchFn.mockResolvedValue({
+        totalCount: 10_000,
+        results: rows(100),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { per_page: 100, page: 50 });
+      const structured = result.structuredContent as Record<string, unknown>;
+      expect(structured).toMatchObject({ truncated: true, totalPages: 50, cap: 5000 });
+      expect(structured).not.toHaveProperty('nextPage');
+      expect(structured.notice).toBe(
+        'At least 10,000 documents matched (the Federal Register stops counting at 10,000), but it serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query) to bring the rest within reach.',
+      );
+      // Live: an unfiltered search reports count 10,000. A capped count is a
+      // floor, so no surface may state it as the number of matches.
+      expect(contentText(result)).not.toMatch(/(?<!least )10,000 documents matched/);
+    });
+
+    it('states a count below the cap as the exact number of matches', async () => {
+      searchFn.mockResolvedValue({
+        totalCount: 9_999,
+        results: rows(100),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { per_page: 100 });
+      const notice = String((result.structuredContent as Record<string, unknown>).notice);
+      expect(notice).toMatch(/^9,999 documents matched, but the Federal Register serves 50 pages/);
+    });
+
+    it('says how far the largest per_page reaches when no per_page reaches every match', async () => {
+      searchFn.mockResolvedValue({
+        totalCount: 10_000,
+        results: rows(20),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { per_page: 20 });
+      const notice = String((result.structuredContent as Record<string, unknown>).notice);
+      expect(notice).toContain('Raise per_page (max 100) to reach 5,000. Or narrow');
+      expect(notice).not.toMatch(/reach all/);
+    });
+  });
+
+  describe('date_range_inverted', () => {
+    it('rejects published_after later than published_before before any request', async () => {
+      const result = await runToolContract(searchRulesTool, {
+        query: 'PFAS',
+        published_after: '2025-01-01',
+        published_before: '2024-01-01',
+      });
+      const error = (
+        result.structuredContent as { error?: { data?: { reason?: string }; message: string } }
+      ).error;
+      expect(error?.data?.reason).toBe('date_range_inverted');
+      expect(error?.message).toContain('published_after (2025-01-01)');
+      expect(error?.message).toContain('published_before (2024-01-01)');
+      expect(searchFn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['equal dates', { published_after: '2024-06-01', published_before: '2024-06-01' }],
+      ['an empty start', { published_after: '', published_before: '2024-01-01' }],
+      ['an empty end', { published_after: '2025-01-01', published_before: '' }],
+    ])('accepts %s', async (_label, dates) => {
+      searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, { query: 'PFAS', ...dates });
+      expect(result.isError).toBeFalsy();
+      expect(searchFn).toHaveBeenCalledTimes(1);
     });
   });
 

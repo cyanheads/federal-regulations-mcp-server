@@ -10,10 +10,14 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import { isoDate } from './date-input.js';
-import { escapePipes, formatAgencies } from './format-utils.js';
+import { escapePipes, formatAgencies, formatCount } from './format-utils.js';
+import { FEDERAL_REGISTER_PAGE_CEILING, pageSpan, raisePerPageAdvice } from './paging.js';
 
-/** Above this match count the FR's 50-page navigation ceiling (5,000 records) bites. */
-const FR_NAV_CEILING = 5000;
+/** The largest per_page this tool takes. */
+const MAX_PER_PAGE = 100;
+
+/** The Federal Register's `count` saturates here; a larger set reports this number. */
+const FR_COUNT_CAP = 10_000;
 
 export const searchRulesTool = tool('regulations_search_rules', {
   title: 'regulations_search_rules',
@@ -59,7 +63,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .number()
       .int()
       .min(2)
-      .max(100)
+      .max(MAX_PER_PAGE)
       .optional()
       .default(20)
       .describe(
@@ -73,7 +77,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .optional()
       .default(1)
       .describe(
-        'Page number (1–50, default 1). The FR API caps total_pages at 50 — with per_page=100 this allows navigating up to 5,000 results. To reach beyond that window, narrow with published_after/published_before rather than paging deeper.',
+        'Page number (1–50, default 1). The Federal Register serves 50 pages, so a query reaches 50 × per_page matches (5,000 at per_page 100); totalPages and nextPage in the response say how far this one goes. To reach past that, narrow with published_after/published_before rather than paging deeper.',
       ),
   }),
   output: z.object({
@@ -139,16 +143,41 @@ export const searchRulesTool = tool('regulations_search_rules', {
   enrichment: {
     totalCount: z
       .number()
-      .describe('Total matches before pagination (FR count; capped at 10,000 by the API window).'),
+      .describe(
+        'Matches before pagination. The Federal Register stops counting at 10,000, so 10,000 means at least that many.',
+      ),
+    totalPages: z
+      .number()
+      .describe(
+        'Pages at this per_page, at most the 50 the Federal Register serves; 0 when nothing matched.',
+      ),
+    nextPage: z
+      .number()
+      .optional()
+      .describe('Page to request next — present only when a later page holds matches.'),
     truncated: z
       .boolean()
       .optional()
-      .describe('True when matches exceed the FR 50-page (5,000-record) navigation ceiling.'),
+      .describe(
+        'True when more documents matched than 50 pages reach at this per_page, so some are on no page — set on every page of such a set.',
+      ),
     shown: z.number().optional().describe('Results returned on this page.'),
+    cap: z
+      .number()
+      .optional()
+      .describe(
+        'The most matches 50 pages reach at this per_page (50 × per_page); set with truncated.',
+      ),
     notice: z
       .string()
       .optional()
-      .describe('Guidance when nothing matched or when results were truncated.'),
+      .describe(
+        'Guidance when nothing matched, when the page is past the end, or when matches lie beyond the last page.',
+      ),
+  },
+  enrichmentTrailer: {
+    totalPages: { label: 'Total pages' },
+    nextPage: { label: 'Next page' },
   },
   errors: [
     {
@@ -156,6 +185,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       code: JsonRpcErrorCode.ServiceUnavailable,
       when: 'Federal Register returned a 5xx, timed out, or served an HTML error page.',
       recovery: 'Retry after a brief wait; the Federal Register API may be momentarily down.',
+      thrownBy: 'service',
     },
     {
       reason: 'invalid_filter',
@@ -166,9 +196,27 @@ export const searchRulesTool = tool('regulations_search_rules', {
       severity: 'notice',
       thrownBy: 'service',
     },
+    {
+      reason: 'date_range_inverted',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The start of a date range is later than its end.',
+      recovery:
+        'Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day.',
+    },
   ],
 
   async handler(input, ctx) {
+    const publishedAfter = input.published_after || undefined;
+    const publishedBefore = input.published_before || undefined;
+    // An inverted window can only answer empty; it reads as "nothing matched".
+    if (publishedAfter && publishedBefore && publishedAfter > publishedBefore) {
+      throw ctx.fail(
+        'date_range_inverted',
+        `published_after (${publishedAfter}) is later than published_before (${publishedBefore}), so no document can fall in the window.`,
+        { ...ctx.recoveryFor('date_range_inverted') },
+      );
+    }
+
     const service = getFederalRegisterService();
     const query = input.query || undefined;
     const result = await service.search(
@@ -176,8 +224,8 @@ export const searchRulesTool = tool('regulations_search_rules', {
         query,
         types: input.type,
         agencies: input.agencies?.length ? input.agencies : undefined,
-        publishedAfter: input.published_after || undefined,
-        publishedBefore: input.published_before || undefined,
+        publishedAfter,
+        publishedBefore,
         order: input.order ?? (query ? 'relevance' : 'newest'),
         perPage: input.per_page,
         page: input.page,
@@ -185,21 +233,48 @@ export const searchRulesTool = tool('regulations_search_rules', {
       ctx,
     );
 
-    ctx.enrich.total(result.totalCount);
+    const total = result.totalCount;
+    const span = pageSpan({
+      total,
+      perPage: input.per_page,
+      page: input.page,
+      ceiling: FEDERAL_REGISTER_PAGE_CEILING,
+    });
+    ctx.enrich.total(total);
+    ctx.enrich({
+      totalPages: span.totalPages,
+      ...(span.nextPage !== undefined && { nextPage: span.nextPage }),
+    });
 
-    if (result.results.length === 0) {
+    if (total === 0) {
       ctx.enrich.notice(
         'No Federal Register documents matched. Broaden the query, widen the date range, or drop an agency filter.',
       );
-      return { results: [] };
-    }
-
-    if (result.totalCount > FR_NAV_CEILING) {
-      ctx.enrich.truncated({
-        shown: result.results.length,
-        cap: FR_NAV_CEILING,
-        guidance: `${result.totalCount} matches exceed the Federal Register's 5,000-record navigation ceiling. Narrow with published_after / published_before to reach the rest.`,
+    } else if (span.pastEnd) {
+      ctx.enrich.notice(
+        `Page ${input.page} is past the end: ${formatCount(total)} documents matched, so the last page is ${span.totalPages} at per_page ${input.per_page}.`,
+      );
+    } else if (span.truncated) {
+      const raise = raisePerPageAdvice({
+        total,
+        perPage: input.per_page,
+        maxPerPage: MAX_PER_PAGE,
+        ceiling: FEDERAL_REGISTER_PAGE_CEILING,
       });
+      // A count at the cap is a floor; per_page advice never promises to reach it,
+      // since 50 pages of the largest per_page reach half the cap.
+      const matched =
+        total >= FR_COUNT_CAP
+          ? `At least ${formatCount(FR_COUNT_CAP)} documents matched (the Federal Register stops counting at ${formatCount(FR_COUNT_CAP)}), but it serves`
+          : `${formatCount(total)} documents matched, but the Federal Register serves`;
+      const guidance = [
+        `${matched} ${FEDERAL_REGISTER_PAGE_CEILING} pages, so only the first ${formatCount(span.reachable)} are reachable at per_page ${input.per_page}.`,
+        raise,
+        `${raise ? 'Or narrow' : 'Narrow'} with published_after / published_before (or type, agencies, query) to bring the rest within reach.`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      ctx.enrich.truncated({ shown: result.results.length, cap: span.reachable, guidance });
     }
 
     return { results: result.results };
