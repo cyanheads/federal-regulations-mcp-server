@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.0](changelog/0.5.x/0.5.0.md) — 2026-09-25 · ⚠️ Breaking
+
+regulations_find_comments gains text and posted-date filters and resolves documents by exact FR number or document ID; list tools share one paging contract to each upstream's real page ceiling; older FR document numbers are accepted.
+
 ## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-09-22 · ⚠️ Breaking
 
 CFR section text is now a bounded, resumable window (breaking), structure mode lists a part's sections and appendices flattened, search collapses per-version repeats, and the mirror refresh cron actually runs.

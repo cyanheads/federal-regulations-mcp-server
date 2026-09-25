@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-09-22 20:43:01
+Generated on: 2026-09-25 09:28:09
 
 ```text
 federal-regulations-mcp-server/
@@ -27,6 +27,8 @@ federal-regulations-mcp-server/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
 │   ├── 0.3.x/
+│   ├── 0.4.x/
+│   ├── 0.5.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
@@ -153,6 +155,7 @@ federal-regulations-mcp-server/
 │   │       └── definitions/
 │   │           ├── browse-cfr.tool.ts
 │   │           ├── date-input.ts
+│   │           ├── document-number.ts
 │   │           ├── find-comments.tool.ts
 │   │           ├── format-utils.ts
 │   │           ├── get-cfr-section.tool.ts
@@ -160,6 +163,7 @@ federal-regulations-mcp-server/
 │   │           ├── get-document.tool.ts
 │   │           ├── index.ts
 │   │           ├── list-open-comments.tool.ts
+│   │           ├── paging.ts
 │   │           └── search-rules.tool.ts
 │   ├── services/
 │   │   ├── ecfr/
@@ -177,6 +181,7 @@ federal-regulations-mcp-server/
 │   │   ├── regulations-gov/
 │   │   │   ├── regulations-gov-service.ts
 │   │   │   └── types.ts
+│   │   ├── character-references.ts
 │   │   ├── request-budget.ts
 │   │   ├── text-window.ts
 │   │   └── upstream-failure.ts
@@ -197,6 +202,7 @@ federal-regulations-mcp-server/
 │   ├── scripts/
 │   │   └── lint-packaging.test.ts
 │   ├── services/
+│   │   ├── character-references.test.ts
 │   │   ├── ecfr-mirror.test.ts
 │   │   ├── ecfr-service.test.ts
 │   │   ├── ecfr-xml.test.ts
@@ -219,6 +225,7 @@ federal-regulations-mcp-server/
 │   │   ├── get-document.tool.test.ts
 │   │   ├── list-open-comments-window.test.ts
 │   │   ├── list-open-comments.tool.test.ts
+│   │   ├── paging.test.ts
 │   │   └── search-rules.tool.test.ts
 │   └── tsconfig-coverage.test.ts
 ├── .dockerignore
