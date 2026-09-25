@@ -78,8 +78,10 @@ Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_s
 
 ### `regulations_get_cfr_section` <sub>tool</sub>
 
-- One section (`title` + `part` + `section`), a whole part (`section` omitted), or one appendix (`appendix`, verbatim as `regulations_browse_cfr` emits it, e.g. `Appendix A-1 to Part 50`). `section` also takes cites as people write them (`"61"`, `"§ 141.61"`, `"141.61(c)"`), and `date` reads text from 2017-01-01 through the title's up-to-date date
+- One section (`title` + `part` + `section`), a whole part (`section` omitted), or one appendix (`appendix`, verbatim as `regulations_browse_cfr` emits it, e.g. `Appendix A-1 to Part 50`). `section` also takes cites as people write them (`"61"`, `"§ 141.61"`, `"141.61(c)"`) and the `cfrCite` the server returns (`"40 CFR 141.61"`, `"14 CFR 241 § 25"`; a cite naming another title fails with `conflicting_title`), `part` takes `"Part 141"`, and `date` reads text from 2017-01-01 through the title's up-to-date date
 - Text comes back as one `bodyText` window (`max_chars` default 64,000, max 200,000, from `offset`), paged by `bodyTextLength` and `bodyTextNextOffset`. A whole-part read adds a `sections[]` index with each section's `offset` and names its `appendices` without their text; `source` (`mirror` / `live`) reports provenance
+- A whole-part read also returns the part's `heading`, `authority`, `sourceNote`, and `notes`, and each `sections[]` entry carries the Authority or Source its subpart or subject group states for it
+- Superscripts read `^x` and subscripts `_x` (`3 × 10^−8`, `CO_{2}e`), footnote markers `[n]`, and diacritics and overlines are combining marks (`x̄`)
 
 ---
 
@@ -116,7 +118,7 @@ Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_s
 
 ### `regulations://cfr/{title}/{part}/{section}` <sub>resource</sub>
 
-- Sections only, at the current date and the tool's default 64,000-character window; the `section` segment resolves the way the tool resolves it (`"61"`, `"§ 141.61"`)
+- Sections only, at the current date and the tool's default 64,000-character window; the `part` and `section` segments resolve the way the tool resolves them (`"Part 141"`; `"61"`, `"§ 141.61"`, `"40 CFR 141.61"`)
 - `source` (`mirror` / `live`) reports provenance. `bodyTextNextOffset` marks a section longer than the window; read the rest through `regulations_get_cfr_section` with `offset`
 
 ## Features
@@ -128,7 +130,7 @@ Federal Register / eCFR / Regulations.gov-specific:
 - One workflow over three official sources: the agent calls regulatory verbs (`search_rules`, `get_cfr_section`, `find_comments`) rather than three API clients
 - Cross-source stitching: every Federal Register document surfaces its docket ID and CFR-part handles, which feed the proposal → comments → final rule → codified text trace
 - Keyless core: the five Federal Register and eCFR tools need no key. `regulations_get_docket` and `regulations_find_comments` need `REGULATIONS_GOV_API_KEY` (free at [api.data.gov/signup](https://api.data.gov/signup/), 1,000 requests/hour) and fail with `auth_required`, naming the variable and signup URL, when it is missing or rejected
-- Locally mirrored codified CFR: the eCFR syncs into embedded SQLite + FTS5 for exact-cite reads and full-text search, and falls back to the live API for historical dates, whole parts, appendices, and titles outside the mirror
+- Locally mirrored codified CFR: the eCFR syncs into embedded SQLite + FTS5 for exact-cite reads and full-text search, and falls back to the live API for historical dates, whole parts, appendices, titles outside the mirror, and titles eCFR has re-issued since the mirror last synced them
 - A 45-second budget per request, shared by every upstream call, retry, and backoff, so a stalled source answers with `upstream_unavailable` inside a client's timeout
 
 Agent-friendly output:
