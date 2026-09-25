@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-09-25 09:28:09
+Generated on: 2026-09-25 10:14:51
 
 ```text
 federal-regulations-mcp-server/
@@ -154,10 +154,12 @@ federal-regulations-mcp-server/
 │   │   └── tools/
 │   │       └── definitions/
 │   │           ├── browse-cfr.tool.ts
+│   │           ├── cfr-part.ts
 │   │           ├── date-input.ts
 │   │           ├── document-number.ts
 │   │           ├── find-comments.tool.ts
 │   │           ├── format-utils.ts
+│   │           ├── fr-citation.ts
 │   │           ├── get-cfr-section.tool.ts
 │   │           ├── get-docket.tool.ts
 │   │           ├── get-document.tool.ts
@@ -176,6 +178,7 @@ federal-regulations-mcp-server/
 │   │   │   ├── ecfr-mirror.ts
 │   │   │   └── refresh-job.ts
 │   │   ├── federal-register/
+│   │   │   ├── comment-period.ts
 │   │   │   ├── federal-register-service.ts
 │   │   │   └── types.ts
 │   │   ├── regulations-gov/
@@ -226,6 +229,7 @@ federal-regulations-mcp-server/
 │   │   ├── list-open-comments-window.test.ts
 │   │   ├── list-open-comments.tool.test.ts
 │   │   ├── paging.test.ts
+│   │   ├── search-rules-citation.test.ts
 │   │   └── search-rules.tool.test.ts
 │   └── tsconfig-coverage.test.ts
 ├── .dockerignore

@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.1](changelog/0.5.x/0.5.1.md) — 2026-09-25
+
+regulations_search_rules filters by CFR part, printed docket number, and RIN and resolves a CFR source-note cite to its document; Federal Register rows carry keyless Regulations.gov IDs, comment counts, and comment URLs, plus whether the comment period is open.
+
 ## [0.5.0](changelog/0.5.x/0.5.0.md) — 2026-09-25 · ⚠️ Breaking
 
 regulations_find_comments gains text and posted-date filters and resolves documents by exact FR number or document ID; list tools share one paging contract to each upstream's real page ceiling; older FR document numbers are accepted.
