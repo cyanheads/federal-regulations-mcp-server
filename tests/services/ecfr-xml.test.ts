@@ -135,6 +135,7 @@ describe('parseCfrXml sections', () => {
     expect(parseCfrXml('<DIV5 TYPE="PART" N="50"></DIV5>')).toEqual({
       sections: [],
       appendices: [],
+      parts: [{ part: '50', heading: '', authority: null, sourceNote: null, notes: [] }],
     });
   });
 
@@ -173,6 +174,336 @@ describe('parseCfrXml character references', () => {
 
   it('decodes an escaped reference once', () => {
     expect(bodyOf('&amp;lt;10 &amp;amp;')).toBe('&lt;10 &amp;');
+  });
+});
+
+/** `GET /versioner/v1/full/2026-09-17/title-40.xml?part=141&section=141.61`, byte for byte. */
+const SECTION_141_61 = readFileSync(
+  new URL('../fixtures/ecfr-40-141.61.xml', import.meta.url),
+  'utf-8',
+);
+
+/** The body a section of one `<P>` holding `inner` reads as. */
+function paragraphText(inner: string): string {
+  const xml = `<DIV8 TYPE="SECTION" N="9.1"><HEAD>§ 9.1 X.</HEAD><P>${inner}</P></DIV8>`;
+  return parseCfrXml(xml).sections[0]!.bodyText;
+}
+
+/** The body a section of one table cell holding `inner` reads as. */
+function cellText(inner: string): string {
+  const xml = `<DIV8 TYPE="SECTION" N="9.1"><HEAD>§ 9.1 X.</HEAD><TABLE><TR><TD>${inner}</TD></TR></TABLE></DIV8>`;
+  return parseCfrXml(xml).sections[0]!.bodyText;
+}
+
+describe('inline markup: exponents, subscripts, footnote markers (#51)', () => {
+  it('reads 40 CFR 141.61 with its exponent, table marker, and paragraph letter in place', () => {
+    const body = parseCfrXml(SECTION_141_61).sections[0]!.bodyText;
+    // `3 × 10<sup>−</sup> <sup>8</sup>` — the 2,3,7,8-TCDD MCL, 3×10⁻⁸ mg/L.
+    expect(body).toContain('2,3,7,8-TCDD (Dioxin) | 3 × 10^−8');
+    // `1 (unitless) <sup>1</sup>` — a table footnote marker the markup cannot
+    // tell from an exponent, so it keeps the superscript form.
+    expect(body).toContain('1 (unitless) ^1 |');
+    // `Paragraph (<E T="01">a</E>)` — an inline element adds no separator.
+    expect(body).toContain('Table 1 to Paragraph (a)—Maximum Contaminant Levels');
+    expect(body).not.toContain('( a)');
+    expect(body).not.toContain('10 − 8');
+  });
+
+  it.each([
+    ['SO<E T="52">2</E> emissions', 'SO_2 emissions'],
+    ['CO<E T="52">2</E>e per year', 'CO_{2}e per year'],
+    ['4500-CN<sup>−</sup> C', '4500-CN^− C'],
+    ['PM<sub>2.5</sub> levels', 'PM_2.5 levels'],
+    ['10<E T="51">&#x2212;14</E> m', '10^−14 m'],
+    ['RT<E T="54">NDT</E> is', 'RT_NDT is'],
+    ['cm<SU>2</SU> area', 'cm^2 area'],
+    ['Btu/ft <SU>2</SU>sec', 'Btu/ft ^{2}sec'],
+    ['the <sup>1 2</sup> notes', 'the ^{1 2} notes'],
+    ['K<sub><em>eff</em></sub> value', 'K_eff value'],
+    ['x<sup></sup> y', 'x y'],
+  ])('renders %j as %j', (inner, expected) => {
+    expect(paragraphText(inner)).toBe(expected);
+  });
+
+  it('joins a sign-only run to the run beside it, across whitespace', () => {
+    expect(paragraphText('3 × 10<sup>−</sup> <sup>8</sup> mg/L')).toBe('3 × 10^−8 mg/L');
+    expect(paragraphText('SO<sub>4</sub> <sup>2</sup> <sup>&#x2212;</sup> ion')).toBe(
+      'SO_4 ^2− ion',
+    );
+    expect(paragraphText('e<sup>±</sup><sup>3</sup>')).toBe('e^±3');
+  });
+
+  it('keeps two adjacent markers that are not signs apart', () => {
+    expect(cellText('value <sup>d</sup> <sup>e</sup>')).toBe('value ^d ^e');
+  });
+
+  it('never joins runs of different kinds', () => {
+    expect(paragraphText('X<sub>−</sub> <sup>2</sup>')).toBe('X_− ^2');
+  });
+
+  it('marks a footnote reference and a footnote label, and nothing else, as [n]', () => {
+    expect(paragraphText('access <SU>2</SU><FTREF/> to')).toBe('access [2] to');
+    expect(paragraphText('<SU>1</SU> If the notice is late')).toBe('[1] If the notice is late');
+    // A superscript opening a table cell is not a paragraph's footnote label.
+    expect(cellText('<SU>1</SU> The PFAS Mixture')).toBe('^1 The PFAS Mixture');
+    // A superscript mid-paragraph with no footnote reference is an exponent.
+    expect(paragraphText('area in cm<SU>2</SU>.')).toBe('area in cm^2.');
+  });
+
+  it('adds no separator for inline elements, and a space for every other tag', () => {
+    expect(paragraphText('Paragraph (<E T="01">a</E>) and <I>Act</I>, <B>bold</B>')).toBe(
+      'Paragraph (a) and Act, bold',
+    );
+    expect(paragraphText('<em>x</em><strong>y</strong>')).toBe('xy');
+    expect(cellText('MCL<br></br>(mg/l)')).toBe('MCL (mg/l)');
+    expect(paragraphText('8<FR>1/2</FR> inches')).toBe('8 1/2 inches');
+  });
+
+  it('keeps an inline element nested in a run inside the run', () => {
+    expect(paragraphText('V<E T="52">max<E T="03">x</E>y</E> z')).toBe('V_maxxy z');
+  });
+
+  it('renders a heading the same way', () => {
+    const xml = `<DIV8 TYPE="SECTION" N="50.6"><HEAD>§ 50.6 PM<E T="52">10</E> in (<E T="01">a</E>).</HEAD><P>x</P></DIV8>`;
+    expect(parseCfrXml(xml).sections[0]!.heading).toBe('§ 50.6 PM_10 in (a).');
+  });
+});
+
+describe('diacritics and overlines (#60)', () => {
+  it('puts a mark on the character before it, dropping the newline between them', () => {
+    expect(paragraphText('<I>x\n<AC T="8"/></I> is the sample mean')).toBe('x̄ is the sample mean');
+    expect(paragraphText('n\n<AC T="g"/> is the number of units')).toBe('ṉ is the number of units');
+  });
+
+  it('reaches back across a closing </I> or </E> to the base', () => {
+    expect(paragraphText('<I>t</I>\n<AC T="g"/><E T="52">0.975</E> is the t statistic')).toBe(
+      'ṯ_0.975 is the t statistic',
+    );
+    expect(cellText('<E T="03">n</E>\n<AC T="b"/> = 3')).toBe('ṅ = 3');
+  });
+
+  it('reads a diacritic written as an open-close pair the same as a self-closing one', () => {
+    // 10 CFR 429.35 as the versioner serves it on 2026-09-25: `<AC T="g"></AC>`.
+    expect(paragraphText('<I>t</I>\n<AC T="g"></AC><E T="52">0.975</E> is')).toBe('ṯ_0.975 is');
+    expect(paragraphText('x\n<AC T="8"></AC> is the mean')).toBe('x̄ is the mean');
+  });
+
+  it('marks a base written as a character reference', () => {
+    expect(paragraphText('2&#x3C3;\n<AC T="3"/> from the mean')).toBe('2σ̂ from the mean');
+  });
+
+  it('emits both marks of a two-mark code, dot first', () => {
+    expect(paragraphText('V\n<AC T="i"/>, C')).toBe('V̇̅, C');
+    expect(paragraphText('<I>n\n<AC T="j"/></I><E T="52">1</E> = 3.922 mol')).toBe(
+      'ṅ̃_1 = 3.922 mol',
+    );
+  });
+
+  it('marks the base before a subscript, and each of two bases in a row', () => {
+    expect(paragraphText('W<AC T="8"/><sub>v</sub> is')).toBe('W̄_v is');
+    expect(paragraphText('C\n<AC T="8"/>V\n<AC T="8"/> = 0.008')).toBe('C̄V̄ = 0.008');
+  });
+
+  it.each([
+    ['b', '̇'],
+    ['8', '̄'],
+    ['i', '̇̅'],
+    ['3', '̂'],
+    ['g', '̱'],
+    ['6', '̃'],
+    ['j', '̇̃'],
+    ['2', '̀'],
+    ['1', '́'],
+    ['4', '̈'],
+    ['7', '̊'],
+    ['9', '̧'],
+  ])('renders code %s as its mark', (code, mark) => {
+    expect(paragraphText(`q\n<AC T="${code}"/> end`)).toBe(`q${mark} end`);
+  });
+
+  it.each(['I', '0', '5', 'constructor'])('keeps the base and adds nothing for code %j', (code) => {
+    expect(paragraphText(`V\n<AC T="${code}"/>, specific heat`)).toBe('V, specific heat');
+  });
+
+  it('overlines each character of an <E T="7503"> span', () => {
+    expect(paragraphText('Average <E T="7503">RM</E> value')).toBe('Average R̅M̅ value');
+  });
+});
+
+describe('inline rendering stays linear (#51, #60)', () => {
+  it.each([
+    ['unclosed <sup> runs', (n: number) => '<sup>1'.repeat(n / 6)],
+    [
+      'unclosed inline openers then stray closers',
+      (n: number) => `${'<I>'.repeat(n / 6)}${'</B>'.repeat(n / 8)}`,
+    ],
+    [
+      'open inline elements each closed by an outer name',
+      (n: number) => '<E T="03"><I>x</E>'.repeat(n / 18),
+    ],
+    ['sign runs in a row', (n: number) => '<sup>1</sup> <sup>−</sup> '.repeat(n / 24)],
+    [
+      'footnote references after spacing',
+      (n: number) => `<SU>1</SU>${'<br/><FTREF/>'.repeat(n / 13)}`,
+    ],
+    ['diacritics in a row', (n: number) => `x${'\n<AC T="8"/>'.repeat(n / 12)}`],
+    [
+      'diacritics after long whitespace',
+      (n: number) => `x${' '.repeat(n / 2)}${'<AC T="8"/>'.repeat(n / 22)}`,
+    ],
+    ['overline spans', (n: number) => '<E T="7503">RM</E>'.repeat(n / 18)],
+  ])('renders %s in linear time', (_label, build) => {
+    const timings = timeAcrossSizes(build, (inner) => paragraphText(inner));
+    expectLinear(timings);
+  });
+});
+
+/** A verbatim cut of a real whole-part versioner response (`tests/fixtures/`). */
+function partFixture(name: string) {
+  return parseCfrXml(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), 'utf-8'));
+}
+
+describe('part, subpart, and subject-group notes (#52)', () => {
+  it('reads 40 CFR 141’s heading, Authority, Source, and part-level notes', () => {
+    // The part's preamble plus its Subpart B, verbatim from `?part=141`.
+    const { parts, sections } = partFixture('ecfr-40-141-part-notes.xml');
+    expect(parts).toHaveLength(1);
+    const [part] = parts;
+    expect(part).toMatchObject({
+      part: '141',
+      heading: 'PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS',
+      sourceNote: '40 FR 59570, Dec. 24, 1975, unless otherwise noted.',
+    });
+    expect(part?.authority).toMatch(/^42 U\.S\.C\. 300f, 300g-1, .* and 300j-11\.$/);
+    expect(part?.notes).toHaveLength(2);
+    expect(part?.notes[0]).toBe(
+      'Nomenclature changes to part 141 appear at 69 FR 18803, Apr. 9, 2004.',
+    );
+    expect(part?.notes[1]).toMatch(/^For community water systems serving 75,000 or more persons/);
+    // No subpart note governs Subpart B, so its sections carry none of their own.
+    expect(sections.map((s) => [s.section, s.authority, s.sourceNote])).toEqual([
+      ['141.11', null, null],
+      ['141.12', null, null],
+      ['141.13', null, null],
+    ]);
+    // The notes are not folded into any section's text (a section's own <CITA>
+    // may cite the same FR page).
+    for (const text of ['unless otherwise noted', 'Nomenclature changes', 'Authority:']) {
+      expect(sections.some((s) => s.bodyText.includes(text))).toBe(false);
+    }
+  });
+
+  it('reports no notes for a part that has none, and keeps a section’s own <SECAUTH>', () => {
+    const { parts, sections } = partFixture('ecfr-10-622.xml');
+    expect(parts).toEqual([
+      {
+        part: '622',
+        heading: 'PART 622—CONTRACTUAL PROVISIONS',
+        authority: null,
+        sourceNote: null,
+        notes: [],
+      },
+    ]);
+    const body = sections[0]!.bodyText;
+    // In document order, ahead of the section's <CITA>.
+    expect(body).toMatch(
+      /\n\n\(Sec\. 644, Department of Energy Organization Act, Pub\. L\. 95-91, 91 Stat\. 599 \(42 U\.S\.C\. 7254\)\)\n\n\[46 FR 34559, July 2, 1981\]$/,
+    );
+  });
+
+  it('puts a subpart’s Source on the sections under it when the part has none (10 CFR 20)', () => {
+    const { parts, sections } = partFixture('ecfr-10-20-part-notes.xml');
+    expect(parts[0]?.sourceNote).toBeNull();
+    expect(parts[0]?.authority).toMatch(/^Atomic Energy Act of 1954, secs\. 11, 53/);
+    expect(sections.map((s) => [s.section, s.sourceNote, s.authority])).toEqual([
+      ['20.1001', '56 FR 23391, May 21, 1991, unless otherwise noted.', null],
+      ['20.1002', '56 FR 23391, May 21, 1991, unless otherwise noted.', null],
+      ['20.1101', '56 FR 23396, May 21, 1991, unless otherwise noted.', null],
+    ]);
+  });
+
+  it('reads subject-group notes, and a part-level note that follows the part’s subparts (10 CFR 205)', () => {
+    const { parts, sections } = partFixture('ecfr-10-205-part-notes.xml');
+    const [part] = parts;
+    expect(part?.sourceNote).toBe('39 FR 35489, Oct. 1, 1974, unless otherwise noted.');
+    // Two Authority paragraphs, kept apart.
+    expect(part?.authority?.split('\n\n')).toHaveLength(2);
+    expect(part?.authority).toMatch(/^Department of Energy Organization Act, Pub\. L\. 95-91/);
+    // The OMB note written at part level, after Subpart W, is the part's.
+    expect(part?.notes).toEqual([
+      '(Approved by the Office of Management and Budget under Control No. 1901-0245)',
+    ]);
+
+    const byId = new Map(sections.map((s) => [s.section, s]));
+    // The Source written after Subpart W governs what follows it, not the whole part.
+    expect(byId.get('205.300')).toMatchObject({
+      authority: null,
+      sourceNote: '45 FR 71560, Oct. 28, 1980; 46 FR 63209, Dec. 31, 1981, unless otherwise noted.',
+    });
+    // A subject group's own notes win over it.
+    const s350 = byId.get('205.350');
+    expect(s350?.authority).toMatch(
+      /^Department of Energy Organization Act, Pub\. L\. 95-91 \(42 U\.S\.C\. 7101\)/,
+    );
+    expect(s350?.sourceNote).toMatch(/^Sections 205\.350 through 205\.353 appear at 51 FR 39745/);
+    // A section's own OMB control-number note stays in its text.
+    expect(s350?.bodyText).toContain(
+      '(Approved by the Office of Management and Budget under control number 1901-0288)',
+    );
+  });
+
+  it('resolves each note from the nearest level that states one, and lets no scope leak', () => {
+    const xml = `<DIV1 N="9" TYPE="TITLE">
+      <DIV5 N="1" TYPE="PART"><HEAD>PART 1—ONE</HEAD>
+        <AUTH><HED>Authority:</HED><PSPACE>Part auth.</PSPACE></AUTH>
+        <DIV6 N="A" TYPE="SUBPART"><HEAD>Subpart A</HEAD>
+          <AUTH><HED>Authority:</HED><PSPACE>Subpart A auth.</PSPACE></AUTH>
+          <DIV7 N="ECFRx" TYPE="SUBJGRP"><HEAD>Group</HEAD>
+            <SOURCE><HED>Source:</HED><PSPACE>Group source.</PSPACE></SOURCE>
+            <DIV8 N="1.1" TYPE="SECTION"><HEAD>§ 1.1 In group.</HEAD><P>x</P></DIV8>
+          </DIV7>
+          <DIV8 N="1.2" TYPE="SECTION"><HEAD>§ 1.2 After group.</HEAD><P>x</P></DIV8>
+        </DIV6>
+        <DIV6 N="B" TYPE="SUBPART"><HEAD>Subpart B</HEAD>
+          <DIV8 N="1.3" TYPE="SECTION"><HEAD>§ 1.3 Plain.</HEAD><P>x</P></DIV8>
+        </DIV6>
+      </DIV5>
+      <DIV5 N="2" TYPE="PART"><HEAD>PART 2—TWO</HEAD>
+        <DIV8 N="2.1" TYPE="SECTION"><HEAD>§ 2.1 Other part.</HEAD><P>x</P></DIV8>
+      </DIV5>
+    </DIV1>`;
+    const { parts, sections } = parseCfrXml(xml);
+    expect(parts.map((p) => [p.part, p.heading, p.authority])).toEqual([
+      ['1', 'PART 1—ONE', 'Part auth.'],
+      ['2', 'PART 2—TWO', null],
+    ]);
+    expect(sections.map((s) => [s.section, s.authority, s.sourceNote])).toEqual([
+      ['1.1', 'Subpart A auth.', 'Group source.'],
+      ['1.2', 'Subpart A auth.', null],
+      ['1.3', null, null],
+      ['2.1', null, null],
+    ]);
+  });
+
+  it('reads no part notes from a section-filtered response, which has no part around it', () => {
+    const { parts, sections } = parseCfrXml(SECTION_141_61);
+    expect(parts).toEqual([]);
+    expect(sections[0]).toMatchObject({ authority: null, sourceNote: null });
+  });
+
+  it('keeps a <SECAUTH> in an appendix too', () => {
+    const xml = `<DIV9 N="Appendix A to Part 33" TYPE="APPENDIX"><HEAD>Appendix A</HEAD><P>Body.</P><SECAUTH TYPE="N">(Sec. 161, Pub. L. 83-703)</SECAUTH></DIV9>`;
+    expect(parseCfrXml(xml).appendices[0]!.bodyText).toBe('Body.\n\n(Sec. 161, Pub. L. 83-703)');
+  });
+
+  it('walks unclosed note elements in linear time', () => {
+    const timings = timeAcrossSizes(
+      (n) => `<DIV5 N="1" TYPE="PART">${'<AUTH><DIV6 N="A" TYPE="SUBPART">'.repeat(n / 34)}`,
+      (xml) => {
+        expect(parseCfrXml(xml).parts).toHaveLength(1);
+      },
+    );
+    expectLinear(timings);
   });
 });
 
@@ -240,7 +571,7 @@ describe('parseCfrXml appendices', () => {
     expect(appendices[0]!.appendix).toBe('Appendix A-1 to Part 50');
     expect(appendices[0]!.part).toBe('50');
     expect(appendices[0]!.heading).toBe('Appendix A-1 to Part 50—Reference Measurement Principle');
-    expect(appendices[0]!.bodyText).toBe('1.0 Applicability\n\n1.1 This method measures SO 2.');
+    expect(appendices[0]!.bodyText).toBe('1.0 Applicability\n\n1.1 This method measures SO_2.');
   });
 
   it('takes the part from hierarchy_metadata when no DIV5 wraps the appendix', () => {
@@ -323,6 +654,100 @@ describe('parseCfrXml appendices', () => {
   });
 });
 
+/**
+ * Time `run` over the input `build` makes at 5k, 20k, and 80k characters, after
+ * one warm-up call, returning the best of three runs at each size in
+ * milliseconds — the best, so a collector pause during one run of a
+ * few-millisecond call is not read as the algorithm's cost.
+ */
+function timeAcrossSizes(build: (n: number) => string, run: (input: string) => void): number[] {
+  run(build(5_000));
+  return [5_000, 20_000, 80_000].map((n) => {
+    const input = build(n);
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      run(input);
+      best = Math.min(best, performance.now() - started);
+    }
+    return best;
+  });
+}
+
+/** Sixteen times the input may cost at most ~64× the time, and 80k stays fast. */
+function expectLinear([t5k = 0, , t80k = 0]: number[]): void {
+  expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
+  expect(t80k).toBeLessThan(150);
+}
+
+describe('parseCfrXml on malformed markup stays linear (#57)', () => {
+  /** A section whose one paragraph holds `inner`. */
+  const paragraph = (inner: string) =>
+    `<DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 X.</HEAD><P>${inner}</P></DIV8>`;
+  /** A section whose one table cell holds `inner`. */
+  const cell = (inner: string) =>
+    `<DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 X.</HEAD><TABLE><TR><TD>${inner}</TD></TR></TABLE></DIV8>`;
+
+  it.each([
+    ['unclosed <', (n: number) => '<'.repeat(n)],
+    ['<a openers', (n: number) => '<a'.repeat(n / 2)],
+    ['</ closers', (n: number) => '</'.repeat(n / 2)],
+  ])('strips a paragraph of %s in linear time, keeping the text', (_label, build) => {
+    const timings = timeAcrossSizes(build, (inner) => {
+      // A `<` that opens no tag is text, and stays text.
+      expect(parseCfrXml(paragraph(inner)).sections[0]!.bodyText).toBe(inner);
+    });
+    expectLinear(timings);
+  });
+
+  it.each([
+    ['unclosed <', (n: number) => '<'.repeat(n)],
+    ['<a openers', (n: number) => '<a'.repeat(n / 2)],
+    ['</ closers', (n: number) => '</'.repeat(n / 2)],
+  ])('strips a table cell of %s in linear time', (_label, build) => {
+    const timings = timeAcrossSizes(build, (inner) => {
+      expect(parseCfrXml(cell(inner)).sections[0]!.bodyText).toBe(inner);
+    });
+    expectLinear(timings);
+  });
+
+  it.each([
+    ['unclosed <P> blocks', (n: number) => '<P>'.repeat(n / 3), ''],
+    ['<P openers with no >', (n: number) => '<P '.repeat(n / 3), ''],
+    ['<img openers with no >', (n: number) => '<img'.repeat(n / 4), ''],
+  ])('scans a section body of %s in linear time', (_label, build, body) => {
+    const timings = timeAcrossSizes(build, (inner) => {
+      const xml = `<DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 X.</HEAD>${inner}</DIV8>`;
+      expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(body);
+    });
+    expectLinear(timings);
+  });
+
+  it('reads past an unclosed <HEAD> in linear time', () => {
+    const timings = timeAcrossSizes(
+      (n) => '<HEAD>'.repeat(n / 6),
+      (inner) => {
+        const xml = `<DIV8 TYPE="SECTION" N="1.1">${inner}<P>Body.</P></DIV8>`;
+        const [section] = parseCfrXml(xml).sections;
+        expect(section).toMatchObject({ section: '1.1', heading: '§ 1.1', bodyText: 'Body.' });
+      },
+    );
+    expectLinear(timings);
+  });
+
+  it.each([
+    ['<DIV8 openers with no >', (n: number) => '<DIV8 '.repeat(n / 6)],
+    ['unclosed section elements', (n: number) => '<DIV8 TYPE="SECTION">'.repeat(n / 21)],
+    ['unclosed appendix elements', (n: number) => '<DIV9 N="A" TYPE="APPENDIX">'.repeat(n / 28)],
+    ['<DIV5 openers with no >', (n: number) => '<DIV5 '.repeat(n / 6)],
+  ])('walks a document of %s in linear time', (_label, build) => {
+    const timings = timeAcrossSizes(build, (xml) => {
+      expect(parseCfrXml(xml)).toMatchObject({ sections: [], appendices: [] });
+    });
+    expectLinear(timings);
+  });
+});
+
 describe('isCompleteXmlDocument', () => {
   it('accepts a whole title document as the versioner serves it', () => {
     expect(isCompleteXmlDocument(TITLE_3_DOCUMENT)).toBe(true);
@@ -363,5 +788,35 @@ describe('isCompleteXmlDocument', () => {
   it('looks past a comment before the root element', () => {
     expect(isCompleteXmlDocument('<!-- </ECFR> -->\n<ECFR><P>x</P></ECFR>')).toBe(true);
     expect(isCompleteXmlDocument('<!-- </ECFR> -->\n<ECFR><P>x</P>')).toBe(false);
+  });
+
+  it('looks past a doctype, and a processing instruction after the declaration', () => {
+    expect(
+      isCompleteXmlDocument(
+        '<?xml version="1.0"?><?xml-stylesheet href="x"?><!DOCTYPE ECFR>\n<ECFR><P>x</P></ECFR>',
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['a processing instruction', '<?xml version="1.0"\n<ECFR><P>x</P></ECFR>'],
+    ['a comment', '<!-- note\n<ECFR><P>x</P></ECFR>'],
+    ['a declaration', '<!DOCTYPE ECFR'],
+    ['the root element’s open tag', '<ECFR N="1" '],
+  ])('reads a document whose %s never closes as incomplete', (_label, xml) => {
+    // Whatever follows an unterminated construct is inside it, so no root opens.
+    expect(isCompleteXmlDocument(xml)).toBe(false);
+  });
+
+  it.each([
+    ['unclosed <?', (n: number) => '<?'.repeat(n / 2)],
+    ['unclosed <!--', (n: number) => '<!--'.repeat(n / 4)],
+    ['unclosed <!', (n: number) => '<!'.repeat(n / 2)],
+    ['element openers with no >', (n: number) => '<a '.repeat(n / 3)],
+  ])('reads a body of %s as incomplete in linear time (#62)', (_label, build) => {
+    const timings = timeAcrossSizes(build, (xml) => {
+      expect(isCompleteXmlDocument(xml)).toBe(false);
+    });
+    expectLinear(timings);
   });
 });

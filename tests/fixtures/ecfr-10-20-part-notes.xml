@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<DIV5 N="20" TYPE="PART" VOLUME="1">
+<HEAD>PART 20—STANDARDS FOR PROTECTION AGAINST RADIATION
+
+
+</HEAD>
+<AUTH>
+<HED>Authority:</HED><PSPACE>Atomic Energy Act of 1954, secs. 11, 53, 63, 65, 81, 103, 104, 161, 170H, 182, 186, 223, 234, 274, 1701 (42 U.S.C. 2014, 2073, 2093, 2095, 2111, 2133, 2134, 2201, 2210h, 2232, 2236, 2273, 2282, 2021, 2297f); Energy Reorganization Act of 1974, secs. 201, 202 (42 U.S.C. 5841, 5842); Low-Level Radioactive Waste Policy Amendments Act of 1985, sec. 2 (42 U.S.C. 2021b); 44 U.S.C. 3504 note.
+
+
+</PSPACE></AUTH>
+
+<DIV6 N="A" TYPE="SUBPART" VOLUME="1">
+<HEAD>Subpart A—General Provisions</HEAD>
+
+<SOURCE>
+<HED>Source:</HED><PSPACE>56 FR 23391, May 21, 1991, unless otherwise noted.
+
+
+</PSPACE></SOURCE>
+
+<DIV8 N="20.1001" TYPE="SECTION" VOLUME="1">
+<HEAD>§ 20.1001   Purpose.</HEAD>
+<P>(a) The regulations in this part establish standards for protection against ionizing radiation resulting from activities conducted under licenses issued by the Nuclear Regulatory Commission. These regulations are issued under the Atomic Energy Act of 1954, as amended, and the Energy Reorganization Act of 1974, as amended.
+</P>
+<P>(b) It is the purpose of the regulations in this part to control the receipt, possession, use, transfer, and disposal of licensed material by any licensee in such a manner that the total dose to an individual (including doses resulting from licensed and unlicensed radioactive material and from radiation sources other than background radiation) does not exceed the standards for protection against radiation prescribed in the regulations in this part. However, nothing in this part shall be construed as limiting actions that may be necessary to protect health and safety.
+
+
+</P>
+</DIV8>
+
+
+<DIV8 N="20.1002" TYPE="SECTION" VOLUME="1">
+<HEAD>§ 20.1002   Scope.</HEAD>
+<P>The regulations in this part apply to persons licensed by the Commission to receive, possess, use, transfer, or dispose of byproduct, source, or special nuclear material or to operate a production or utilization facility under parts 30 through 36 or part 39, 40, 50, 52, 53, 60, 61, 63, 70, or 72 of this chapter, and in accordance with 10 CFR 76.60 to persons required to obtain a certificate of compliance or an approved compliance plan under part 76 of this chapter. The limits in this part do not apply to doses due to background radiation, to exposure of patients to radiation for the purpose of medical diagnosis or therapy, to exposure from individuals administered radioactive material and released under § 35.75, or to exposure from voluntary participation in medical research programs.
+</P>
+<CITA TYPE="N">[72 FR 49485, Aug. 28, 2007, as amended at 91 FR 15772, Mar. 30, 2026; 91 FR 18772, Apr. 13, 2026]
+
+
+
+
+
+
+
+
+</CITA>
+</DIV8>
+
+
+</DIV6>
+
+<DIV6 N="B" TYPE="SUBPART" VOLUME="1">
+<HEAD>Subpart B—Radiation Protection Programs</HEAD>
+
+<SOURCE>
+<HED>Source:</HED><PSPACE>56 FR 23396, May 21, 1991, unless otherwise noted.
+
+
+</PSPACE></SOURCE>
+
+<DIV8 N="20.1101" TYPE="SECTION" VOLUME="1">
+<HEAD>§ 20.1101   Radiation protection programs.</HEAD>
+<XREF ID="20260330" REFID="62" AMDINSN="56">Link to an amendment published at 91 FR 15772, Mar. 30, 2026.</XREF>
+<P>(a) Each licensee shall develop, document, and implement a radiation protection program commensurate with the scope and extent of licensed activities and sufficient to ensure compliance with the provisions of this part. (See § 20.2102 for recordkeeping requirements relating to these programs.)
+</P>
+<P>(b) The licensee shall use, to the extent practical, procedures and engineering controls based upon sound radiation protection principles to achieve occupational doses and doses to members of the public that are as low as is reasonably achievable (ALARA).
+</P>
+<P>(c) The licensee shall periodically (at least annually) review the radiation protection program content and implementation.
+</P>
+<P>(d) To implement the ALARA requirements of paragraph (b) of this section, and notwithstanding the requirements in § 20.1301, a constraint on air emissions of radioactive material to the environment, excluding Radon-222 and its daughters, shall be established by licensees other than those subject to § 50.34a or § 53.260 of this chapter, such that the individual member of the public likely to receive the highest dose will not be expected to receive a total effective dose equivalent in excess of 10 mrem (0.1 mSv) per year from these emissions. If a licensee subject to this requirement exceeds this dose constraint, the licensee shall report the exceedance as provided in § 20.2203 and promptly take appropriate corrective action to ensure against recurrence.
+</P>
+<CITA TYPE="N">[56 FR 23396, May 21, 1991, as amended at 61 FR 65127, Dec. 10, 1996; 63 FR 39482, July 23, 1998; 91 FR 15772, Mar. 30, 2026]
+
+
+</CITA>
+</DIV8>
+
+</DIV6>
+</DIV5>

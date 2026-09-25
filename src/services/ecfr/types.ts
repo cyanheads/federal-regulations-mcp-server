@@ -64,6 +64,13 @@ export interface RawEcfrStructureNode {
 
 /** One section parsed from versioner XML. */
 export interface EcfrSection {
+  /**
+   * The Authority note governing this section from inside its part — its
+   * subject group's, else its subpart's, else one written at part level after
+   * the part's first subpart — with the "Authority:" label dropped. Null when
+   * none does, and the part's own Authority applies.
+   */
+  authority: string | null;
   bodyText: string;
   heading: string;
   /**
@@ -77,6 +84,26 @@ export interface EcfrSection {
    */
   part: string | null;
   section: string;
+  /** The Source note governing this section from inside its part, on the same terms as `authority`. */
+  sourceNote: string | null;
+}
+
+/**
+ * A part's own heading and notes, read from the preamble of its
+ * `<DIV5 TYPE="PART">`: the Authority and Source every section in it takes
+ * unless a subpart or subject group states its own, and its editorial, general,
+ * and OMB-approval notes.
+ */
+export interface EcfrPartNotes {
+  /** "Authority:" text with the label dropped; null when the part states none. */
+  authority: string | null;
+  /** The part's `<HEAD>` ("PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS"); empty when it has none. */
+  heading: string;
+  /** Part-level `<EDNOTE>`, `<NOTE>`, and `<APPRO>` text, labels dropped, in document order. */
+  notes: string[];
+  part: string | null;
+  /** "Source:" text with the label dropped; null when the part states none. */
+  sourceNote: string | null;
 }
 
 /**
@@ -106,9 +133,11 @@ export interface EcfrAppendixSummary {
   heading: string;
 }
 
-/** Sections and appendices parsed out of one versioner XML document. */
+/** Sections, appendices, and each part's notes parsed out of one versioner XML document. */
 export interface EcfrXmlContent {
   appendices: EcfrAppendix[];
+  /** One entry per `<DIV5 TYPE="PART">` the document holds — none on a section- or appendix-filtered response. */
+  parts: EcfrPartNotes[];
   sections: EcfrSection[];
 }
 
@@ -117,26 +146,36 @@ export interface EcfrXmlContent {
  * part's body, and the handles that read it on its own.
  */
 export interface EcfrSectionIndexEntry {
+  /** The subpart- or subject-group-level Authority governing the section; absent when the part's applies. */
+  authority?: string;
   cfrCite: string;
   heading: string;
   /** Offset in the whole part's body where this section's heading starts. */
   offset: number;
   section: string;
+  /** The subpart- or subject-group-level Source governing the section; absent when the part's applies. */
+  sourceNote?: string;
 }
 
 /** Result of a codified-text fetch (a section, or a whole part). */
 export interface EcfrSectionResult {
   /** Appendices in the part, named only — present on a whole-part fetch. */
   appendices?: EcfrAppendixSummary[];
+  /** The part's Authority — present on a whole-part fetch, null when it states none. */
+  authority?: string | null;
   /** The whole text — one section's, or every section of a part in order. */
   bodyText: string;
   date: string;
   heading: string;
+  /** The part's editorial, general, and OMB-approval notes — present on a whole-part fetch. */
+  notes?: string[];
   part: string;
   /** The identifier the text was read under; null for a whole part. */
   section: string | null;
   /** Index of the part's sections — present on a whole-part fetch. */
   sections?: EcfrSectionIndexEntry[];
+  /** The part's Source — present on a whole-part fetch, null when it states none. */
+  sourceNote?: string | null;
   title: number;
 }
 
