@@ -29,123 +29,94 @@
 
 ## Overview
 
-US federal regulatory law across three official sources: the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR text), and Regulations.gov (rulemaking dockets and public comments). Search rules, trace a document from proposal through comments to codified text, and read CFR sections from any MCP client. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+US federal regulatory law from three official sources: the Federal Register (proposed rules, final rules, and notices), the eCFR (codified CFR text, current or as of a past date), and Regulations.gov (rulemaking dockets and public comments). Search rules, trace a document from proposal through its comments to the codified text, and read CFR sections. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
 
 ### Tools
 
 | Tool | Description |
 |:---|:---|
-| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, and date range, ranked by relevance or date |
+| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, and date range |
 | `regulations_get_document` | Fetch one Federal Register document by number, with the docket ID, CFR parts, and comment count that chain into other tools |
 | `regulations_browse_cfr` | List CFR titles, a title's chapters, or every section and appendix in a part, or full-text-search the codified CFR |
 | `regulations_get_cfr_section` | Read codified CFR text for a section, whole part, or appendix, current or as of a past date |
 | `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov (key required) |
 | `regulations_find_comments` | Fetch public comments on a document or docket, or one comment's full body and attachments (key required) |
-| `regulations_list_open_comments` | List proposed rules, comment-requesting final rules, and optionally notices currently open for public comment, soonest closing first |
+| `regulations_list_open_comments` | List documents currently open for public comment, soonest closing first |
 
 ### Resources
 
 | Resource | Description |
 |:---|:---|
-| `regulations://document/{documentNumber}` | A single Federal Register document — metadata plus cross-source handles (mirrors `regulations_get_document`) |
-| `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section (mirrors `regulations_get_cfr_section`) |
+| `regulations://document/{documentNumber}` | One Federal Register document's metadata and cross-source handles |
+| `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section |
 
-All resource data is also reachable via the tool surface — tool-only MCP clients lose nothing.
+Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_section`), so tool-only clients lose nothing.
 
 ## Capability reference
 
 ### `regulations_search_rules` <sub>tool</sub>
 
-- Keyless; full-text `query` optional, or browse by `type` (`PRORULE`/`RULE`/`NOTICE`/`PRESDOCU`), `agencies` (Federal Register slug, e.g. `environmental-protection-agency`), and `published_after`/`published_before` (real calendar days, `YYYY-MM-DD`)
-- `order` is `relevance`, `newest`, or `oldest`; omitted, it is `relevance` with a `query` and `newest` without one
-- `per_page` 2–100 (default 20), `page` 1–50 — the Federal Register caps navigation at 50 pages / 5,000 records and total matches at 10,000; narrow the date window rather than paging deeper
-- Each result carries `documentNumber` (→ `regulations_get_document`), `agencies` as `{ name, slug }` (the slug feeds back into `agencies`; null when the Federal Register lists an agency by raw name only), `docketIds` (→ `regulations_get_docket` / `find_comments`), `regulationIdNumbers`, and `cfrReferences` (→ `regulations_get_cfr_section`)
-- `invalid_filter` when the Federal Register rejects a filter value (an agency name or acronym instead of a slug), naming the parameter; `upstream_unavailable` on a 5xx/timeout, retryable after a brief wait
+- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), and `published_after` / `published_before`; `per_page` 2–100 (default 20), `page` 1–50
+- Each result carries `documentNumber`, `agencies[].slug`, `docketIds`, `regulationIdNumbers`, and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
 
 ---
 
 ### `regulations_get_document` <sub>tool</sub>
 
-- Keyless; fetch one document by `document_number` (format `\d{4}-\d+`, e.g. `2025-14555`)
-- Full metadata (title, type, agencies as `{ name, slug }`, abstract, action, effective/comment dates, RINs) plus cross-source handles: `docketId`, `regulationsGovDocumentId`, `commentCount`, and `cfrReferences`
-- `include_full_text` inlines the plain-text body as a character window: `max_chars` (default 64,000, up to 200,000) from `offset` (default 0). `fullTextLength` reports the whole body's length and `fullTextNextOffset` the offset to resume from while text remains; documents of about ten printed pages or fewer come back whole, while a major final rule runs past a million characters
-- Passing `offset` or `max_chars` implies `include_full_text`; pairing either with an explicit `include_full_text: false` fails as `full_text_disabled`. An offset at or past the end returns empty `fullText` with the length and a notice
-- `fullText` is plain text: links reduce to their text, and email addresses the published body obfuscates are decoded
-- `not_found` when the FR number doesn't exist; `upstream_unavailable` on a 5xx/timeout
+- `document_number` in any form the Federal Register issues: `2024-07773` from 2010 on, and older and correction numbers such as `98-1572`, `E9-25990`, or `C1-2009-30484`; `include_full_text` adds the plain-text body as one window of `max_chars` (default 64,000, max 200,000) starting at `offset`, and passing either of those implies it
+- Returns metadata plus the handles other tools take: `docketId`, `regulationsGovDocumentId`, `commentCount`, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
 
 ---
 
 ### `regulations_browse_cfr` <sub>tool</sub>
 
-- Keyless; `mode: "structure"` lists all 50 titles, a title's top-level divisions (chapters or subtitles), or — with `title` + `part` — every section and appendix in the part, flattened, each carrying its `subpart` and `subjectGroup`; `mode: "search"` full-text-searches the codified CFR
-- `title` (1–50) and `part` scope both modes; a `part` without `title` is rejected (`title_required_for_part`) since part numbers repeat across titles
-- `date` is point-in-time in both modes and must be a real calendar day; structure mode rejects a date past the title's up-to-date date (`date_out_of_range`), and search indexes 2017-01-03 onward
-- `page` (1-based, default 1) and `per_page` (1–50, default 20) page search results and a part's listing; `page` and `totalCount` come back with a notice naming the next page, and a page past the end returns no rows plus the last page. Labels are plain text (eCFR's inline markup stripped)
-- Search returns one row per section: eCFR's live index answers one hit per section *version*, so repeats are collapsed. `countBasis` says what `totalCount` counts — `sections`, or eCFR's own `section_versions` count until the whole hit list has been read. Live search pages through eCFR's first 10,000 hits only; a page past them fails as `page_out_of_window`
-- Every search result reports `source` (`mirror`/`live`) and `sourceScope` — the mirror only answers a title it holds, never an all-titles query when scoped, so anything it can't answer falls through to the live eCFR API
-- `query_required` when `mode="search"` has no query; `title_not_found` / `date_out_of_range` / `page_out_of_window` / `upstream_unavailable` round out the errors
+- `mode: "structure"` lists the 50 titles, a title's top-level divisions, or, with `title` + `part`, every section and appendix in the part with its `subpart` and `subjectGroup`; `mode: "search"` full-text-searches the codified CFR and requires `query`. `title`, `part` (needs `title`), and a point-in-time `date` scope both modes, and `per_page` 1–50 (default 20) pages search results and part listings
+- Search rows carry `cfrCite`, `heading`, `hierarchyPath`, and `excerpt`, one per section. `source` (`mirror` / `live`) and `sourceScope` name the corpus that answered and what it covers, and `countBasis` says whether `totalCount` counts `sections` or `section_versions`; live search reaches eCFR's first 10,000 hits only (`page_out_of_window` past them)
 
 ---
 
 ### `regulations_get_cfr_section` <sub>tool</sub>
 
-- Keyless; reads one section (`title`+`part`+`section`), a whole part (`title`+`part`, `section` omitted), or one appendix (`title`(+`part`)+`appendix`) — `section` and `appendix` are mutually exclusive (`conflicting_target`)
-- `section` accepts the cite the way people write it: `"61"` in part 141, `"§ 141.61"`, `"Sec. 141.61"`, and `"141.61(c)"` (paragraph designators dropped; the whole section comes back) all read 40 CFR 141.61. An identifier that resolves as given is never rewritten (14 CFR 241 `"25"`, 26 CFR `"48.4061(a)"`); a rewrite returns the identifier read in `section` / `cfrCite` plus a `notice`
-- Text is one window of `bodyText`: `offset` (default 0) and `max_chars` (default 64,000, max 200,000) select it, and `bodyTextOffset` / `bodyTextLength` / `bodyTextNextOffset` (present while text remains) page through it — the same contract as `regulations_get_document`'s full text. An offset past the end is an empty window with a `notice`
-- A whole-part fetch adds `sections[]`, a text-free index of the sections in the window (`section`, `heading`, `cfrCite`, and the `offset` each starts at in the part's text — pass it as `offset` to jump there)
-- `date` for point-in-time text, 2017-01-01 through the title's up-to-date date; anything outside that is `date_out_of_range`, checked before any text request, and a date that is not a real calendar day is rejected at input validation
-- `appendix` must be passed verbatim as eCFR / `regulations_browse_cfr` emits it (e.g. `Appendix A-1 to Part 50`), not a short form
-- A whole-part fetch lists its appendices' identifiers and headings without inlining their text — call again with `appendix` to read one
-- `source` (`mirror`/`live`) reports provenance; current single-section reads are mirror-served when ready, everything else (historical dates, whole-part, appendix reads) falls back to the live eCFR versioner
-- `not_found` / `location_required` / `upstream_unavailable` round out the errors
+- One section (`title` + `part` + `section`), a whole part (`section` omitted), or one appendix (`appendix`, verbatim as `regulations_browse_cfr` emits it, e.g. `Appendix A-1 to Part 50`). `section` also takes cites as people write them (`"61"`, `"§ 141.61"`, `"141.61(c)"`), and `date` reads text from 2017-01-01 through the title's up-to-date date
+- Text comes back as one `bodyText` window (`max_chars` default 64,000, max 200,000, from `offset`), paged by `bodyTextLength` and `bodyTextNextOffset`. A whole-part read adds a `sections[]` index with each section's `offset` and names its `appendices` without their text; `source` (`mirror` / `live`) reports provenance
 
 ---
 
 ### `regulations_get_docket` <sub>tool</sub> · key required
 
-- Requires `REGULATIONS_GOV_API_KEY`; fetch a docket by `docket_id` (e.g. `EPA-HQ-OAR-2025-0194`)
-- `document_types` filters to `Proposed Rule` / `Rule` / `Notice` / `Supporting & Related Material` / `Other` — a docket often holds hundreds of supporting materials
-- `per_page` 5–250 (default 25), `page` 1–20 — Regulations.gov caps a query at 5,000 records
-- Each document's `objectId` chains into `regulations_find_comments`; `frDocNum` chains back to `regulations_get_document`
-- `auth_required` (missing/rejected key) names the env var and signup URL; `not_found` / `rate_limited` (429, 1,000 req/hr) / `upstream_unavailable` round out the errors
+- `docket_id` (e.g. `EPA-HQ-OAR-2025-0194`); `document_types` filters to `Proposed Rule`, `Rule`, `Notice`, `Supporting & Related Material`, or `Other`; `per_page` 5–250 (default 25), `page` 1–40
+- Returns the docket's metadata, `documentCount`, and `documents[]`, each with an `objectId` for `regulations_find_comments` and a `frDocNum` back to `regulations_get_document`. `totalPages` and `nextPage` page the documents; Regulations.gov serves 40 pages, so `truncated` marks a docket larger than 40 × `per_page` (10,000 at 250)
 
 ---
 
 ### `regulations_find_comments` <sub>tool</sub> · key required
 
-- Requires `REGULATIONS_GOV_API_KEY`; exactly one of `docket_id`, `document_object_id`, `fr_document_number`, or `comment_id` — zero or two is rejected (`target_required` / `multiple_targets`), never resolved by precedence
-- `comment_id` returns one comment's full body and attachments; the other three list a set — the list endpoint carries no body text, so read a comment's substance via `comment_id`
-- When a comment's substance is a PDF/DOCX attachment, `bodyText` is a stub and `attachmentOnly` is `true`, with the attachment download URLs
-- `per_page` 5–250 (default 25), `page` 1–20 — Regulations.gov caps a query at 5,000 records; narrow a high-volume docket with `document_object_id`
-- `auth_required` / `not_found` / `rate_limited` (429, 1,000 req/hr) / `upstream_unavailable` round out the errors
+- Exactly one of `docket_id`, `document_object_id`, `fr_document_number`, or `comment_id`; list scopes take `per_page` 5–250 (default 25) and `page` 1–40
+- `document_object_id` takes an object ID (`0900006485883ec6`) or a document ID (`EPA-HQ-OW-2022-0114-0027`). `fr_document_number` resolves to the Regulations.gov document carrying that exact number and answers `not_found` when none does
+- Lists narrow by comment text with `search_term`, and each hit then carries `highlightedContent`, the matched passages. `posted_after` / `posted_before` set an inclusive posted-date window. A backwards window fails with `date_range_inverted`, and filters passed with `comment_id` fail with `filter_requires_list_mode`
+- `mode` is `list` or `detail`. Lists return comment summaries without body text. `comment_id` returns the body, submitter, `receivedDate`, `postmarkDate`, `duplicateComments` (above 1 marks a mass-mail campaign record), and `attachments`, with `attachmentOnly: true` when the substance is in a PDF/DOCX file. Lists carry `totalPages` and `nextPage`; `truncated` marks a set larger than the 40 pages Regulations.gov serves reach (40 × `per_page`, 10,000 at 250), and posted-date windows take it one slice at a time
 
 ---
 
 ### `regulations_list_open_comments` <sub>tool</sub>
 
-- Keyless; lists documents currently open for public comment, sorted by closing date soonest first (same-day closes by document number) across the whole open window — filter by `type`, `query`, `agencies` (Federal Register slug), and `closing_before` (a real calendar day, `YYYY-MM-DD`)
-- `type` takes `PRORULE`, `RULE`, and `NOTICE`; the default (also used for an empty list) is `["PRORULE", "RULE"]` — proposed rules plus the direct final and interim final rules that take comment. `NOTICE` adds several hundred information-collection and other notices
-- `per_page` 1–100 (default 20), `page` from 1; `totalCount`, `totalPages`, and `nextPage` describe the window. The Federal Register can't sort by comment date, so the window is fetched whole (one request up to 2,000 documents, then 2,000 per request) and paged locally; past the Federal Register's 10,000-document limit the response is `truncated` and holds the 10,000 most recently published matches
-- Each row carries `daysRemaining`, `documentNumber` (→ `regulations_get_document`), `agencies` as `{ name, slug }`, and `docketIds` (→ `regulations_find_comments`)
-- Fully functional keyless; when `REGULATIONS_GOV_API_KEY` is set, `commentCount` is enriched from the Federal Register document's own embedded Regulations.gov info (no extra call) — `keyed` reports which
-- `invalid_filter` when the Federal Register rejects a filter value, naming the parameter; `upstream_unavailable` on a 5xx/timeout
+- Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (Federal Register slugs), and `closing_before`; `per_page` 1–100 (default 20)
+- Rows sort by closing date, soonest first, and carry `commentsCloseOn`, `daysRemaining`, `documentNumber`, and `docketIds`. `totalPages` and `nextPage` page the window; `truncated` means the Federal Register's 10,000-document limit was reached
+- Keyless. `keyed` reports whether `commentCount` was filled in, which happens only when `REGULATIONS_GOV_API_KEY` is set
 
 ---
 
 ### `regulations://document/{documentNumber}` <sub>resource</sub>
 
-- Same payload as `regulations_get_document` without full text — metadata plus cross-source handles, the body never inlined
-- `documentNumber` format `\d{4}-\d+` (e.g. `2025-14555`)
-- `not_found` / `upstream_unavailable` mirror the tool's errors
+- `documentNumber` in any Federal Register form (`2024-07773`, `98-1572`, `E9-25990`); the payload is `regulations_get_document`'s without the body text
+- `docketId`, `cfrReferences`, and `commentCount` chain into the comment and CFR tools
 
 ---
 
 ### `regulations://cfr/{title}/{part}/{section}` <sub>resource</sub>
 
-- Same payload as `regulations_get_cfr_section` at the current date and its default 64,000-character window — sections only; read an appendix via the tool's `appendix` input instead
-- The section resolves as the tool resolves it (`"61"`, `"§ 141.61"`, `"141.61(c)"`), with a `notice` naming the rewrite; a section longer than one window carries `bodyTextNextOffset`, and the rest is read through the tool's `offset`
-- Mirror-backed with a live eCFR fallback; `source` (`mirror`/`live`) reports provenance
-- `not_found` / `upstream_unavailable` mirror the tool's errors
+- Sections only, at the current date and the tool's default 64,000-character window; the `section` segment resolves the way the tool resolves it (`"61"`, `"§ 141.61"`)
+- `source` (`mirror` / `live`) reports provenance. `bodyTextNextOffset` marks a section longer than the window; read the rest through `regulations_get_cfr_section` with `offset`
 
 ## Features
 
@@ -153,18 +124,17 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 
 Federal Register / eCFR / Regulations.gov-specific:
 
-- One workflow over three official sources — the agent sees regulatory verbs (`search_rules`, `get_cfr_section`, `find_comments`), not three API clients
-- Cross-source stitching — every Federal Register document surfaces its docket ID and CFR-part handles next to the tools that consume them, priming the proposal → comments → final → codified-text trace
-- Keyless core — the Federal Register + eCFR tools (5 of 7) are a complete deployment with no API key; the Regulations.gov leg (`REGULATIONS_GOV_API_KEY`) layers on top
-- Locally mirrored codified CFR — the eCFR is synced once into embedded SQLite + FTS5 and queried by exact cite or full text, falling back to the live API whenever the mirror's title coverage can't answer
-- A 45-second wall-clock budget per request, shared across every upstream call, retry, and backoff a tool makes — a stalled source answers with an actionable `upstream_unavailable` well inside a client's request timeout
+- One workflow over three official sources: the agent calls regulatory verbs (`search_rules`, `get_cfr_section`, `find_comments`) rather than three API clients
+- Cross-source stitching: every Federal Register document surfaces its docket ID and CFR-part handles, which feed the proposal → comments → final rule → codified text trace
+- Keyless core: the five Federal Register and eCFR tools need no key. `regulations_get_docket` and `regulations_find_comments` need `REGULATIONS_GOV_API_KEY` (free at [api.data.gov/signup](https://api.data.gov/signup/), 1,000 requests/hour) and fail with `auth_required`, naming the variable and signup URL, when it is missing or rejected
+- Locally mirrored codified CFR: the eCFR syncs into embedded SQLite + FTS5 for exact-cite reads and full-text search, and falls back to the live API for historical dates, whole parts, appendices, and titles outside the mirror
+- A 45-second budget per request, shared by every upstream call, retry, and backoff, so a stalled source answers with `upstream_unavailable` inside a client's timeout
 
 Agent-friendly output:
 
-- Provenance — `source: "mirror" | "live"` on every CFR read, and a `sourceScope` line on search naming what that corpus covers
-- Honest truncation — Federal Register (50-page/5,000-record) and Regulations.gov (20-page/5,000-record) ceilings are surfaced via `truncated`/`notice` enrichment, never silently dropped
-- Attachment-aware comments — `attachmentOnly` flags when a comment's substance is a file rather than inline text, with the download URLs, on both the structured and text surfaces
-- Actionable `auth_required` errors — the two keyed tools name the env var and free signup URL rather than passing through a raw 401/403
+- Provenance: `source: "mirror" | "live"` on every CFR read, plus a `sourceScope` line on search naming what the corpus covers
+- Honest paging: `totalPages` and `nextPage` say how far a list goes, a page past the end names the last page instead of reading as "nothing matched", and matches beyond the Federal Register's 50 pages or Regulations.gov's 40 surface through `truncated` and `notice`, never as silently dropped rows
+- Attachment-aware comments: `attachmentOnly` flags a comment whose substance is a file, with the download URLs
 
 ## Getting started
 
@@ -185,7 +155,7 @@ A public instance is available at `https://federal-regulations.caseyjhand.com/mc
 
 ### Self-Hosted / Local
 
-Add the following to your MCP client configuration file. The Federal Register and eCFR tools work with no key; set `REGULATIONS_GOV_API_KEY` (free at [api.data.gov/signup](https://api.data.gov/signup/)) to enable the Regulations.gov docket and comment tools.
+Add the following to your MCP client configuration file. `REGULATIONS_GOV_API_KEY` enables the docket and comment tools; omit it to run the keyless Federal Register and eCFR tools alone.
 
 ```json
 {
@@ -242,8 +212,6 @@ Or with Docker:
 }
 ```
 
-> Omit the `REGULATIONS_GOV_API_KEY` line entirely to run the keyless core (Federal Register + eCFR). The two Regulations.gov tools then return an actionable `auth_required` error, and `regulations_list_open_comments` runs without comment counts.
-
 For Streamable HTTP, set the transport and start the server:
 
 ```sh
@@ -253,8 +221,8 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
 
 ### Prerequisites
 
-- [Bun v1.3](https://bun.sh/) or higher (or Node.js v24+).
-- Optional: a free [api.data.gov key](https://api.data.gov/signup/) for the Regulations.gov tools (`regulations_get_docket`, `regulations_find_comments`, and comment counts in `regulations_list_open_comments`). The Federal Register and eCFR tools need no key. The shared key allows 1,000 requests/hour.
+- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+- Optional: a free [api.data.gov key](https://api.data.gov/signup/) for the Regulations.gov tools and comment counts.
 
 ### Installation
 
@@ -285,23 +253,21 @@ cp .env.example .env
 
 ## Configuration
 
-All configuration is validated at startup via Zod schemas in `src/config/server-config.ts`. Key environment variables:
-
 | Variable | Description | Default |
 |:---|:---|:---|
-| `REGULATIONS_GOV_API_KEY` | `api.data.gov` key for the Regulations.gov tools (`get_docket`, `find_comments`, and comment-count enrichment in `list_open_comments`). Optional — the Federal Register and eCFR tools work without it. | — |
+| `REGULATIONS_GOV_API_KEY` | api.data.gov key for `regulations_get_docket`, `regulations_find_comments`, and comment counts in `regulations_list_open_comments`. | none |
 | `FEDERAL_REGISTER_BASE_URL` | Federal Register API v1 base URL. | `https://www.federalregister.gov/api/v1` |
 | `ECFR_BASE_URL` | eCFR API base URL. | `https://www.ecfr.gov/api` |
 | `REGULATIONS_GOV_BASE_URL` | Regulations.gov API v4 base URL. | `https://api.regulations.gov/v4` |
-| `ECFR_MIRROR_PATH` | Filesystem path for the eCFR SQLite mirror database. | `./data/ecfr-mirror.sqlite` |
-| `ECFR_MIRROR_REFRESH_CRON` | Cron expression for an in-process mirror refresh (HTTP transport only), e.g. `0 4 * * 0`. Unset registers no job. Each run re-harvests every configured title in full, and a tick is skipped until `mirror:init` has completed once. | — (no job) |
-| `ECFR_MIRROR_TITLES` | Comma-separated CFR title numbers to scope the mirror to (e.g. `21,40`). Omit to mirror all 50 titles. Cites and searches outside the set fall through to the live eCFR API, as does any all-titles search while this is set. | — (all titles) |
+| `ECFR_MIRROR_PATH` | Path to the eCFR SQLite mirror database. | `./data/ecfr-mirror.sqlite` |
+| `ECFR_MIRROR_REFRESH_CRON` | Cron expression for an in-process mirror refresh (HTTP transport only), e.g. `0 4 * * 0`. Each run re-harvests every configured title in full. | none (no job) |
+| `ECFR_MIRROR_TITLES` | Comma-separated CFR titles to mirror (e.g. `21,40`). Reads and searches outside the set, and all-titles searches, go to the live eCFR API. | all 50 titles |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
-| `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
-| `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
-| `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
-| `STORAGE_PROVIDER_TYPE` | Storage backend. | `in-memory` |
-| `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry). | `false` |
+| `MCP_HTTP_PORT` | HTTP server port. | `3010` |
+| `MCP_AUTH_MODE` | Authentication: `none`, `jwt`, or `oauth`. | `none` |
+| `MCP_LOG_LEVEL` | Log level (`debug`, `info`, `warning`, `error`, etc.). | `info` |
+| `STORAGE_PROVIDER_TYPE` | Storage backend: `in-memory`, `filesystem`, `supabase`, `cloudflare-kv/r2/d1`. | `in-memory` |
+| `OTEL_ENABLED` | Enable [OpenTelemetry](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry). | `false` |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 
@@ -321,10 +287,10 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
   bun run start:http
   ```
 
-- **Populate/refresh the eCFR mirror** (out-of-band, idempotent — the codified-text tools work against the live eCFR API until this completes, so it's a latency optimization, not a hard dependency):
+- **Build or refresh the eCFR mirror** (out of band and idempotent; the CFR tools use the live eCFR API until the first build completes):
 
   ```sh
-  bun run mirror:init      # full build across all 50 titles, resumable (scope with ECFR_MIRROR_TITLES)
+  bun run mirror:init      # full build, resumable (scope with ECFR_MIRROR_TITLES)
   bun run mirror:refresh   # re-harvest every configured title against the latest eCFR issues
   bun run mirror:verify    # report row counts and the last-synced issue date
   ```
@@ -334,7 +300,6 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
   ```sh
   bun run devcheck   # Lint, format, typecheck, security, changelog sync
   bun run test       # Vitest test suite
-  bun run lint:mcp   # Validate MCP definitions against the linter rules
   ```
 
 ### Docker
@@ -344,20 +309,21 @@ docker build -t federal-regulations-mcp-server .
 docker run --rm -e REGULATIONS_GOV_API_KEY=your-key -p 3010:3010 federal-regulations-mcp-server
 ```
 
-The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `/var/log/federal-regulations-mcp-server`. The build stage installs dependencies with `--ignore-scripts` — `better-sqlite3` is a build/ingest-only dependency whose native compile is skipped, and the runtime reads the mirror through Bun's built-in `bun:sqlite`. Populate the mirror in a running container with `docker exec <container> bun run mirror:init`; mount a volume over `/usr/src/app/data` so the synced index survives container recreation. OpenTelemetry peer dependencies are installed by default — build with `--build-arg OTEL_ENABLED=false` to omit them.
+The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `/var/log/federal-regulations-mcp-server`. Build the mirror inside a running container with `docker exec <container> bun run mirror:init`, and mount a volume over `/usr/src/app/data` so it survives recreation. OpenTelemetry peer dependencies are installed by default; build with `--build-arg OTEL_ENABLED=false` to omit them.
 
 ## Project structure
 
 | Directory | Purpose |
 |:---|:---|
-| `src/index.ts` | `createApp()` entry point — registers tools/resources, inits the three services, and schedules the mirror refresh on HTTP when `ECFR_MIRROR_REFRESH_CRON` is set. |
+| `src/index.ts` | `createApp()` entry point: registers tools and resources, inits the three services, and schedules the mirror refresh when `ECFR_MIRROR_REFRESH_CRON` is set. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
-| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`) — the seven `regulations_*` tools. |
-| `src/mcp-server/resources` | Resource definitions (`*.resource.ts`) — the document and CFR-section resources. |
+| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`), the seven `regulations_*` tools. |
+| `src/mcp-server/resources` | Resource definitions (`*.resource.ts`), the document and CFR-section resources. |
 | `src/services/federal-register` | Federal Register API v1 client (keyless). |
-| `src/services/ecfr` | eCFR API client (keyless) — versioner, structure, search, and section XML parsing. |
-| `src/services/ecfr-mirror` | eCFR codified-text mirror (MirrorService — SQLite + FTS5), its read path, and the opt-in refresh job. |
-| `src/services/regulations-gov` | Regulations.gov v4 client (`X-Api-Key`) — dockets and comments. |
+| `src/services/ecfr` | eCFR API client (keyless): versioner, structure, search, section XML parsing, and cite resolution. |
+| `src/services/ecfr-mirror` | eCFR codified-text mirror (SQLite + FTS5) and the opt-in refresh job. |
+| `src/services/regulations-gov` | Regulations.gov v4 client (`X-Api-Key`): dockets and comments. |
+| `src/services` | Shared request budget, text windowing, character-reference decoding, and upstream-failure handling. |
 | `scripts/ecfr-mirror-*.ts` | Out-of-band mirror lifecycle: `init`, `refresh`, `verify`. |
 | `tests/` | Unit and integration tests mirroring `src/`. |
 
@@ -372,7 +338,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for development guidelines and architectural rule
 
 ## Data disclaimer
 
-eCFR content is "authoritative but unofficial" per the Office of the Federal Register — not the official legal edition of the Code of Federal Regulations; verify against [govinfo.gov](https://www.govinfo.gov/app/collection/cfr) for legal research. This server is not affiliated with or endorsed by the Office of the Federal Register, the Government Publishing Office, or the General Services Administration.
+eCFR content is "authoritative but unofficial" per the Office of the Federal Register, not the official legal edition of the Code of Federal Regulations; verify against [govinfo.gov](https://www.govinfo.gov/app/collection/cfr) for legal research. This server is not affiliated with or endorsed by the Office of the Federal Register, the Government Publishing Office, or the General Services Administration.
 
 ## Contributing
 

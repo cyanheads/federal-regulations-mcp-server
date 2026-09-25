@@ -53,7 +53,7 @@ It is a **multi-source workflow server**, not three API wrappers. The agent sees
 - **Single shared `api.data.gov` key** for the Regulations.gov leg — same hosting pattern as `congressgov`/`census`, not per-user. Stays hostable. 1,000 requests/hour per key.
 - **Keyless tools never require the key.** The two keyed tools (`get_docket`, `find_comments`) must detect a missing key and return an actionable `auth_required` error naming the env var and the signup URL — not a generic 401 passthrough or a silent empty result. `list_open_comments` degrades: it runs on the Federal Register without the key and only enriches with Regulations.gov comment counts when the key is present.
 - **eCFR codified full text is mirrored, not paginated live** (see Services → eCFR mirror). The Federal Register search/document data and the Regulations.gov docket/comment data stay live — they are volatile (the FR publishes daily; comments arrive continuously) and, for Regulations.gov, key-rate-limited.
-- **Pagination truncation is surfaced, never silent** (see API Reference → Pagination). The Federal Register caps navigation at 50 pages (up to 5,000 records with per_page=100); Regulations.gov caps a query at 5,000 records (20 pages × 250). When a result set is truncated by an upstream ceiling, the tool says so and tells the agent how to narrow.
+- **Pagination truncation is surfaced, never silent** (see Tool Detail → The paging contract). The Federal Register serves 50 pages (up to 5,000 records with per_page=100); Regulations.gov serves 40 (up to 10,000 records at 250). When a result set is larger than the pages reach, the tool says so and tells the agent how to narrow; a page past the end names the last page rather than reading as "nothing matched".
 - **Comment bodies can be attachment-only.** When a comment's substance is a PDF/DOCX attachment rather than inline text, the inline `comment` field is null; the tool flags this and surfaces the attachment download URLs so the agent knows where the real content lives.
 - **No DataCanvas.** Comment corpora are text (retrieval/summarization, not SQL aggregation); rule lists are a discovery surface (search → open a rule). Results return inline with honest truncation. (Confirmed by the 2026-05-31 DataCanvas-fit audit.)
 - **No `govinfo`.** GPO ships its own official GovInfo MCP server for the broad CFR/USCODE catalog. This server stays focused on the *regulatory workflow* — rulemaking, comments, and point-in-time CFR — which the GPO catalog wrapper does not center on.
@@ -73,6 +73,8 @@ It is a **multi-source workflow server**, not three API wrappers. The agent sees
 Each source is its own service with independent base URL, auth, retry, and rate-limit handling. Tools compose across services internally; the agent never sees the service boundary. Init/accessor pattern (`getFederalRegisterService()` etc.), constructed in `setup()`.
 
 **Resilience (all three):** every service method runs its full fetch+parse pipeline through `runUpstream` (`src/services/upstream-failure.ts`), which arms a deadline for each attempt, wraps them in `withRetry` from `@cyanheads/mcp-ts-core/utils`, and draws all of it down the request's shared budget (below). Backoff calibration: 200–500ms base for FR/eCFR (ephemeral failures), 1–2s for Regulations.gov (rate-limited — honor `Retry-After` on 429). FR and eCFR fetch through `fetchWithTimeout`, which maps a non-OK status to a code and a failed connection to `ServiceUnavailable`; Regulations.gov branches on `response.status` itself and wraps its raw call in `fetchUpstream` for the same connection-level classification. Every leg then re-codes the 500 and 501 that mapping calls `InternalError`, so the whole 5xx range retries and answers alike, and Regulations.gov's 429 opts out of retry through the call's own `isTransient` predicate rather than a wire-visible flag. The response handler detects HTML error pages (FR and eCFR both serve HTML error pages on some failures) and throws transient errors rather than `SerializationError`. eCFR section text is XML — the service parses `<DIV*>`/`<HEAD>`/`<P>` into structured text + headings.
+
+**Character references decode through one module.** `src/services/character-references.ts` serves the Regulations.gov comment bodies and search snippets, both eCFR extractors (versioner XML and structure/search labels), and the Federal Register body's numeric references. A named reference resolves through the `entities` package's strict (semicolon-required) decoder, so every name in the HTML standard decodes and an unknown one — including an inherited object property such as `&constructor;` — stays as written. A numeric reference decodes only when it names a Unicode scalar value; 0, a surrogate, or anything past U+10FFFF stays as written instead of producing a NUL, a lone surrogate, or a `RangeError`. Tags are stripped first and the decode is one pass, so `&lt;b&gt;` reads as the text `<b>` and `&amp;lt;` decodes once. The Federal Register body keeps its five XML names (`amp`, `apos`, `gt`, `lt`, `quot`) and leaves `&nbsp;`/`&copy;` as written. *Decision:* hand-kept name tables were replaced rather than extended, because each missed a name somewhere (comment bodies rendered `&bull;` literally) and the plain-object lookups resolved inherited property names to function source. Measured over 12 live parts from 12 titles (8,675 sections and appendices, ~115 MB of XML) and 451,000 structure and search strings, the eCFR extractors' text did not change, so the mirror's `INGEST_VERSION` stayed put.
 
 **No response on this surface goes through a framework parser, and none may.** Every JSON body is read with `JSON.parse` and every XML body with the scanner in `src/services/ecfr/xml.ts`. That is not incidental: `@cyanheads/mcp-ts-core`'s `jsonParser`/`xmlParser` bound their input at 1 MiB of text, and the documents here run three to five orders of magnitude past it — a whole title's XML is ~157 MB, and even a single title's structure JSON is ~9 MB. Both would be rejected outright. A `maxBytes` override exists, but sizing one to the largest CFR title is picking a number against a corpus that grows, so the parsers stay unused rather than raised. Swapping either read onto a framework parser breaks the biggest titles first and the small ones never, which is the shape of failure a smoke test misses.
 
@@ -97,7 +99,7 @@ Each definition's `errors[]` is its advertised failure surface: a caller switche
 
 **Every reason declared on this surface is raised, and it is attached wherever the failure is first known.** Two places qualify, covering different failures:
 
-- **The handler**, via `ctx.fail(reason, …)` — for anything decided from the inputs, or from a value a service returned: `conflicting_target`, `location_required`, `target_required`, `multiple_targets`, `query_required`, `title_required_for_part`, the `auth_required` its `hasKey()` gate raises, `date_out_of_range` on the read tool, and the `not_found` a service reports by returning `null` (`getSectionText`, `getAppendixText`, `resolveFrDocumentObjectId`).
+- **The handler**, via `ctx.fail(reason, …)` — for anything decided from the inputs, or from a value a service returned: `conflicting_target`, `location_required`, `target_required`, `multiple_targets`, `query_required`, `title_required_for_part`, the `auth_required` its `hasKey()` gate raises, `date_out_of_range` on the read tool, the `not_found` a service reports by returning `null` (`getSectionText`, `getAppendixText`, `resolveFrDocument`), the `not_found` for a `find_comments` ID shaped like no Regulations.gov ID, and `filter_requires_list_mode` / `date_range_inverted` on the list filters.
 - **The service**, by putting `reason` in the thrown error's `data` and spreading `ctx.recoveryFor(reason)` — for anything decided from an upstream response, which no handler sees. `ctx.recoveryFor` resolves against whichever definition is calling, so one service throw carries each tool's own hint, and returns `{}` where the caller declares nothing. This is how `rate_limited`, the `auth_required` a rejected key produces, the Regulations.gov `not_found` (404, and the 400 that reports an unparseable ID), the search `date_out_of_range`, `title_not_found`, the Federal Register `not_found`, and `upstream_unavailable` reach the wire.
 
 **`auth_required` is the one reason both places raise, because the failure has two shapes.** The `hasKey()` gate names a key that was never configured; a key that *is* configured and rejected by Regulations.gov is the same problem one step further on, and the declared recovery — set a working key — is the answer to both. Only the gate used to say so: a rejected key came back as a bare `Forbidden` with nothing to switch on, for exactly the case the recovery was written for. api.data.gov answers a key it will not accept with 403 (`API_KEY_INVALID`, and `API_KEY_MISSING` for a request carrying none) and reserves 401 for the same class, so the service raises the reason on either status, as `Unauthorized` — the code both tools declare `auth_required` against, not the `Forbidden` a 403 maps to. That is the same trade `withUpstreamReason` makes for a `Timeout`: a contract naming a code the wire contradicts is the defect, and the status it lost survives in the message, which is also the only thing separating the two shapes. The upstream body is deliberately *not* captured on this branch — a rejected-credential response is the one place an upstream tends to echo what it was sent.
@@ -206,6 +208,21 @@ Adding `REGULATIONS_GOV_API_KEY` (and any other env var) requires the matching e
 
 ## Tool Detail
 
+### The paging contract
+
+`regulations_search_rules`, `regulations_get_docket`, and `regulations_find_comments` list mode page the same way, through `pageSpan()` in `src/mcp-server/tools/definitions/paging.ts`, in the shape `regulations_list_open_comments` already used. `total` is `totalCount`, or `documentCount` on `get_docket`; the ceiling is the last page the upstream serves.
+
+| Signal | Rule |
+|---|---|
+| `page` max | The ceiling: 40 on Regulations.gov (page 41 is an HTTP 400), 50 on the Federal Register (a page past 50 silently re-serves page 1, so the schema bound stays). |
+| `totalPages` | `min(ceil(total / per_page), ceiling)`, 0 when nothing matched — the number both upstreams report (`meta.totalPages`, `total_pages`). |
+| `nextPage` | `page + 1`, present only when `page < totalPages`. |
+| `truncated` | Set on every page when `total > ceiling × per_page`: matches exist that no page reaches. `cap` carries that reachable count. The notice names it, then (below the `per_page` max) the smallest `per_page` that reaches every match, or how far the max reaches when none does, then the tool's narrowing filters. A later reachable page is `nextPage`'s job, never `truncated`'s. |
+| Past-end page | `total > 0` and `page > totalPages`: a notice naming the last page at this `per_page`, with no advice to drop filters. No `truncated`, no `nextPage`. |
+| Empty | `total == 0`: the tool's own empty-result notice. |
+
+`totalPages` and `nextPage` are declared in `enrichment` with the `Total pages` / `Next page` trailer labels. Because the page bound equals the ceiling, a past-end page and truncation never coincide, so each response writes at most one notice. *Decision:* the branches key on `total`, never on the row count. Keying on rows is what made a page past the end read as "nothing matched, drop a filter", and what set `truncated` on every page of any docket longer than one page.
+
 ### 1. `regulations_search_rules`
 
 Search the Federal Register — the daily journal of proposed rules, final rules, notices, and presidential documents, 1994→present. The primary discovery entry point.
@@ -229,7 +246,7 @@ order: z.enum(['relevance', 'newest', 'oldest']).optional()
 per_page: z.number().int().min(2).max(100).optional().default(20)
   .describe('Results per page (2–100, default 20). The Federal Register API treats exactly 1 as its default page size instead of returning one result.'),
 page: z.number().int().min(1).max(50).optional().default(1)
-  .describe('Page number (1–50, default 1). The FR API caps `total_pages` at 50 — with per_page=100 this allows navigating up to 5,000 results. To reach beyond that window, narrow with published_after/published_before rather than paging deeper.'),
+  .describe('Page number (1–50, default 1). The Federal Register serves 50 pages, so a query reaches 50 × per_page matches (5,000 at per_page 100); totalPages and nextPage in the response say how far this one goes. To reach past that, narrow with published_after/published_before rather than paging deeper.'),
 ```
 
 **Output:**
@@ -250,13 +267,17 @@ page: z.number().int().min(1).max(50).optional().default(1)
     effectiveOn: string | null,
     htmlUrl: string,
   }>,
-  // enrichment (optional, framework-populated):
-  truncated?: boolean,                // true when totalCount > 5000 (50 pages × 100) and the agent should date-window to narrow
-  shown?: number,                     // results returned this page
+  // enrichment (the paging contract above):
+  totalPages: number,                 // min(ceil(totalCount / per_page), 50)
+  nextPage?: number,                  // present while a later page holds matches
+  truncated?: boolean,                // totalCount > 50 × per_page — some matches are on no page; date-window to narrow
+  shown?: number,                     // results returned this page (with truncated)
+  cap?: number,                       // 50 × per_page, the reachable count (with truncated)
+  notice?: string,                    // empty result, page past the end, or truncation guidance
 }
 ```
 
-`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close), with a trailing note when `truncated`. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
+`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close); the enrichment trailer follows it. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
 
 **Order.** `order` resolves before the request: an explicit value is sent as given; omitted, it is `relevance` when `query` is set and `newest` otherwise, and the resolved value is always sent. Measured live: on "PFAS drinking water" (type RULE, 38 matches) the PFAS National Primary Drinking Water Regulation (2024-07773) ranks 1st under `relevance`, 13th under `newest`, 26th under `oldest`; `relevance` without `conditions[term]` returns 200 in newest order; an unrecognized `order` returns 200 and is silently ignored, so the enum is the only guard.
 
@@ -265,6 +286,9 @@ page: z.number().int().min(1).max(50).optional().default(1)
 |:-------|:-----|:-----|:---------|
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
 | `invalid_filter` | `ValidationError` | FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) — most often an agency name or acronym where a slug belongs | Correct the parameter the message names; the hint is per field — for `agencies`, the kebab-case slug format and where to read one (`agencies[].slug` on any result); for dates, a real `YYYY-MM-DD` day. |
+| `date_range_inverted` | `ValidationError` | `published_after` later than `published_before` | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
+
+`date_range_inverted` is thrown before any request: the Federal Register answers an inverted window with an empty success, which read as "nothing matched, widen the date range." Equal dates are a one-day window, and `''` on either side skips the check as it skips the filter.
 
 `invalid_filter` maps each FR field to the parameter the caller set — `agencies` → `agencies`, `publication_date` → whichever of `published_after`/`published_before` was sent, `term` → `query` — and names a field with no mapping as the FR spells it. The raw upstream body is not echoed. A 400 without a parseable non-empty `errors` object keeps the framework's classification (`InvalidParams`). The 400 is not retried. Calendar-invalid dates (`2025-13-45`, `2025-02-30`), which the FR also answers with a 400, are rejected at the schema before any request.
 
@@ -280,8 +304,8 @@ Fetch one Federal Register document by its FR document number — full metadata 
 
 **Input schema:**
 ```ts
-document_number: z.string().regex(/^[0-9]{4}-[0-9]+$/)
-  .describe('Federal Register document number (e.g. "2025-14555"). Obtain from regulations_search_rules results (the documentNumber field).'),
+document_number: frDocumentNumber()   // FR_DOCUMENT_NUMBER_PATTERN, shared with the document resource and find_comments
+  .describe('Federal Register document number, as regulations_search_rules returns it in documentNumber: "2024-07773" from 2010 on, older and correction numbers like "98-1572", "E9-25990", or "C1-2009-30484".'),
 include_full_text: z.boolean().optional()
   .describe('When true, inline one window of the document body as plain text (see offset and max_chars). Omitted, the body URLs alone come back unless offset or max_chars is passed.'),
 offset: z.number().int().min(0).optional()
@@ -309,7 +333,7 @@ max_chars: z.number().int().min(1).max(200_000).optional()
   cfrReferences: Array<{ title: number; part: string }>,  // → regulations_get_cfr_section
   // Cross-source handles (the point of the tool):
   docketId: string | null,            // from regulations_dot_gov_info.docket_id → regulations_get_docket / find_comments
-  regulationsGovDocumentId: string | null,  // regulations_dot_gov_info.document_id → find_comments (document-scoped)
+  regulationsGovDocumentId: string | null,  // regulations_dot_gov_info.document_id → find_comments(document_object_id)
   commentCount: number | null,        // regulations_dot_gov_info.comments_count (FR-reported; null if not on Regulations.gov)
   supportingDocuments: Array<{ title: string; documentId: string }>,  // related Regulations.gov docs
   bodyHtmlUrl: string,
@@ -332,10 +356,22 @@ max_chars: z.number().int().min(1).max(200_000).optional()
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `full_text_disabled` | `ValidationError` | `offset` or `max_chars` passed with `include_full_text: false` | Drop include_full_text: false to read the body window, or drop offset and max_chars to skip the body. |
-| `not_found` | `NotFound` | No FR document with that number | Verify the number via regulations_search_rules; FR numbers look like "2025-14555". |
+| `not_found` | `NotFound` | No FR document with that number | Verify the number via regulations_search_rules; FR numbers look like "2024-07773", or "98-1572" and "E9-25990" before 2010. |
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
 
-A number that fails the `^[0-9]{4}-[0-9]+$` check is rejected by the input schema, so it is an `InvalidParams` naming the field rather than a contract reason.
+**Document numbers take every shape the Federal Register issues.** One pattern, `FR_DOCUMENT_NUMBER_PATTERN` = `^[A-Za-z]?[0-9]{1,4}-[0-9]{1,6}(-[0-9]{1,6})?$` in `src/mcp-server/tools/definitions/document-number.ts`, serves this tool, the `regulations://document/{documentNumber}` resource, and `regulations_find_comments`' `fr_document_number`:
+
+| Shape | Example | Years seen |
+|---|---|---|
+| `YYYY-N` | `2024-07773` | 2010– |
+| `YY-N` | `98-1572` | 1994–2008 |
+| `YY-N-N` | `94-31556-2` | 1994–1999 |
+| letter + 1–2 digits, `-N` | `E9-25990`, `X94-100621` | 1994–2010, 2026 |
+| letter + digit, `-YYYY-N` | `C1-2009-30484` | 2010– |
+
+A lowercase letter prefix is accepted and uppercased before the request, since both upstreams serve only the uppercase form (the Federal Register 404s `e9-25990`; Regulations.gov's `filter[frDocNum]` is case-sensitive). A number that fails the pattern — a Regulations.gov document ID, `90 FR 12345`, a trailing space — is rejected by the input schema, so it is an `InvalidParams` naming the field rather than a contract reason.
+
+*Decision:* the pattern admits all five shapes rather than only the post-2010 `YYYY-N`, because `regulations_search_rules` returns every shape as `documentNumber` and a result must open with the tool it points to. The old pattern rejected every document from 1994–2009 plus every correction.
 
 ---
 
@@ -546,8 +582,8 @@ document_types: z.array(z.enum(['Proposed Rule', 'Rule', 'Notice', 'Supporting &
   .describe('Filter the docket\'s documents to these types. Omit for all. A docket often contains hundreds of "Supporting & Related Material" items — filter to "Proposed Rule"/"Rule" to find the rule documents themselves.'),
 per_page: z.number().int().min(5).max(250).optional().default(25)
   .describe('Documents per page (5–250, default 25). Regulations.gov requires a minimum page size of 5.'),
-page: z.number().int().min(1).max(20).optional().default(1)
-  .describe('Page number (1-based). Regulations.gov caps a query at 20 pages (5,000 records); beyond that, narrow with document_types.'),
+page: z.number().int().min(1).max(40).optional().default(1)
+  .describe('Page number (1–40, default 1). Regulations.gov serves 40 pages, so a docket listing reaches 40 × per_page documents (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. Beyond that, narrow with document_types.'),
 ```
 
 **Output:**
@@ -572,12 +608,17 @@ page: z.number().int().min(1).max(20).optional().default(1)
     commentEndDate: string | null,    // when set, open for comment
     withdrawn: boolean,
   }>,
-  truncated?: boolean,                // documentCount exceeds the returned set / 5,000 ceiling
-  shown?: number,
+  // enrichment (the paging contract above):
+  totalPages: number,                 // min(ceil(documentCount / per_page), 40)
+  nextPage?: number,                  // present while a later page holds documents
+  truncated?: boolean,                // documentCount > 40 × per_page — some documents are on no page
+  shown?: number,                     // with truncated
+  cap?: number,                       // 40 × per_page (with truncated)
+  notice?: string,                    // empty docket, page past the end, or truncation guidance
 }
 ```
 
-`format()`: docket header (ID, title, agency, RIN, type), then a table of documents (type · title · posted · comment-close · object ID for comment lookup). Surfaces each document's `objectId` so the agent can pull comments on a specific document.
+`format()`: docket header (ID, title, agency, RIN, type), then a table of documents (type · title · posted · comment-close · object ID for comment lookup). Surfaces each document's `objectId` so the agent can pull comments on a specific document. The empty-docket notice suggests dropping `document_types` only when it was set; truncation guidance names the reachable count, then `per_page` (below 250), then `document_types`.
 
 **Errors:**
 | Reason | Code | When | Recovery |
@@ -593,9 +634,11 @@ page: z.number().int().min(1).max(20).optional().default(1)
 
 Fetch public comments on a Federal Register document or a Regulations.gov docket — the unique corpus of what citizens and organizations actually submitted. Resolves comment bodies and **flags when the real content is in an attachment** rather than inline text.
 
-**API:** list → `GET /v4/comments?filter[commentOnId]={objectId}` (comments on a specific document) or `filter[docketId]={id}` (all comments in a docket), `sort=-postedDate`. Detail → `GET /v4/comments/{commentId}?include=attachments` for the body. Confirmed live:
+**API:** list → `GET /v4/comments?filter[commentOnId]={objectId}` (comments on a specific document) or `filter[docketId]={id}` (all comments in a docket), `sort=-postedDate`, narrowed by `filter[searchTerm]` (comment text, stemmed) and `filter[postedDate][ge]` / `[le]` (inclusive, `yyyy-MM-dd` only — a datetime is a 400). Detail → `GET /v4/comments/{commentId}?include=attachments` for the body. Document resolution → `GET /v4/documents/{documentId}` (a document ID to its `objectId` and `docketId`; 404 when missing) and `GET /v4/documents?filter[frDocNum]={number}` (exact, case-sensitive match on the FR number). Confirmed live:
 - The list endpoint returns `comment: ''` (empty string) for every record — the body is never populated at list level. A caller must hit the detail endpoint to get the body.
-- The detail endpoint returns `comment` as an HTML string. For attachment-primary comments the value is a stub (e.g., "See Attached" or "See attached"), not `null`; for comments with genuine inline text it contains the body. The handler should HTML-strip the value and treat stubs as attachment-signaling.
+- Under `filter[searchTerm]`, each list hit carries `highlightedContent`: an HTML snippet of the matched passages, matches wrapped in `<mark><em>`, fragments joined by `&hellip;&nbsp;`, at most ~1,600 characters. Without a search term it is `''`.
+- The detail endpoint returns `comment` as an HTML string. For attachment-primary comments the value is a stub (e.g., "See Attached" or "See attached"), not `null`; for comments with genuine inline text it contains the body. The handler HTML-strips the value (line-breaking tags to newlines, then every character reference through the shared decoder) and treats stubs as attachment-signaling.
+- The detail endpoint names the receipt date `receiveDate` and also carries `postmarkDate` (null for most CMS, FDA, and DOT records) and `duplicateComments`, the number of identical submissions a mass-mail campaign record stands for (0 or 1 for an ordinary submission, by agency; 99,324 on `EPA-HQ-OAR-2023-0072-0856`).
 - Top-level comment `attributes.fileFormats` is always `null` (in both list and detail). Attachments are under `relationships.attachments.data[]` (IDs) and `included[]` (full records with `attributes.fileFormats[].fileUrl`) — only present when the detail request includes `?include=attachments`.
 - `meta` returns `totalElements`, `totalPages`, `hasNextPage`, `pageNumber`, `pageSize`.
 
@@ -604,15 +647,21 @@ Fetch public comments on a Federal Register document or a Regulations.gov docket
 docket_id: z.string().optional()
   .describe('Fetch all comments in a docket by docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Broadest scope. One of docket_id / document_object_id / fr_document_number / comment_id is required.'),
 document_object_id: z.string().optional()
-  .describe('Fetch comments on one specific document by its Regulations.gov object ID (the objectId from regulations_get_docket\'s documents). Narrower than docket_id — comments usually attach to the docket\'s primary (proposed-rule) document.'),
-fr_document_number: z.string().optional()
-  .describe('Convenience: fetch comments for a Federal Register document by its FR number (e.g. "2025-14555"). The handler resolves it to the Regulations.gov document and pulls comments on it. Saves a manual get_document → get_docket hop.'),
+  .describe('Fetch comments on one specific Regulations.gov document, by its object ID (16 hex characters, e.g. "0900006485883ec6") or its document ID (e.g. "EPA-HQ-OW-2022-0114-0027", the regulationsGovDocumentId from regulations_get_document). Narrower than docket_id — comments usually attach to the docket\'s primary (proposed-rule) document.'),
+fr_document_number: z.union([z.literal(''), frDocumentNumber()]).optional()
+  .describe('Convenience: fetch comments on the Regulations.gov document carrying a Federal Register number (e.g. "2023-05471"; older numbers like "E9-25990" too). Saves a manual get_document → get_docket hop.'),
 comment_id: z.string().optional()
-  .describe('Fetch one comment\'s full detail and attachments by its Regulations.gov comment ID (e.g. "EPA-HQ-OAR-2025-0194-31102"). Use to read a single comment\'s body after finding it in a list.'),
+  .describe('Fetch one comment\'s full detail and attachments by its Regulations.gov comment ID (e.g. "EPA-HQ-OAR-2025-0194-31102"). Use to read a single comment\'s body after finding it in a list. Takes none of the list filters.'),
+search_term: z.string().optional()
+  .describe('List mode: keep only comments whose text matches (stemmed full-text search). Each hit then carries highlightedContent.'),
+posted_after: z.union([z.literal(''), isoDate()]).optional()
+  .describe('List mode: earliest posted date, inclusive, YYYY-MM-DD.'),
+posted_before: z.union([z.literal(''), isoDate()]).optional()
+  .describe('List mode: latest posted date, inclusive, YYYY-MM-DD. The same date as posted_after selects that one day.'),
 per_page: z.number().int().min(5).max(250).optional().default(25)
   .describe('Comments per page (5–250, default 25). Regulations.gov requires a minimum page size of 5.'),
-page: z.number().int().min(1).max(20).optional().default(1)
-  .describe('Page number (1-based). Regulations.gov caps a query at 20 pages (5,000 records); for a high-volume docket (rules can draw hundreds of thousands of comments), this surfaces a sample — narrow by document_object_id or use the lastModifiedDate window described in the truncation note.'),
+page: z.number().int().min(1).max(40).optional().default(1)
+  .describe('Page number (1–40, default 1). Regulations.gov serves 40 pages, so a list reaches 40 × per_page comments (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. To reach past that, take the set one posted_after/posted_before window at a time.'),
 ```
 
 **Output (list):**
@@ -620,7 +669,7 @@ page: z.number().int().min(1).max(20).optional().default(1)
 {
   mode: 'list',
   totalCount: number,                 // meta.totalElements
-  target: string,                     // what was queried (docket / document / FR doc)
+  target: string,                     // what was queried (docket / document / FR doc), plus the active filters
   comments: Array<{
     commentId: string,                // chaining → comment_id for full detail
     title: string,                    // e.g. "Comment from Gates, Andrew"
@@ -629,15 +678,23 @@ page: z.number().int().min(1).max(20).optional().default(1)
     agencyId: string | null,
     objectId: string,
     withdrawn: boolean,
+    highlightedContent?: string,      // search_term only: the matched passages, tags stripped and references decoded, relayed whole
     // NOTE: The list endpoint returns NEITHER comment body NOR attachment info — comment is always '',
     // relationships block is absent, and fileFormats is always null. The only fields that identify
     // substantive content at list level are title and documentType. Always use comment_id detail mode
     // (GET /v4/comments/{id}?include=attachments) to get body text and attachment URLs.
   }>,
-  truncated?: boolean,                // totalCount exceeds the 5,000-record ceiling
-  shown?: number,
+  // enrichment (the paging contract above):
+  totalPages: number,                 // min(ceil(totalCount / per_page), 40)
+  nextPage?: number,                  // present while a later page holds comments
+  truncated?: boolean,                // totalCount > 40 × per_page — some comments are on no page
+  shown?: number,                     // with truncated
+  cap?: number,                       // 40 × per_page (with truncated)
+  notice?: string,                    // no comments, page past the end, or truncation guidance
 }
 ```
+
+Truncation guidance names the reachable count, then `per_page` (below 250), then posted-date windows and `search_term`. A high-volume proposed rule usually holds most of its docket's comments on one document, so narrowing by `document_object_id` is no remedy there; a posted-date window is.
 
 **Output (detail, when `comment_id` is given):**
 ```ts
@@ -648,7 +705,9 @@ page: z.number().int().min(1).max(20).optional().default(1)
   docketId: string | null,
   commentOnDocumentId: string | null,
   postedDate: string,
-  receivedDate: string | null,
+  receivedDate: string | null,        // upstream receiveDate
+  postmarkDate: string | null,        // passed through; null when the agency records none
+  duplicateComments: number | null,   // passed through; above 1 marks a mass-mail campaign record standing for that many submissions
   submitterName: string | null,       // firstName + lastName, when public
   organization: string | null,
   bodyText: string | null,            // `comment` field, HTML-stripped. Non-null but stub ("See Attached") when the real content is in attachments; null only when the field was genuinely empty.
@@ -662,19 +721,25 @@ page: z.number().int().min(1).max(20).optional().default(1)
 }
 ```
 
-`format()`: list mode → a table (commenter · posted · has-attachments flag · comment ID), with a note that comment bodies are only available via the detail mode (`comment_id`); detail mode → the body text (HTML-stripped), or, when `attachmentOnly`, an explicit "the substance of this comment is in N attachment(s)" notice followed by the attachment titles and download URLs. **The attachment-only flag must reach both client surfaces** (it goes in the structured output and the `format()` text), so an agent never mistakes a stub body for substantive inline text.
+`format()`: list mode → a table (commenter · type · posted · agency · object ID · comment ID), each search hit followed by a `↳ Match:` row carrying its `highlightedContent`, with a note that comment bodies are only available via the detail mode (`comment_id`); detail mode → a header with the posted, received, and postmark dates and `duplicateComments` (a campaign callout only when it is above 1), then the body text (HTML-stripped), or, when `attachmentOnly`, an explicit "the substance of this comment is in N attachment(s)" notice followed by the attachment titles and download URLs. **The attachment-only flag must reach both client surfaces** (it goes in the structured output and the `format()` text), so an agent never mistakes a stub body for substantive inline text.
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured | Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
-| `target_required` | `InvalidParams` | None of docket_id / document_object_id / fr_document_number / comment_id given | Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID. |
-| `multiple_targets` | `InvalidParams` | More than one of the four targeting parameters given | Keep the single target you meant and drop the rest; to read a comment found in a docket listing, call again with `comment_id` alone. |
-| `not_found` | `NotFound` | The target docket/document/comment has no comments or does not exist | Verify the ID; comments often attach to the docket\'s primary document — try docket_id to widen, or check the docket has reached its comment period. |
+| `target_required` | `ValidationError` | None of docket_id / document_object_id / fr_document_number / comment_id given | Provide one targeting parameter — a docket ID, a document object ID, an FR document number, or a comment ID. |
+| `multiple_targets` | `ValidationError` | More than one of the four targeting parameters given | Keep the single target you meant and drop the rest; to read a comment found in a docket listing, call again with `comment_id` alone. |
+| `filter_requires_list_mode` | `ValidationError` | `search_term`, `posted_after`, or `posted_before` given with `comment_id` | Drop the filters to read the comment by comment_id, or replace comment_id with docket_id, document_object_id, or fr_document_number to list the comments the filters match. |
+| `date_range_inverted` | `ValidationError` | The start of a date range is later than its end | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
+| `not_found` | `NotFound` | The target docket, document, or comment does not exist on Regulations.gov, or no Regulations.gov document carries the FR number | Verify the ID or number; a docket ID goes in docket_id, and an FR document with no regulationsGovDocumentId has no Regulations.gov record — list its docketId with docket_id instead. |
 | `rate_limited` | `RateLimited` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
-The four targeting parameters are mutually exclusive. The handler counts the non-empty ones before doing any work, so neither zero nor two can resolve by branch order; two used to return detail mode for the `comment_id` and drop the rest without a word. An empty string counts as absent — form-based clients send `""` for a field the caller left untouched, the same reason `query`, `date`, and `section` accept a `''` literal elsewhere in this surface.
+**A document target resolves before the list runs, and an unmatched one is an error, never an empty success.** Regulations.gov answers `filter[commentOnId]=<anything>` with zero comments as a normal success, so a wrong handle used to read as "this document drew no comments." `document_object_id` takes a 16-hex object ID as-is and resolves anything else through `GET /documents/{id}` (404 → `not_found`). A `docket_id`, `document_object_id`, or `comment_id` with a character outside `[A-Za-z0-9_-]` names no record and is `not_found` without a request: sent anyway, `..` in a URL path reaches the API root, an encoded `/` draws a 403 that reads as a rejected key, and whitespace in a filter draws a 500. `fr_document_number` resolves through the exact `filter[frDocNum]` match, uppercased first because the filter is case-sensitive, and zero hits is `not_found`. *Decision:* the earlier `filter[searchTerm]` lookup with a first-hit fallback is gone — a text search ranks documents that merely quote the number (Executive Order 14192 resolved to an EPA supporting document reproducing it). A resolved document with no comments of its own — a final rule, a hearing notice — still lists 0 total, and the empty-result notice names the resolved document and its docket as the `docket_id` to widen with.
+
+**Filters are validated before any request.** An empty `search_term` / `posted_after` / `posted_before` counts as absent, as does a whitespace-only `search_term` (Regulations.gov answers one with the unfiltered set); a `search_term` is sent trimmed. A window whose start falls after its end is `date_range_inverted` (equal dates are a one-day window), and any filter beside `comment_id` is `filter_requires_list_mode` rather than ignored.
+
+The four targeting parameters are mutually exclusive. The handler counts the non-empty ones before doing any work, so neither zero nor two can resolve by branch order; two used to return detail mode for the `comment_id` and drop the rest without a word. Each value is trimmed first, as Regulations.gov trims a padded filter value, so an empty or whitespace-only string counts as absent — form-based clients send `""` for a field the caller left untouched, the same reason `query`, `date`, and `section` accept a `''` literal elsewhere in this surface.
 
 The rule stays out of the advertised `inputSchema`. Expressing it as a JSON Schema `oneOf` of four `required` branches validates cleanly for a single target but rejects two shapes the handler accepts — `{docket_id, comment_id: ""}` matches two branches and fails — and replaces both typed errors with `must match exactly one schema in oneOf`, accompanied by `must have required property …` errors naming the parameters a caller should *remove*. JSON Schema cannot express "exactly one non-empty," so the constraint lives in the tool description, all four field descriptions, and the handler.
 
@@ -834,8 +899,8 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 ## Known Limitations
 
-- **Federal Register caps navigation at 50 pages.** With `per_page=100`, this allows up to 5,000 records per query; with smaller per_page values, fewer records are reachable. The `count` field is itself capped at 10,000 (ElasticSearch default window), so for queries with more than 10,000 matches the true total is unknown. `search_rules` surfaces this via the `truncated` flag and steers the agent to date-windowing to narrow results below the navigable ceiling. `list_open_comments` fetches its window at per_page 2,000 instead and reaches the full 10,000.
-- **Regulations.gov caps a query at 5,000 records** (250/page × 20 pages). For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` surfaces a sample and flags `truncated`; exhaustive retrieval needs the documented `lastModifiedDate`-window workaround (iterate by posting-date slices), noted in the parameter descriptions. v1 surfaces the sample honestly rather than implementing the full windowed crawl.
+- **Federal Register caps navigation at 50 pages.** With `per_page=100`, this allows up to 5,000 records per query; at the default 20, 1,000. The `count` field is itself capped at 10,000 (ElasticSearch default window), so for queries with more than 10,000 matches the true total is unknown, and the truncation notice says so. `search_rules` sets `truncated` on every page of a set larger than 50 × `per_page` and steers the agent to date-windowing to narrow results below the navigable ceiling. `list_open_comments` fetches its window at per_page 2,000 instead and reaches the full 10,000.
+- **Regulations.gov serves 40 pages per query** — 10,000 records at 250 per page, 1,000 at the default 25. For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` flags `truncated` and points at `posted_after`/`posted_before` windows, which take the set one reachable slice at a time; `get_docket` points at `document_types`. The server does not crawl the windows itself.
 - **Comment bodies can be attachment-only.** Confirmed live: the inline `comment` field is null when the substance is a PDF/DOCX attachment. `find_comments` flags `attachmentOnly`/`hasInlineBody` and returns the attachment download URLs, but does **not** fetch and OCR/parse the attachment binaries — the agent gets the URLs and the flag, retrieval of the file content is left to the caller.
 - **eCFR historical coverage starts ~2017.** Point-in-time reads before 2017-01-01 are rejected as `date_out_of_range`; the server can't synthesize CFR text that eCFR doesn't retain.
 - **Regulations.gov coverage is agency-dependent.** Not every FR document has a Regulations.gov docket, and not every docket accepts comments. `commentCount`/`docketId` are null when absent — the server reports the gap rather than fabricating a docket.
@@ -848,7 +913,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 ### Federal Register (keyless) — `GET https://www.federalregister.gov/api/v1/documents.json`
 - **Filters** (`conditions[...]`): `term` (full text), `type[]` (PRORULE/RULE/NOTICE/PRESDOCU), `agencies[]` (agency slug), `publication_date[gte|lte]`, `comment_date[gte|lte]` (open-comment window).
 - **Field selection:** `fields[]` — request only what's needed. Key fields: `document_number`, `title`, `type`, `abstract`, `publication_date`, `agencies` (objects with `name`, `raw_name`, `slug`; an entry carried by `raw_name` alone has no slug — e.g. "Office of the Secretary"), `docket_ids`, `regulation_id_numbers`, `cfr_references`, `comments_close_on`, `effective_on`, `html_url`, `regulations_dot_gov_info`, `body_html_url`/`full_text_xml_url`/`raw_text_url` (single-doc).
-- **Pagination:** `per_page` is honored from 2 to 2,000; exactly `per_page=1`, and any value above 2,000, is silently treated as the default 20. `page` supports 1–50. Responses include `count`, `total_pages`, and `next_page_url`. `count` is capped at 10,000 (ElasticSearch window); `total_pages` is always capped at 50 regardless of actual result count. Maximum navigable records = 50 × per_page at per_page ≤ 100; at per_page 2,000 the 10,000-item limit binds first, and a page reaching past item 10,000 answers `400 Pagination limit exceeded`. Pages beyond the reported `total_pages` still return results (the API doesn't enforce a hard stop), but going past 50 pages is undefined/unreliable — date-window instead. `next_page_url` carries a `search_after_cursor` parameter, but plain `page=N` URLs page correctly without it: five 2,000-row pages of a 10,000-item window return 10,000 distinct documents, so the open-comment window builds page URLs directly.
+- **Pagination:** `per_page` is honored from 2 to 2,000; exactly `per_page=1`, and any value above 2,000, is silently treated as the default 20. `page` supports 1–50. Responses include `count`, `total_pages`, and `next_page_url`. `count` is capped at 10,000 (ElasticSearch window); `total_pages` is always capped at 50 regardless of actual result count. Maximum navigable records = 50 × per_page at per_page ≤ 100; at per_page 2,000 the 10,000-item limit binds first, and a page reaching past item 10,000 answers `400 Pagination limit exceeded`. A page past the reported `total_pages` but within 50 returns no rows (page 10 of a 5-page result); page 51 and beyond silently re-serve page 1, so `search_rules` keeps `page` at 1–50 — date-window instead. `next_page_url` carries a `search_after_cursor` parameter, but plain `page=N` URLs page correctly without it: five 2,000-row pages of a 10,000-item window return 10,000 distinct documents, so the open-comment window builds page URLs directly.
 - **Single document:** `GET /documents/{document_number}.json`. Returns both `regulations_dot_gov_info` (single-docket convenience block) AND a `dockets[]` array when multiple dockets are present; handler should prefer `regulations_dot_gov_info.docket_id` and `regulations_dot_gov_info.document_id` for the primary cross-source handles.
 - **Agencies reference:** `GET /agencies.json` (473 agencies, ~695 KB, each with `name`/`slug`/`short_name`/`id`) — not used; results carry each agency's slug, and the 400 on an unknown slug is authoritative.
 - **Order:** `order=relevance|newest|oldest`. An unrecognized value is silently ignored (200) — including `comment_date`, so there is no server-side comment-deadline order.
@@ -863,10 +928,10 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 ### Regulations.gov v4 (key required) — `https://api.regulations.gov/v4`, header `X-Api-Key: {key}`
 - **JSON:API shape:** every record is `{ type, id, attributes: {...} }`; lists are `data[]`, `meta` carries `totalElements`, `hasNextPage`, and `aggregations` (facet counts by `documentType`/`agencyId`).
-- **Documents:** `GET /documents?filter[searchTerm]={q}&filter[docketId]={id}&filter[documentType]={t}&page[size]={n}&page[number]={p}&sort=-postedDate`. Attributes: `docketId`, `documentType`, `title`, `postedDate`, `commentEndDate`, `objectId`, `frDocNum`, `withdrawn`, `openForComment`.
+- **Documents:** `GET /documents?filter[searchTerm]={q}&filter[docketId]={id}&filter[documentType]={t}&page[size]={n}&page[number]={p}&sort=-postedDate`; `filter[frDocNum]={number}` is an exact, case-sensitive match on the FR number (`E9-25990` hits, `e9-25990` does not); `GET /documents/{documentId}` returns one document (404 when missing). Attributes: `docketId`, `documentType`, `title`, `postedDate`, `commentEndDate`, `objectId`, `frDocNum`, `withdrawn`, `openForComment`.
 - **Dockets:** `GET /dockets/{docketId}`. Attributes: `docketType`, `title`, `agencyId`, `rin`, `objectId`, `program`, `dkAbstract`, `modifyDate`.
-- **Comments:** list `GET /comments?filter[commentOnId]={documentObjectId}` or `filter[docketId]={id}`, `sort=-postedDate`. Detail `GET /comments/{commentId}?include=attachments`. **Critical shape (confirmed live):** `attributes.comment` is always `''` (empty string) at list level — the body is never populated in list responses. In detail responses, `comment` contains HTML body text (substantive for citizen comments) or a stub string like "See Attached" / "See attached" for attachment-primary submissions. `attributes.fileFormats` is always `null` at both list and detail level — attachments live in `relationships.attachments.data[]` (ID list) and `included[]` (full records with `attributes.fileFormats[].fileUrl`), only present when `?include=attachments` is specified on the detail call.
-- **Constraints:** `page[size]` **minimum 5**, maximum 250; **max 20 pages (5,000 records) per query** — beyond that, iterate with a `lastModifiedDate` filter window. Rate limit **1,000 req/hr per key**; 429 carries `Retry-After`. Invalid key → **HTTP 403**, `{ error: { code: "API_KEY_INVALID", message } }`.
+- **Comments:** list `GET /comments?filter[commentOnId]={documentObjectId}` or `filter[docketId]={id}`, `sort=-postedDate`, optionally `filter[searchTerm]` (hits carry `highlightedContent`) and `filter[postedDate][ge]` / `[le]` (`yyyy-MM-dd`). Detail `GET /comments/{commentId}?include=attachments`. **Critical shape (confirmed live):** `attributes.comment` is always `''` (empty string) at list level — the body is never populated in list responses. In detail responses, `comment` contains HTML body text (substantive for citizen comments) or a stub string like "See Attached" / "See attached" for attachment-primary submissions. `attributes.fileFormats` is always `null` at both list and detail level — attachments live in `relationships.attachments.data[]` (ID list) and `included[]` (full records with `attributes.fileFormats[].fileUrl`), only present when `?include=attachments` is specified on the detail call.
+- **Constraints:** `page[size]` **minimum 5**, maximum 250; **max 40 pages per query** (10,000 records at 250; `page[number]=41` is a 400, "Page number parameter is greater than allowed. Maximum value is 40.") — beyond that, iterate with a posted-date filter window. `meta.totalPages` is `min(ceil(totalElements / page[size]), 40)`, and a page past it within 40 returns `data: []`. Rate limit **1,000 req/hr per key**; 429 carries `Retry-After`. Invalid key → **HTTP 403**, `{ error: { code: "API_KEY_INVALID", message } }`.
 - **Two statuses mean "no such record", and 400 is overloaded (confirmed live).** A single-resource lookup whose ID is well formed but matches nothing answers **404** (`"The docket with the specified ID could not be found."`); one whose ID the API cannot parse answers **400** with `{"errors":[{"status":"400","title":"Invalid ID: NO-SUCH-DOCKET-XYZ"}]}`. The same 400 also carries genuine caller mistakes — `"Invalid filter field name: bogusFilter"`, `"Page size parameter must be a positive number of 5 or greater."` — so the service discriminates on the `Invalid ID:` title, not on the status: that one maps to `not_found` with the tool's recovery hint, and every other 400 keeps its `InvalidParams` classification and upstream body. List endpoints never take this path — a bogus `filter[docketId]` returns **200** with `data: []`.
 
 ### Cross-source key map
@@ -875,6 +940,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 | FR `document_number` | FR search/document | `regulations_get_document`, `regulations_find_comments(fr_document_number)` |
 | `docket_id` | FR `docket_ids` / `regulations_dot_gov_info.docket_id` | `regulations_get_docket`, `regulations_find_comments(docket_id)` |
 | Regulations.gov document `objectId` | `get_docket` documents[] | `regulations_find_comments(document_object_id)` |
+| Regulations.gov document ID | `get_document` `regulationsGovDocumentId` / `get_docket` documents[] | `regulations_find_comments(document_object_id)` (resolved to the object ID) |
 | `cfr_references` (title + part) | FR document | `regulations_get_cfr_section`, `regulations_browse_cfr` |
 | `commentId` | `find_comments` list | `regulations_find_comments(comment_id)` (detail + attachments) |
 
@@ -888,7 +954,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 **1. FR pagination ceiling corrected (search_rules + Known Limitations + API Reference)**
 
-The design claimed "first 2,000 results (20 pages × 100, or 100 pages × 20)" — incorrect. Live probing confirms the Federal Register API caps `total_pages` at 50 and `count` at 10,000 (ElasticSearch default window), regardless of actual result count. Max navigable records = 50 × per_page (5,000 with per_page=100). The `page` input schema was fixed from `max=100` to `max=50`. The `pagination_ceiling` error contract was removed (the FR API does not return an error at page > reported total_pages; it silently continues returning results past page 50 — so there is no `InvalidParams` situation to contract). The `truncated` flag threshold corrected to 5,000. The Known Limitations section updated. The API Reference updated with the actual behavior plus a note about cursor-based `search_after_cursor` appearing in `next_page_url` for some query types.
+The design claimed "first 2,000 results (20 pages × 100, or 100 pages × 20)" — incorrect. Live probing confirms the Federal Register API caps `total_pages` at 50 and `count` at 10,000 (ElasticSearch default window), regardless of actual result count. Max navigable records = 50 × per_page (5,000 with per_page=100). The `page` input schema was fixed from `max=100` to `max=50`. The `pagination_ceiling` error contract was removed (the FR API does not return an error at page > reported total_pages; page 51 and beyond silently re-serve page 1 — so there is no `InvalidParams` situation to contract). The `truncated` flag threshold corrected to 50 × per_page (5,000 at per_page 100). The Known Limitations section updated. The API Reference updated with the actual behavior plus a note about cursor-based `search_after_cursor` appearing in `next_page_url` for some query types.
 
 **2. `regulations_find_comments` comment body / attachment detection corrected (tool detail + API Reference)**
 
@@ -916,7 +982,7 @@ Live probing of the single-document endpoint confirmed it returns both `regulati
 - Truncation fields `truncated`/`shown` are `.optional()` throughout — correct, avoids `-32007` ValidationError on non-truncated results.
 - `REGULATIONS_GOV_API_KEY` is `z.string().optional()` with per-tool enforcement — correct keyless-core split.
 - Regulations.gov `page[size]` minimum of 5 — confirmed live (400 error on size=3).
-- Regulations.gov `page[number]` max of 20 (5,000 record ceiling) — confirmed via `totalPages` in meta.
+- Regulations.gov `page[number]` max of 40 (10,000 records at `page[size]` 250) — confirmed live: `meta.totalPages` caps at 40 and page 41 is a 400.
 - eCFR `<DIV8 TYPE="SECTION">` XML structure with `hierarchy_metadata` citation attribute — confirmed live.
 - Mirror aux-table idempotent creation (`CREATE TABLE IF NOT EXISTS` in `sync` routine, not migrations) — correctly documented; this is the build-correctness requirement.
 - Identity: `federal-regulations-mcp-server` (hyphenated, no Title Case) — already set correctly.
