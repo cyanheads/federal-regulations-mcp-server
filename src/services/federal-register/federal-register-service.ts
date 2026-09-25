@@ -25,6 +25,7 @@ import {
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
+import { decodeNumericReference } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
 import { type TextWindow, windowText } from '@/services/text-window.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
@@ -100,25 +101,24 @@ function decodeCfEmail(hex: string): string {
   return email;
 }
 
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  gt: '>',
-  lt: '<',
-  quot: '"',
-};
+const NAMED_ENTITIES = new Map([
+  ['amp', '&'],
+  ['apos', "'"],
+  ['gt', '>'],
+  ['lt', '<'],
+  ['quot', '"'],
+]);
 
 /**
- * Decode one character reference. A numeric reference naming no Unicode scalar
- * value (NUL, a surrogate, past U+10FFFF) is left as written rather than turned
- * into a lone surrogate or thrown on.
+ * Decode one character reference. Named references are the five XML predefines
+ * the pattern admits; a numeric reference naming no Unicode scalar value (NUL, a
+ * surrogate, past U+10FFFF) is left as written rather than turned into a lone
+ * surrogate or thrown on.
  */
 function decodeEntity(entity: string, dec?: string, hex?: string, name?: string): string {
-  if (name) return NAMED_ENTITIES[name] ?? entity;
-  const codePoint = Number.parseInt(dec ?? hex ?? '', dec ? 10 : 16);
-  const isScalar =
-    codePoint > 0 && codePoint <= 0x10ffff && (codePoint < 0xd800 || codePoint > 0xdfff);
-  return isScalar ? String.fromCodePoint(codePoint) : entity;
+  if (name) return NAMED_ENTITIES.get(name) ?? entity;
+  if (dec) return decodeNumericReference(entity, dec, 10);
+  return hex ? decodeNumericReference(entity, hex, 16) : entity;
 }
 
 /**

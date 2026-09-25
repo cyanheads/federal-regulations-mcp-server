@@ -741,6 +741,46 @@ describe('EcfrService', () => {
     expect(table?.appendix).toBe('Table 1 to Subpart JJJJ of Part 60');
   });
 
+  it('leaves a label reference naming no character, or an inherited property name, as written', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        type: 'title',
+        identifier: '40',
+        children: [
+          {
+            type: 'part',
+            identifier: '60',
+            children: [
+              {
+                type: 'section',
+                identifier: '60.1',
+                label: '§ 60.1 Lone &#xD800; &#1114112; &constructor; &toString; &notanentity;',
+              },
+              {
+                type: 'section',
+                identifier: '60.2',
+                label: '§ 60.2 Ratios &frac12; &frasl; &AMP; &eacute;',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const [lone, named] = await service.browseStructure(
+      40,
+      '60',
+      '2026-09-17',
+      createMockContext(),
+    );
+
+    // A surrogate reference decoded to a lone surrogate; a name the table did not
+    // own was looked up on a plain object.
+    expect(lone?.label).toBe(
+      '§ 60.1 Lone &#xD800; &#1114112; &constructor; &toString; &notanentity;',
+    );
+    expect(named?.label).toBe('§ 60.2 Ratios ½ ⁄ & é');
+  });
+
   it("reads eCFR's current index date and reuses it across calls", async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));
     const ctx = createMockContext();

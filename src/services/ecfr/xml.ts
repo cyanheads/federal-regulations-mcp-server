@@ -1,6 +1,6 @@
 /**
- * @fileoverview Minimal, dependency-free extraction of CFR text from eCFR
- * versioner XML. The versioner returns `<DIV8 TYPE="SECTION">` and
+ * @fileoverview Minimal extraction of CFR text from eCFR versioner XML, with no
+ * XML parser behind it. The versioner returns `<DIV8 TYPE="SECTION">` and
  * `<DIV9 TYPE="APPENDIX">` elements with a `<HEAD>` heading over body content —
  * paragraphs, `<HD1>`–`<HD7>` subheadings, editorial notes, tables, `<CITA>`
  * source notes, and `<img>` figure references; this module pulls those into flat
@@ -22,52 +22,19 @@
  * @module services/ecfr/xml
  */
 
+import { decodeCharacterReferences } from '@/services/character-references.js';
 import type { EcfrAppendix, EcfrSection, EcfrXmlContent } from './types.js';
-
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-  mdash: '—',
-  ndash: '–',
-  sect: '§',
-  rsquo: '’',
-  lsquo: '‘',
-  ldquo: '“',
-  rdquo: '”',
-  hellip: '…',
-  deg: '°',
-  reg: '®',
-};
-
-/** Decode the XML/HTML entities that appear in eCFR text. */
-function decodeEntities(text: string): string {
-  return text.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X')) {
-      const code = Number.parseInt(body.slice(2), 16);
-      return Number.isNaN(code) ? match : String.fromCodePoint(code);
-    }
-    if (body.startsWith('#')) {
-      const code = Number.parseInt(body.slice(1), 10);
-      return Number.isNaN(code) ? match : String.fromCodePoint(code);
-    }
-    return NAMED_ENTITIES[body] ?? match;
-  });
-}
 
 /**
  * Strip XML tags from a fragment and collapse whitespace to readable text.
  * Closing tags are removed without a separator (they close inline runs, so
  * `term</E>.` becomes `term.`, not `term .`); other tags become a space so word
- * boundaries are preserved. Any residual space before sentence punctuation is
- * then tidied.
+ * boundaries are preserved. Character references decode after the tags are
+ * gone. Any residual space before sentence punctuation is then tidied.
  */
 function stripTags(fragment: string): string {
   const withoutTags = fragment.replace(/<\/[^>]+>/g, '').replace(/<[^>]+>/g, ' ');
-  return decodeEntities(withoutTags)
+  return decodeCharacterReferences(withoutTags)
     .replace(/\s+/g, ' ')
     .replace(/\s+([.,;:)])/g, '$1')
     .trim();

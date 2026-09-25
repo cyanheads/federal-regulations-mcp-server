@@ -26,6 +26,7 @@ import {
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
+import { decodeCharacterReferences } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
 import { appendixCite, sectionCite } from './cite.js';
@@ -837,39 +838,17 @@ function labelForAncestor(node: RawEcfrStructureNode): string | null {
   return `${typeLabel} ${node.identifier}`;
 }
 
-/** The named entities eCFR writes into labels and headings. */
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  apos: "'",
-  frasl: '⁄',
-  gt: '>',
-  lt: '<',
-  nbsp: ' ',
-  quot: '"',
-};
-
 /**
  * Reduce eCFR's inline markup to plain text: drop the tags, keep their text,
- * decode entities, collapse whitespace. The search API wraps matched terms in
- * `<strong>` in `full_text_excerpt` and the `headings.*` values; structure
- * labels carry `<em>`, `<sub>`, `<sup>`, `<span>` and escaped `&lt;` / `&amp;`.
- * Tags go before entities are decoded, so an escaped `&lt;10` survives as the
- * text `<10` rather than being read as the start of a tag. An unknown named
- * entity is left as written.
+ * decode character references, collapse whitespace. The search API wraps
+ * matched terms in `<strong>` in `full_text_excerpt` and the `headings.*`
+ * values; structure labels carry `<em>`, `<sub>`, `<sup>`, `<span>` and escaped
+ * `&lt;` / `&amp;`. Tags go before references are decoded, so an escaped `&lt;10`
+ * survives as the text `<10` rather than being read as the start of a tag. An
+ * unknown name is left as written.
  */
 function plainText(text: string): string {
-  return text
-    .replace(/<[^>]+>/g, '')
-    .replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (entity, body: string) => {
-      if (body[0] !== '#') return NAMED_ENTITIES[body.toLowerCase()] ?? entity;
-      const code =
-        body[1] === 'x' || body[1] === 'X'
-          ? Number.parseInt(body.slice(2), 16)
-          : Number(body.slice(1));
-      return Number.isInteger(code) && code > 0 && code <= 0x10ffff
-        ? String.fromCodePoint(code)
-        : entity;
-    })
+  return decodeCharacterReferences(text.replace(/<[^>]+>/g, ''))
     .replace(/\s+/g, ' ')
     .trim();
 }

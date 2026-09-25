@@ -145,6 +145,37 @@ describe('parseCfrXml sections', () => {
   });
 });
 
+describe('parseCfrXml character references', () => {
+  function bodyOf(body: string): string {
+    const xml = `<DIV8 TYPE="SECTION" N="9.1"><HEAD>§ 9.1 X.</HEAD><P>${body}</P></DIV8>`;
+    return parseCfrXml(xml).sections[0]!.bodyText;
+  }
+
+  it('leaves a numeric reference naming no Unicode scalar value as written instead of throwing', () => {
+    // `&#1114112;` threw RangeError out of String.fromCodePoint, failing the parse.
+    expect(bodyOf('x &#1114112; y')).toBe('x &#1114112; y');
+    expect(bodyOf('x &#xD800; &#0; y')).toBe('x &#xD800; &#0; y');
+  });
+
+  it('leaves inherited property names and unknown names as written', () => {
+    expect(bodyOf('a &constructor; &toString; &notanentity; b')).toBe(
+      'a &constructor; &toString; &notanentity; b',
+    );
+  });
+
+  it('decodes any HTML named reference, not only a fixed list', () => {
+    expect(bodyOf('&frac12; &eacute; &sect; &mdash; &#167; &#x2014;')).toBe('½ é § — § —');
+  });
+
+  it('does not decode the leading digits of a decimal reference carrying hex letters', () => {
+    expect(bodyOf('x &#12ab; y')).toBe('x &#12ab; y');
+  });
+
+  it('decodes an escaped reference once', () => {
+    expect(bodyOf('&amp;lt;10 &amp;amp;')).toBe('&lt;10 &amp;');
+  });
+});
+
 describe('parseCfrXml part derivation', () => {
   it('reads the part from the enclosing DIV5, not the section number', () => {
     // 14 CFR 241 numbers its sections without a dot, so cutting the number at
