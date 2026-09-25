@@ -2,8 +2,9 @@
  * @fileoverview FederalRegisterService — keyless client for the Federal Register
  * API v1 (federalregister.gov/api/v1). Backs the document search (and resolving a
  * page cite on its publication day), single-document fetch (with the
- * cross-source docket/CFR handles), and the open-comment-window tools. Each method runs the full fetch + parse pipeline through `runUpstream`,
- * which bounds every attempt by the request's shared budget and retries inside
+ * cross-source docket/CFR handles), and the open-comment-window tools. Each
+ * method runs the full fetch + parse pipeline through `runUpstream`, which
+ * bounds every attempt by the request's shared budget and retries inside
  * it; `fetchWithTimeout` throws a classified `McpError` on a non-OK response, the
  * response parser detects HTML error pages and re-throws them as transient, and
  * `rethrowTransportFailure` re-codes the 5xx statuses the status→code map calls
