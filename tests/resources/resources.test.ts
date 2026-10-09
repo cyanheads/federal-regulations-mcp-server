@@ -9,6 +9,7 @@ import type { ListExtra } from '@cyanheads/mcp-ts-core/resources';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FrDocumentDetail } from '@/services/federal-register/types.js';
 import { handlerContext } from '../helpers/handler-context.js';
+import { readResourceError } from '../helpers/read-resource.js';
 
 const getDocument = vi.hoisted(() => vi.fn());
 const getSectionText = vi.hoisted(() => vi.fn());
@@ -156,19 +157,11 @@ describe('cfrSectionResource', () => {
     mirrorReady.mockResolvedValue(false);
     latestIssueDate.mockResolvedValue('2026-08-06');
     getSectionText.mockResolvedValue(null);
-    const ctx = handlerContext(cfrSectionResource);
-    const params = cfrSectionResource.params!.parse({ title: '40', part: '50', section: '50.999' });
 
-    const err = await Promise.resolve(cfrSectionResource.handler(params, ctx)).catch(
-      (e: unknown) => e,
-    );
-    expect(err).toMatchObject({ data: { reason: 'not_found' } });
-    expect((err as { message: string }).message).toBe(
-      'No codified text found for 40 CFR 50.999 as of 2026-08-06.',
-    );
-    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
-      /regulations_browse_cfr/,
-    );
+    const err = await readResourceError(cfrSectionResource, 'regulations://cfr/40/50/50.999');
+    expect(err.data?.reason).toBe('not_found');
+    expect(err.message).toBe('No codified text found for 40 CFR 50.999 as of 2026-08-06.');
+    expect(err.data?.recovery?.hint).toMatch(/regulations_browse_cfr/);
   });
 
   it('falls back to the live versioner when the mirror is not ready', async () => {

@@ -18,10 +18,9 @@
  * decide whether to retry.
  *
  * Services carry the reason the way the framework prescribes for code that has
- * no `ctx.fail`: put `reason` in the thrown error's `data`, and spread
- * `ctx.recoveryFor` so each tool's own declared hint rides along (the resolver
- * returns `{}` when the caller declares nothing, so this is safe from any call
- * site).
+ * no `ctx.fail`: put `reason` in the thrown error's `data`. The handler factory
+ * fills in the calling tool's own declared hint for that reason, and adds
+ * nothing where the caller declares none, so this is safe from any call site.
  * @module services/upstream-failure
  */
 
@@ -164,12 +163,12 @@ export function retryTransportOnly(error: unknown): boolean {
  * Anything else passes through untouched — an already-classified domain failure,
  * a parse error, a caller abort, a programmer error.
  */
-function withUpstreamReason<T>(work: Promise<T>, ctx: Context): Promise<T> {
+function withUpstreamReason<T>(work: Promise<T>): Promise<T> {
   return work.catch((err: unknown) => {
     if (!(err instanceof McpError) || !TRANSPORT_CODES.has(err.code)) throw err;
     throw serviceUnavailable(
       err.message,
-      { ...err.data, reason: 'upstream_unavailable', ...ctx.recoveryFor('upstream_unavailable') },
+      { ...err.data, reason: 'upstream_unavailable' },
       { cause: err },
     );
   });
@@ -229,7 +228,7 @@ export function runUpstream<T>(
       ...(spec.isTransient && { isTransient: spec.isTransient }),
     },
   );
-  return withUpstreamReason(asSpentBudget(attempts, ctx, budget, spec.operation), ctx);
+  return withUpstreamReason(asSpentBudget(attempts, ctx, budget, spec.operation));
 }
 
 /** One attempt under its own deadline, raised as a `Timeout` when it expires. */

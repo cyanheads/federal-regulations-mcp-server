@@ -610,15 +610,8 @@ async function fetchTitleXml(
 /**
  * A minimal `Context` shim for the sync ingester, which runs outside the MCP
  * request pipeline (CLI / cron), where there is no definition and so no declared
- * error contract. The remaining Context surface is stubbed off a real
- * RequestContext base.
- *
- * `recoveryFor` has to be one of the stubs: every eCFR fetch runs through
- * `withUpstreamReason`, which calls it on any transport failure. Left off, an
- * eCFR 5xx mid-sync raised `TypeError: ctx.recoveryFor is not a function` in
- * place of the classified error — swallowed into a misleading "failed to fetch
- * title N" on the per-title path, and fatal to the run on `listTitles`. `{}` is
- * what the real resolver returns for a caller that declares nothing.
+ * error contract. The Context surface the eCFR service reads (`signal`, `log`)
+ * is stubbed off a real RequestContext base.
  *
  * The context is claimed for {@link ingestBudget} the moment it exists, because
  * it is the one thing a whole run shares. A sync is hours of work against
@@ -633,7 +626,6 @@ function mirrorContext(signal: AbortSignal): Context {
     ...base,
     signal,
     log: logger,
-    recoveryFor: () => ({}),
   } as unknown as Context;
   ingestBudget(ctx);
   return ctx;

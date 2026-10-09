@@ -266,7 +266,6 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       throw ctx.fail(
         'conflicting_target',
         `A section (${section}) and an appendix (${appendix}) name two different locations.`,
-        { ...ctx.recoveryFor('conflicting_target') },
       );
     }
     const cited = section ? citedTitle(section) : undefined;
@@ -274,16 +273,12 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       throw ctx.fail(
         'conflicting_title',
         `Section "${section}" cites title ${cited}, but title is ${input.title}.`,
-        { ...ctx.recoveryFor('conflicting_title') },
       );
     }
     if (requestedDate && requestedDate < ECFR_EARLIEST_DATE) {
       throw ctx.fail(
         'date_out_of_range',
         `Date ${requestedDate} precedes eCFR coverage (~${ECFR_EARLIEST_DATE}).`,
-        {
-          ...ctx.recoveryFor('date_out_of_range'),
-        },
       );
     }
     // The versioner serves a title up to its up-to-date date and 404s past it
@@ -295,7 +290,6 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         throw ctx.fail(
           'date_out_of_range',
           outsideCoverageMessage(input.title, requestedDate, upToDate),
-          { ...ctx.recoveryFor('date_out_of_range') },
         );
       }
     }
@@ -326,7 +320,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         throw ctx.fail(
           'not_found',
           `No codified text found for ${appendixCite(appendix, input.title)} as of ${date}.`,
-          { ...ctx.recoveryFor('not_found'), title: input.title, part: part ?? null, appendix },
+          { title: input.title, part: part ?? null, appendix },
         );
       }
       const hierarchyPath = await service.hierarchyPath(
@@ -357,7 +351,6 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         section
           ? `Section ${section} names no part, and a section number is unique only within one.`
           : `Title ${input.title} alone names no location to read.`,
-        { ...ctx.recoveryFor('location_required') },
       );
     }
 
@@ -368,13 +361,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         throw ctx.fail(
           'not_found',
           `No codified text found for ${sectionCite(input.title, part, read.section)} as of ${read.date}${tried}.`,
-          {
-            ...ctx.recoveryFor('not_found'),
-            title: input.title,
-            part,
-            section,
-            date: read.date,
-          },
+          { title: input.title, part, section, date: read.date },
         );
       }
       if (read.rewrite) notices.push(read.rewrite);
@@ -406,13 +393,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       throw ctx.fail(
         'not_found',
         `No codified text found for ${input.title} CFR ${part} as of ${date}.`,
-        {
-          ...ctx.recoveryFor('not_found'),
-          title: input.title,
-          part,
-          section: null,
-          date,
-        },
+        { title: input.title, part, section: null, date },
       );
     }
     const hierarchyPath = await service.hierarchyPath(input.title, { part }, result.date, ctx);

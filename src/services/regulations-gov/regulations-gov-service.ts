@@ -225,7 +225,7 @@ export class RegulationsGovService {
     const missing = (cause?: unknown) =>
       notFound(
         `No Regulations.gov document ${documentId} to list comments on.`,
-        { documentId, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+        { documentId, reason: 'not_found' },
         { cause },
       );
     let raw: JsonApiSingle<RawDocumentAttributes>;
@@ -328,7 +328,7 @@ export class RegulationsGovService {
             // response is the one place an upstream echoes what it was sent.
             throw unauthorized(
               `Regulations.gov rejected the configured API key (HTTP ${response.status}).`,
-              { operation, reason: 'auth_required', ...ctx.recoveryFor('auth_required') },
+              { operation, reason: 'auth_required' },
             );
           }
           if (response.status === 404) {
@@ -336,7 +336,7 @@ export class RegulationsGovService {
             // contract recovery surfaces, rather than "returned HTTP 404".
             throw notFound(
               'No matching docket, document, or comment found on Regulations.gov. Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket).',
-              { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+              { operation, reason: 'not_found' },
             );
           }
           if (response.status === 400) {
@@ -350,7 +350,7 @@ export class RegulationsGovService {
             if (invalidId) {
               throw notFound(
                 `No matching docket, document, or comment found on Regulations.gov for "${invalidId}". Verify the ID (e.g. "EPA-HQ-OAR-2025-0194" for a docket, "EPA-HQ-OAR-2025-0194-0001" for a document, "EPA-HQ-OAR-2025-0194-31102" for a comment).`,
-                { operation, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+                { operation, reason: 'not_found' },
               );
             }
           }
@@ -376,12 +376,14 @@ export class RegulationsGovService {
  * `Retry-After` already reaches the JSON surface as `data.retryAfter`, but never
  * reaches a client reading `content[]`, which sees the `Recovery:` line and
  * nothing else — so the number is folded into the hint each tool declares rather
- * than replacing it. Falls back to the declared hint alone when the header is
- * absent, or when the calling definition declares no `rate_limited` recovery.
+ * than replacing it. Adds nothing when the header is absent, or when the calling
+ * definition declares no `rate_limited` recovery: the handler factory then fills
+ * the declared hint on its own.
  */
 function rateLimitRecovery(ctx: Context, retryAfter: string | null) {
+  if (!retryAfter) return {};
   const declared = ctx.recoveryFor('rate_limited');
-  if (!retryAfter || !('recovery' in declared)) return declared;
+  if (!('recovery' in declared)) return declared;
   return {
     recovery: { hint: `${declared.recovery.hint} Regulations.gov asked for ${retryAfter}s.` },
   };

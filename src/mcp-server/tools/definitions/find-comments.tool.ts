@@ -379,9 +379,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
     if (!service.hasKey()) {
       // Stated rather than left to the contract's `when`, which now covers a
       // rejected key too — this branch is only the absent one.
-      throw ctx.fail('auth_required', 'REGULATIONS_GOV_API_KEY is not configured.', {
-        ...ctx.recoveryFor('auth_required'),
-      });
+      throw ctx.fail('auth_required', 'REGULATIONS_GOV_API_KEY is not configured.');
     }
 
     // Resolve which single parameter targets the query before doing any work.
@@ -394,20 +392,17 @@ export const findCommentsTool = tool('regulations_find_comments', {
 
     const targeted = given[0];
     if (!targeted) {
-      throw ctx.fail('target_required', undefined, { ...ctx.recoveryFor('target_required') });
+      throw ctx.fail('target_required');
     }
     if (given.length > 1) {
       throw ctx.fail(
         'multiple_targets',
         `regulations_find_comments takes exactly one targeting parameter; ${given.length} were given (${given.map(([name]) => name).join(', ')}).`,
-        { ...ctx.recoveryFor('multiple_targets') },
       );
     }
     const [targetParam, targetValue] = targeted;
     if (targetParam !== 'fr_document_number' && !REGULATIONS_GOV_ID.test(targetValue)) {
-      throw ctx.fail('not_found', `"${targetValue}" is not ${NOT_AN_ID[targetParam]}.`, {
-        ...ctx.recoveryFor('not_found'),
-      });
+      throw ctx.fail('not_found', `"${targetValue}" is not ${NOT_AN_ID[targetParam]}.`);
     }
 
     /**
@@ -430,14 +425,12 @@ export const findCommentsTool = tool('regulations_find_comments', {
       throw ctx.fail(
         'filter_requires_list_mode',
         `comment_id reads one comment and takes no filters; ${activeFilters.join(', ')} ${activeFilters.length === 1 ? 'was' : 'were'} given.`,
-        { ...ctx.recoveryFor('filter_requires_list_mode') },
       );
     }
     if (filters.postedAfter && filters.postedBefore && filters.postedAfter > filters.postedBefore) {
       throw ctx.fail(
         'date_range_inverted',
         `posted_after (${filters.postedAfter}) is later than posted_before (${filters.postedBefore}), so no comment can fall in the window.`,
-        { ...ctx.recoveryFor('date_range_inverted') },
       );
     }
 
@@ -475,7 +468,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
         throw ctx.fail(
           'not_found',
           `No Regulations.gov document carries Federal Register number ${number}, so there are no comments to pull.`,
-          { ...ctx.recoveryFor('not_found'), frDocumentNumber: number },
+          { frDocumentNumber: number },
         );
       }
       resolved = found;

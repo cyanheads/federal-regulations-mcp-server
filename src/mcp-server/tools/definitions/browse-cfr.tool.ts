@@ -344,9 +344,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     // without `hierarchy[title]`. Saying so beats silently dropping the filter.
     const part = normalizePart(input.part);
     if (part && input.title === undefined) {
-      throw ctx.fail('title_required_for_part', undefined, {
-        ...ctx.recoveryFor('title_required_for_part'),
-      });
+      throw ctx.fail('title_required_for_part');
     }
 
     // Only a part's listing and search results are paged; any other structure
@@ -376,7 +374,6 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
           throw ctx.fail(
             'date_out_of_range',
             outsideCoverageMessage(input.title, input.date, upToDate),
-            { ...ctx.recoveryFor('date_out_of_range') },
           );
         }
       }
@@ -416,7 +413,7 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     // search mode
     const query = input.query?.trim();
     if (!query) {
-      throw ctx.fail('query_required', undefined, { ...ctx.recoveryFor('query_required') });
+      throw ctx.fail('query_required');
     }
 
     // The mirror answers only what it actually holds, as of the issue eCFR serves

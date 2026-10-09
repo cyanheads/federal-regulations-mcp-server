@@ -105,7 +105,7 @@ export function outsideCoverageMessage(title: number, date: string, upToDate: st
  * The read tools check the bound before any text request, so this catches the
  * window moving between that check and the read. Any other 404 returns.
  */
-function throwIfPastCoverage(err: McpError, title: number, date: string, ctx: Context): void {
+function throwIfPastCoverage(err: McpError, title: number, date: string): void {
   const body = err.data?.body;
   const upToDate =
     typeof body === 'string'
@@ -114,7 +114,7 @@ function throwIfPastCoverage(err: McpError, title: number, date: string, ctx: Co
   if (!upToDate) return;
   throw validationError(
     outsideCoverageMessage(title, date, upToDate),
-    { reason: 'date_out_of_range', title, date, ...ctx.recoveryFor('date_out_of_range') },
+    { reason: 'date_out_of_range', title, date },
     { cause: err },
   );
 }
@@ -240,7 +240,7 @@ export class EcfrService {
    *
    * A titles document that answers 200 without one is an upstream failure like
    * any other, but it is raised here rather than inside the fetch, past the reach
-   * of `withUpstreamReason` — so it stamps its own reason and hint.
+   * of `withUpstreamReason` — so it stamps its own reason.
    */
   async currentDate(ctx: Context): Promise<string> {
     const { indexDate } = await this.titlesDocument(ctx);
@@ -248,7 +248,6 @@ export class EcfrService {
       throw serviceUnavailable('eCFR did not report a current index date.', {
         url: `${this.baseUrl}/versioner/v1/titles.json`,
         reason: 'upstream_unavailable',
-        ...ctx.recoveryFor('upstream_unavailable'),
       });
     }
     return indexDate;
@@ -284,10 +283,10 @@ export class EcfrService {
       // reserved title, or a date before its coverage. A date past its coverage
       // 404s too, but says so in the body, and that is a different answer.
       if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
-      throwIfPastCoverage(err, title, date, ctx);
+      throwIfPastCoverage(err, title, date);
       throw notFound(
         `CFR title ${title} has no published structure as of ${date}.`,
-        { title, date, reason: 'title_not_found', ...ctx.recoveryFor('title_not_found') },
+        { title, date, reason: 'title_not_found' },
         { cause: err },
       );
     }
@@ -301,7 +300,6 @@ export class EcfrService {
         part,
         date,
         reason: 'title_not_found',
-        ...ctx.recoveryFor('title_not_found'),
       });
     }
     return partLeaves(partNode, title, { part, subpart: null, subjectGroup: null });
@@ -405,7 +403,7 @@ export class EcfrService {
       // The versioner 404s for a nonexistent part/section — no such location,
       // not a fetch failure — and for a date past the title's coverage.
       if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
-      throwIfPastCoverage(err, title, date, ctx);
+      throwIfPastCoverage(err, title, date);
       return null;
     }
     const { sections, appendices, parts } = parseCfrXml(xml);
@@ -498,7 +496,7 @@ export class EcfrService {
       });
     } catch (err) {
       if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
-      throwIfPastCoverage(err, title, date, ctx);
+      throwIfPastCoverage(err, title, date);
       return null;
     }
 
@@ -617,7 +615,7 @@ export class EcfrService {
     if (start >= ECFR_SEARCH_WINDOW) {
       throw validationError(
         `eCFR search pages through its first ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')} hits only, and page ${page} at per_page ${perPage} starts past them.`,
-        { reason: 'page_out_of_window', page, perPage, ...ctx.recoveryFor('page_out_of_window') },
+        { reason: 'page_out_of_window', page, perPage },
       );
     }
 
@@ -707,20 +705,13 @@ export class EcfrService {
         const latest = await this.currentDate(ctx).catch(() => null);
         throw validationError(
           `${rejection.detail} The search index covers ${ECFR_SEARCH_EARLIEST_DATE} through ${latest ?? "eCFR's current index date"}.`,
-          {
-            reason: 'date_out_of_range',
-            date,
-            ...ctx.recoveryFor('date_out_of_range'),
-          },
+          { reason: 'date_out_of_range', date },
         );
       }
       // The reads stay inside the window by construction, so this is eCFR
       // moving its ceiling rather than a request this service meant to make.
       if (/paginate through/i.test(rejection.detail)) {
-        throw validationError(rejection.detail, {
-          reason: 'page_out_of_window',
-          ...ctx.recoveryFor('page_out_of_window'),
-        });
+        throw validationError(rejection.detail, { reason: 'page_out_of_window' });
       }
       throw validationError(rejection.detail, { date, title: title ?? null, part: part ?? null });
     }

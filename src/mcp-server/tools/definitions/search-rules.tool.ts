@@ -403,7 +403,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
             : !citationDate
               ? `citation ${input.citation?.trim()} needs citation_date, the publication date its source note prints beside it.`
               : 'A cite resolves on its own publication day (citation_date), so published_after and published_before do not apply.',
-          { ...ctx.recoveryFor('citation_incomplete') },
         );
       }
       const year = citation.volume + 1935;
@@ -413,7 +412,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
           citation.volume < FIRST_FR_API_VOLUME
             ? `Volume ${citation.volume} (${year}) predates the Federal Register API, which starts at volume ${FIRST_FR_API_VOLUME} (1994).`
             : `Volume ${citation.volume} was published in ${year}, but citation_date ${citationDate} is in ${citationDate.slice(0, 4)}.`,
-          { ...ctx.recoveryFor('citation_out_of_range') },
         );
       }
     }
@@ -422,7 +420,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
       throw ctx.fail(
         'date_range_inverted',
         `published_after (${publishedAfter}) is later than published_before (${publishedBefore}), so no document can fall in the window.`,
-        { ...ctx.recoveryFor('date_range_inverted') },
       );
     }
 
@@ -431,7 +428,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
       throw ctx.fail(
         'title_required_for_part',
         `cfr_part ${cfrPart} names no cfr_title, and part numbers repeat across titles.`,
-        { ...ctx.recoveryFor('title_required_for_part') },
       );
     }
 

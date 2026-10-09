@@ -69,7 +69,6 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       throw ctx.fail(
         'conflicting_title',
         `Section "${section}" cites title ${cited}, but title is ${titleNum}.`,
-        { ...ctx.recoveryFor('conflicting_title') },
       );
     }
     const read = await readSection(titleNum, part, section, undefined, ctx);
@@ -78,13 +77,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       throw ctx.fail(
         'not_found',
         `No codified text found for ${sectionCite(titleNum, part, read.section)} as of ${read.date}${tried}.`,
-        {
-          ...ctx.recoveryFor('not_found'),
-          title: titleNum,
-          part,
-          section,
-          date: read.date,
-        },
+        { title: titleNum, part, section, date: read.date },
       );
     }
     const resolved = read.result.section ?? section;

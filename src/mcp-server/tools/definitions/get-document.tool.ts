@@ -211,7 +211,6 @@ export const getDocumentTool = tool('regulations_get_document', {
       throw ctx.fail(
         'full_text_disabled',
         'offset and max_chars select a window of the body text, which include_full_text: false turns off.',
-        ctx.recoveryFor('full_text_disabled'),
       );
     }
     const window =

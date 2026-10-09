@@ -177,9 +177,7 @@ export const getDocketTool = tool('regulations_get_docket', {
     if (!service.hasKey()) {
       // Stated rather than left to the contract's `when`, which now covers a
       // rejected key too — this branch is only the absent one.
-      throw ctx.fail('auth_required', 'REGULATIONS_GOV_API_KEY is not configured.', {
-        ...ctx.recoveryFor('auth_required'),
-      });
+      throw ctx.fail('auth_required', 'REGULATIONS_GOV_API_KEY is not configured.');
     }
 
     const result = await service.getDocket(

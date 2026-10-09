@@ -7,6 +7,9 @@
  * @module tests/tools/get-cfr-section.tool.test
  */
 
+import type { z } from '@cyanheads/mcp-ts-core';
+import type { McpError } from '@cyanheads/mcp-ts-core/errors';
+import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handlerContext } from '../helpers/handler-context.js';
 
@@ -43,6 +46,18 @@ vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
 const { getCfrSectionTool } = await import(
   '@/mcp-server/tools/definitions/get-cfr-section.tool.js'
 );
+
+/**
+ * The error a caller receives for `input`. The handler factory fills the
+ * declared recovery hint, which `runToolContract` applies and a direct
+ * `handler(...)` call does not, so hint assertions read the error here.
+ */
+async function contractError(input: z.input<typeof getCfrSectionTool.input>) {
+  const result = await runToolContract(getCfrSectionTool, input);
+  const error = (result.structuredContent as { error?: McpError } | undefined)?.error;
+  if (!error) throw new Error(`expected an error result, got ${JSON.stringify(result)}`);
+  return error as McpError & { data?: { reason?: string; recovery?: { hint?: string } } };
+}
 
 describe('getCfrSectionTool', () => {
   beforeEach(() => {
@@ -250,17 +265,11 @@ describe('getCfrSectionTool', () => {
     // so, because the identifier is prose the caller cannot guess back.
     latestIssueDate.mockResolvedValue('2026-08-06');
     getAppendixText.mockResolvedValue(null);
-    const ctx = handlerContext(getCfrSectionTool);
-    const input = getCfrSectionTool.input.parse({ title: 40, part: '50', appendix: 'A-1' });
 
-    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
-      (e: unknown) => e,
-    );
-    expect(err).toMatchObject({ data: { reason: 'not_found' } });
-    expect((err as { message: string }).message).toContain('A-1, Title 40');
-    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
-      /regulations_browse_cfr/,
-    );
+    const err = await contractError({ title: 40, part: '50', appendix: 'A-1' });
+    expect(err.data?.reason).toBe('not_found');
+    expect(err.message).toContain('A-1, Title 40');
+    expect(err.data?.recovery?.hint).toMatch(/regulations_browse_cfr/);
   });
 
   it('tells a caller who cited a nonexistent section where a valid cite comes from', async () => {
@@ -269,35 +278,21 @@ describe('getCfrSectionTool', () => {
     // recovery — nothing saying the browse surface is where a cite is verified.
     latestIssueDate.mockResolvedValue('2026-08-06');
     getSectionText.mockResolvedValue(null);
-    const ctx = handlerContext(getCfrSectionTool);
-    const input = getCfrSectionTool.input.parse({ title: 40, part: '50', section: '50.999' });
 
-    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
-      (e: unknown) => e,
-    );
-    expect(err).toMatchObject({ data: { reason: 'not_found' } });
-    expect((err as { message: string }).message).toBe(
-      'No codified text found for 40 CFR 50.999 as of 2026-08-06.',
-    );
-    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
-      /regulations_browse_cfr/,
-    );
+    const err = await contractError({ title: 40, part: '50', section: '50.999' });
+    expect(err.data?.reason).toBe('not_found');
+    expect(err.message).toBe('No codified text found for 40 CFR 50.999 as of 2026-08-06.');
+    expect(err.data?.recovery?.hint).toMatch(/regulations_browse_cfr/);
   });
 
   it('carries the same reason and recovery for a whole part that does not exist', async () => {
     latestIssueDate.mockResolvedValue('2026-08-06');
     getSectionText.mockResolvedValue(null);
-    const ctx = handlerContext(getCfrSectionTool);
-    const input = getCfrSectionTool.input.parse({ title: 26, part: '99999' });
 
-    const err = await Promise.resolve(getCfrSectionTool.handler(input, ctx)).catch(
-      (e: unknown) => e,
-    );
-    expect(err).toMatchObject({ data: { reason: 'not_found' } });
-    expect((err as { message: string }).message).toContain('26 CFR 99999');
-    expect((err as { data: { recovery?: { hint?: string } } }).data.recovery?.hint).toMatch(
-      /regulations_browse_cfr/,
-    );
+    const err = await contractError({ title: 26, part: '99999' });
+    expect(err.data?.reason).toBe('not_found');
+    expect(err.message).toContain('26 CFR 99999');
+    expect(err.data?.recovery?.hint).toMatch(/regulations_browse_cfr/);
   });
 
   it('names the section when a call gives one but no part', async () => {

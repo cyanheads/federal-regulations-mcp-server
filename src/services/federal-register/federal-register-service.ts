@@ -315,7 +315,7 @@ export class FederalRegisterService {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw notFound(
           `No Federal Register document found with number ${documentNumber}.`,
-          { documentNumber, reason: 'not_found', ...ctx.recoveryFor('not_found') },
+          { documentNumber, reason: 'not_found' },
           { cause: err },
         );
       }

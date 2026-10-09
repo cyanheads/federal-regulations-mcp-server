@@ -5,9 +5,11 @@
  *
  * These run the real services against a fetch harness standing in for the three
  * upstreams, and take the tools through `runToolContract`, which builds the same
- * dual-surface envelope the production handler factory does — so an assertion
- * here is about `structuredContent.error.data.reason` and the `Recovery:` line in
- * `content[]`, the two things an agent switches on. A test that reached into the
+ * dual-surface envelope the production handler factory does, and the resources
+ * through `readResourceError`, a real `resources/read` against the resource
+ * factory — so an assertion here is about `structuredContent.error.data.reason`
+ * and the `Recovery:` line in `content[]`, the two things an agent switches on,
+ * and the JSON-RPC error a resource read answers with. A test that reached into the
  * handler instead would pass while the wire stayed blank, which is the bug this
  * file exists to prevent.
  *
@@ -30,7 +32,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REQUEST_BUDGET_MS } from '@/services/request-budget.js';
-import { handlerContext } from '../helpers/handler-context.js';
+import { readResourceError } from '../helpers/read-resource.js';
 
 /** The mirror is not the subject here — every read takes the live eCFR path. */
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
@@ -385,19 +387,16 @@ describe('upstream_unavailable reaches the caller', () => {
     );
 
     expect(error.data?.reason).toBeUndefined();
-    expect(error.code).toBe(-32004);
+    expect(error.code).toBe(-32011);
   });
 
   it('answers a resource read the same way, at the JSON-RPC level', async () => {
     serveEverything(unavailable);
-    const ctx = handlerContext(cfrSectionResource);
-    const err = (await Promise.resolve(
-      cfrSectionResource.handler({ title: '40', part: '50', section: '50.1' }, ctx),
-    ).catch((e: unknown) => e)) as McpError;
+    const err = await readResourceError(cfrSectionResource, 'regulations://cfr/40/50/50.1');
 
     expect(err.code).toBe(-32000);
     expect(err.data?.reason).toBe('upstream_unavailable');
-    expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/eCFR/);
+    expect(err.data?.recovery?.hint).toMatch(/eCFR/);
   });
 });
 
@@ -609,14 +608,11 @@ describe('not_found reaches the caller', () => {
 
   it('carries the same reason through the document resource', async () => {
     serveEverything(() => new Response('{"errors":["not found"]}', { status: 404 }));
-    const ctx = handlerContext(documentResource);
-    const err = (await Promise.resolve(
-      documentResource.handler({ documentNumber: '2025-14555' }, ctx),
-    ).catch((e: unknown) => e)) as McpError;
+    const err = await readResourceError(documentResource, 'regulations://document/2025-14555');
 
     expect(err.code).toBe(-32001);
     expect(err.data?.reason).toBe('not_found');
-    expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/regulations_search_rules/);
+    expect(err.data?.recovery?.hint).toMatch(/regulations_search_rules/);
   });
 
   it('names an FR number no Regulations.gov document carries, after one exact-match lookup', async () => {
@@ -683,14 +679,14 @@ describe('conflicting_title reaches the caller', () => {
 
   it('carries the same reason through the cfr-section resource', async () => {
     serveEverything(() => new Response('unexpected', { status: 500 }));
-    const ctx = handlerContext(cfrSectionResource);
-    const err = (await Promise.resolve(
-      cfrSectionResource.handler({ title: '40', part: '141', section: '21 CFR 141.61' }, ctx),
-    ).catch((e: unknown) => e)) as McpError;
+    const err = await readResourceError(
+      cfrSectionResource,
+      `regulations://cfr/40/141/${encodeURIComponent('21 CFR 141.61')}`,
+    );
 
     expect(err.code).toBe(-32007);
     expect(err.data?.reason).toBe('conflicting_title');
-    expect((err.data?.recovery as { hint?: string })?.hint).toMatch(/Put the title the cite names/);
+    expect(err.data?.recovery?.hint).toMatch(/Put the title the cite names/);
     expect(http.calls).toHaveLength(0);
   });
 });
