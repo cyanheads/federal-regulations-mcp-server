@@ -3,6 +3,8 @@
 /.claude/
 /.agents/
 /framework-skills/
+/docs/idea.md
+/logs/
 /Dockerfile
 /bun.lock
 /bunfig.toml
@@ -10,6 +12,9 @@
 /biome.json
 /tsconfig*.json
 /vitest.config.ts
+/.cache/
+/coverage/
+/tests/
 
 # eCFR mirror data — large local SQLite store, never ship in the bundle.
 /data/
