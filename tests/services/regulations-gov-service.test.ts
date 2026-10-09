@@ -15,6 +15,7 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { bestCpuMs, CPU_TIMED_TEST_TIMEOUT_MS, expectLinearGrowth } from '../helpers/cpu-time.js';
 
 const configMock = vi.hoisted(() => ({
   regulationsGovApiKey: 'test-key' as string | undefined,
@@ -496,21 +497,24 @@ describe('RegulationsGovService', () => {
       expect(await bodyOf('limits <4 ppt, >2 ppt<br/>next')).toBe('limits <4 ppt, >2 ppt\nnext');
     });
 
-    it('strips a body of unclosed tag openers in linear time', async () => {
-      // A run of `<` with no `>` made the tag pattern rescan to the end from every
-      // opener: 1.1 s at 80k characters.
-      const timings: number[] = [];
-      for (const n of [5_000, 20_000, 80_000]) {
-        const html = `${'<'.repeat(n)}x`;
-        const started = performance.now();
-        const body = await bodyOf(html);
-        timings.push(performance.now() - started);
-        expect(body).toBe(html);
-      }
-      const [t5k = 0, , t80k = 0] = timings;
-      expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
-      expect(t80k).toBeLessThan(250);
-    });
+    it(
+      'strips a body of unclosed tag openers in linear time',
+      async () => {
+        // A run of `<` with no `>` made the tag pattern rescan to the end from every
+        // opener: 1.1 s at 80k characters.
+        const html = (n: number) => `${'<'.repeat(n)}x`;
+        for (const n of [5_000, 20_000, 80_000]) {
+          expect(await bodyOf(html(n))).toBe(html(n));
+        }
+        const [small, large] = [html(5_000), html(80_000)];
+        const timings = await bestCpuMs(
+          () => bodyOf(small),
+          () => bodyOf(large),
+        );
+        expectLinearGrowth(timings, { factor: 16, capMs: 10 });
+      },
+      CPU_TIMED_TEST_TIMEOUT_MS,
+    );
   });
 
   describe('comment detail dates and campaign count', () => {

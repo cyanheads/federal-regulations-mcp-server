@@ -1,11 +1,17 @@
 /**
  * @fileoverview Timing tests for the request budget and the pipeline that spends
- * it. What is under test here is wall clock, so most of these run on real timers
- * and assert real elapsed milliseconds: a fake clock advances whether or not a
- * deadline was ever armed, so a budget that bounds nothing passes every faked
- * assertion and still leaves a hung upstream running past a client's timeout.
- * The two facts fake timers are the right tool for — that the budget's own
- * 45-second signal fires, and that it fires no earlier — are faked deliberately.
+ * it. What is under test here is wall clock, so the single-deadline cases run on
+ * real timers and assert real elapsed milliseconds — the proof that a deadline
+ * is armed on the clock a client actually waits on.
+ *
+ * Fake timers are used deliberately, and only where they assert more than a real
+ * clock could: that the budget's own 45-second signal fires, that it fires no
+ * earlier, and the four-attempt cut-off. That one chains seven timer wakeups,
+ * and on a loaded machine each wakeup waits for a core, so its real elapsed time
+ * measures the scheduler about as much as the deadlines. A fake clock advances
+ * whether or not a deadline was ever armed, so a faked case asserts that its
+ * work settled, and when on that clock — a budget that bounds nothing leaves the
+ * work pending and fails it.
  *
  * The wire shape of a spent budget is asserted in `tests/tools/error-contracts`,
  * against the answer a caller actually reads.
@@ -143,13 +149,15 @@ describe('requestBudget', () => {
   });
 });
 
-describe('runUpstream bounds real wall clock', () => {
+describe('runUpstream bounds wall clock', () => {
   it('cuts off an upstream that accepts and never answers, once per attempt', async () => {
+    vi.useFakeTimers();
     const ctx = createMockContext();
     let attempts = 0;
-    const startedAt = performance.now();
+    const startedAt = Date.now();
+    let settledAt: number | undefined;
 
-    const failure = (await runUpstream(
+    const pending = runUpstream(
       ctx,
       shortBudget(60_000, ctx.signal),
       { operation: 'probe', context: reqCtx, attemptMs: 120, baseDelayMs: 10 },
@@ -157,17 +165,27 @@ describe('runUpstream bounds real wall clock', () => {
         attempts++;
         return neverAnswers(signal);
       },
-    ).catch((error: unknown) => error)) as McpError;
-    const elapsedMs = performance.now() - startedAt;
+    )
+      .catch((error: unknown) => error)
+      .finally(() => {
+        settledAt = Date.now();
+      });
+    await vi.advanceTimersByTimeAsync(2_000);
 
+    // Settled on the simulated clock: the peer still never answers, so only an
+    // armed deadline can have ended each attempt.
+    expect(settledAt).toBeDefined();
+    const failure = (await pending) as McpError;
     expect(failure).toBeInstanceOf(McpError);
     expect(failure.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
     expect(failure.data?.reason).toBe('upstream_unavailable');
-    // Four attempts of 120ms plus backoff — and every one of them ended on the
-    // deadline rather than on the peer, which is the whole claim.
+    // Four attempts of 120ms plus at most 87.5ms of backoff (10, 20, and 40ms,
+    // each ±25% jitter) — and every one of them ended on the deadline rather
+    // than on the peer, which is the whole claim.
     expect(attempts).toBe(4);
+    const elapsedMs = settledAt! - startedAt;
     expect(elapsedMs).toBeGreaterThanOrEqual(4 * 120);
-    expect(elapsedMs).toBeLessThan(2_000);
+    expect(elapsedMs).toBeLessThan(4 * 120 + 100);
   });
 
   it('stops at the budget even when the leg would happily wait much longer', async () => {

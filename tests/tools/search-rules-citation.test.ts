@@ -12,6 +12,7 @@ import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { bestCpuMs, CPU_TIMED_TEST_TIMEOUT_MS, expectLinearGrowth } from '../helpers/cpu-time.js';
 
 const { initFederalRegisterService } = await import(
   '@/services/federal-register/federal-register-service.js'
@@ -352,25 +353,20 @@ describe('regulations_get_document citation fields', () => {
 });
 
 describe('the citation pattern stays linear on hostile input', () => {
-  /** Median of five runs of the pattern against `input`, in ms. */
-  function time(input: string): number {
-    const runs: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const start = performance.now();
-      FR_CITATION_PATTERN.test(input);
-      runs.push(performance.now() - start);
-    }
-    return runs.sort((a, b) => a - b)[2]!;
-  }
-
   it.each([
     ['leading whitespace with no digits after it', (n: number) => `${' '.repeat(n)}x`],
     ['a valid cite trailed by whitespace and junk', (n: number) => `89 FR 1${' '.repeat(n)}x`],
     ['repeated openers with no page', (n: number) => '1 FR '.repeat(n / 5)],
-  ])('%s', (_label, build) => {
-    const t5k = Math.max(time(build(5_000)), 0.01);
-    const t80k = time(build(80_000));
-    expect(t80k / t5k).toBeLessThan(64);
-    expect(t80k).toBeLessThan(50);
-  });
+  ])(
+    '%s',
+    async (_label, build) => {
+      const [small, large] = [build(5_000), build(80_000)];
+      const timings = await bestCpuMs(
+        () => FR_CITATION_PATTERN.test(small),
+        () => FR_CITATION_PATTERN.test(large),
+      );
+      expectLinearGrowth(timings, { factor: 16, capMs: 5, floorMs: 0.01 });
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });

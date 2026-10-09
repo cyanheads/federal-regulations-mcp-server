@@ -19,6 +19,7 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { bestCpuMs, CPU_TIMED_TEST_TIMEOUT_MS, expectLinearGrowth } from '../helpers/cpu-time.js';
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock('@cyanheads/mcp-ts-core/utils', async (importOriginal) => {
@@ -906,40 +907,43 @@ describe('EcfrService', () => {
     ['unclosed <', (n: number) => '<'.repeat(n)],
     ['<a openers', (n: number) => '<a'.repeat(n / 2)],
     ['</ closers', (n: number) => '</'.repeat(n / 2)],
-  ])('reduces a structure label of %s to text in linear time', async (_label, build) => {
-    // A `<` that opens no tag is text; the label comes back as written. Each
-    // read asks for its own date, so the structure cache serves none of them.
-    let reads = 0;
-    const labelOf = async (label: string) => {
-      fetchMock.mockResolvedValueOnce(
-        jsonResponse({
-          type: 'title',
-          identifier: '40',
-          children: [
-            {
-              type: 'part',
-              identifier: '60',
-              children: [{ type: 'section', identifier: '60.1', label }],
-            },
-          ],
-        }),
+  ])(
+    'reduces a structure label of %s to text in linear time',
+    async (_label, build) => {
+      // A `<` that opens no tag is text; the label comes back as written. Each
+      // read asks for its own date, so the structure cache serves none of them.
+      let reads = 0;
+      const labelOf = async (label: string) => {
+        fetchMock.mockResolvedValueOnce(
+          jsonResponse({
+            type: 'title',
+            identifier: '40',
+            children: [
+              {
+                type: 'part',
+                identifier: '60',
+                children: [{ type: 'section', identifier: '60.1', label }],
+              },
+            ],
+          }),
+        );
+        const date = new Date(Date.UTC(2026, 0, ++reads)).toISOString().slice(0, 10);
+        const [node] = await service.browseStructure(40, '60', date, createMockContext());
+        return node?.label;
+      };
+      for (const n of [5_000, 20_000, 80_000]) {
+        const label = build(n);
+        expect(await labelOf(label)).toBe(label);
+      }
+      const [small, large] = [build(5_000), build(80_000)];
+      const timings = await bestCpuMs(
+        () => labelOf(small),
+        () => labelOf(large),
       );
-      const date = `2026-09-${String(++reads).padStart(2, '0')}`;
-      const [node] = await service.browseStructure(40, '60', date, createMockContext());
-      return node?.label;
-    };
-    await labelOf(build(5_000));
-    const timings: number[] = [];
-    for (const n of [5_000, 20_000, 80_000]) {
-      const label = build(n);
-      const started = performance.now();
-      expect(await labelOf(label)).toBe(label);
-      timings.push(performance.now() - started);
-    }
-    const [t5k = 0, , t80k = 0] = timings;
-    expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
-    expect(t80k).toBeLessThan(150);
-  });
+      expectLinearGrowth(timings, { factor: 16, capMs: 10 });
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
   it("reads eCFR's current index date and reuses it across calls", async () => {
     fetchMock.mockImplementation(ecfrEndpoints(SECTION_HIT));

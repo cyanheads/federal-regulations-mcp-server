@@ -16,6 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isCompleteXmlDocument, parseCfrXml } from '@/services/ecfr/xml.js';
+import { bestCpuMs, CPU_TIMED_TEST_TIMEOUT_MS, expectLinearGrowth } from '../helpers/cpu-time.js';
 
 /**
  * `GET /versioner/v1/full/2024-05-17/title-3.xml`, byte for byte — the smallest
@@ -352,22 +353,29 @@ describe('inline rendering stays linear (#51, #60)', () => {
       (n: number) => `x${' '.repeat(n / 2)}${'<AC T="8"/>'.repeat(n / 22)}`,
     ],
     ['overline spans', (n: number) => '<E T="7503">RM</E>'.repeat(n / 18)],
-  ])('renders %s in linear time', (_label, build) => {
-    const timings = timeAcrossSizes(build, (inner) => paragraphText(inner));
-    expectLinear(timings);
-  });
+  ])(
+    'renders %s in linear time',
+    async (_label, build) => {
+      expectLinear(await timeAcrossSizes(build, (inner) => paragraphText(inner)));
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
-  it('joins a chain of sign-only runs in linear time', () => {
-    // Every link joins the next, so the joined signs grow with the chain; the
-    // square of its length only shows past 80k, hence the larger sizes.
-    expect(paragraphText('10<sup>−</sup> <sup>−</sup> <sup>8</sup>')).toBe('10^−−8');
-    const timings = timeAcrossSizes(
-      (n) => '<sup>−</sup> '.repeat(n / 13),
-      (inner) => paragraphText(inner),
-      [20_000, 80_000, 320_000],
-    );
-    expectLinear(timings);
-  });
+  it(
+    'joins a chain of sign-only runs in linear time',
+    async () => {
+      // Every link joins the next, so the joined signs grow with the chain; the
+      // square of its length only shows past 80k, hence the larger sizes.
+      expect(paragraphText('10<sup>−</sup> <sup>−</sup> <sup>8</sup>')).toBe('10^−−8');
+      const scaling = await timeAcrossSizes(
+        (n) => '<sup>−</sup> '.repeat(n / 13),
+        (inner) => paragraphText(inner),
+        [20_000, 80_000, 320_000],
+      );
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });
 
 /** A verbatim cut of a real whole-part versioner response (`tests/fixtures/`). */
@@ -508,15 +516,19 @@ describe('part, subpart, and subject-group notes (#52)', () => {
     expect(parseCfrXml(xml).appendices[0]!.bodyText).toBe('Body.\n\n(Sec. 161, Pub. L. 83-703)');
   });
 
-  it('walks unclosed note elements in linear time', () => {
-    const timings = timeAcrossSizes(
-      (n) => `<DIV5 N="1" TYPE="PART">${'<AUTH><DIV6 N="A" TYPE="SUBPART">'.repeat(n / 34)}`,
-      (xml) => {
-        expect(parseCfrXml(xml).parts).toHaveLength(1);
-      },
-    );
-    expectLinear(timings);
-  });
+  it(
+    'walks unclosed note elements in linear time',
+    async () => {
+      const scaling = await timeAcrossSizes(
+        (n) => `<DIV5 N="1" TYPE="PART">${'<AUTH><DIV6 N="A" TYPE="SUBPART">'.repeat(n / 34)}`,
+        (xml) => {
+          expect(parseCfrXml(xml).parts).toHaveLength(1);
+        },
+      );
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('parseCfrXml part derivation', () => {
@@ -666,34 +678,38 @@ describe('parseCfrXml appendices', () => {
   });
 });
 
+/** The input sizes, smallest to largest, and the CPU time measured at the ends. */
+interface Scaling {
+  sizes: readonly number[];
+  timings: [small: number, large: number];
+}
+
 /**
- * Time `run` over the input `build` makes at each of `sizes` characters (5k,
- * 20k, and 80k unless given), after one warm-up call, returning the best of
- * three runs at each size in milliseconds — the best, so a collector pause
+ * Run `run` over the input `build` makes at each of `sizes` characters (5k,
+ * 20k, and 80k unless given), then time it in CPU milliseconds at the smallest
+ * and largest — the best of several alternating rounds, so a collector pause
  * during one run of a few-millisecond call is not read as the algorithm's cost.
  */
-function timeAcrossSizes(
+async function timeAcrossSizes(
   build: (n: number) => string,
   run: (input: string) => void,
   sizes: readonly number[] = [5_000, 20_000, 80_000],
-): number[] {
-  run(build(5_000));
-  return sizes.map((n) => {
-    const input = build(n);
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 3; i++) {
-      const started = performance.now();
-      run(input);
-      best = Math.min(best, performance.now() - started);
-    }
-    return best;
-  });
+): Promise<Scaling> {
+  for (const n of sizes) run(build(n));
+  const small = build(sizes[0]!);
+  const large = build(sizes.at(-1)!);
+  return {
+    sizes,
+    timings: await bestCpuMs(
+      () => run(small),
+      () => run(large),
+    ),
+  };
 }
 
-/** Sixteen times the input may cost at most ~64× the time, and the largest size stays fast. */
-function expectLinear([small = 0, , large = 0]: number[]): void {
-  expect(large / Math.max(small, 0.5)).toBeLessThan(64);
-  expect(large).toBeLessThan(150);
+/** Growth well short of quadratic across the sizes, and the largest size stays fast. */
+function expectLinear({ sizes, timings }: Scaling): void {
+  expectLinearGrowth(timings, { factor: sizes.at(-1)! / sizes[0]!, capMs: 150 });
 }
 
 describe('parseCfrXml on malformed markup stays linear (#57)', () => {
@@ -708,60 +724,80 @@ describe('parseCfrXml on malformed markup stays linear (#57)', () => {
     ['unclosed <', (n: number) => '<'.repeat(n)],
     ['<a openers', (n: number) => '<a'.repeat(n / 2)],
     ['</ closers', (n: number) => '</'.repeat(n / 2)],
-  ])('strips a paragraph of %s in linear time, keeping the text', (_label, build) => {
-    const timings = timeAcrossSizes(build, (inner) => {
-      // A `<` that opens no tag is text, and stays text.
-      expect(parseCfrXml(paragraph(inner)).sections[0]!.bodyText).toBe(inner);
-    });
-    expectLinear(timings);
-  });
+  ])(
+    'strips a paragraph of %s in linear time, keeping the text',
+    async (_label, build) => {
+      const scaling = await timeAcrossSizes(build, (inner) => {
+        // A `<` that opens no tag is text, and stays text.
+        expect(parseCfrXml(paragraph(inner)).sections[0]!.bodyText).toBe(inner);
+      });
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
   it.each([
     ['unclosed <', (n: number) => '<'.repeat(n)],
     ['<a openers', (n: number) => '<a'.repeat(n / 2)],
     ['</ closers', (n: number) => '</'.repeat(n / 2)],
-  ])('strips a table cell of %s in linear time', (_label, build) => {
-    const timings = timeAcrossSizes(build, (inner) => {
-      expect(parseCfrXml(cell(inner)).sections[0]!.bodyText).toBe(inner);
-    });
-    expectLinear(timings);
-  });
+  ])(
+    'strips a table cell of %s in linear time',
+    async (_label, build) => {
+      const scaling = await timeAcrossSizes(build, (inner) => {
+        expect(parseCfrXml(cell(inner)).sections[0]!.bodyText).toBe(inner);
+      });
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
   it.each([
     ['unclosed <P> blocks', (n: number) => '<P>'.repeat(n / 3), ''],
     ['<P openers with no >', (n: number) => '<P '.repeat(n / 3), ''],
     ['<img openers with no >', (n: number) => '<img'.repeat(n / 4), ''],
-  ])('scans a section body of %s in linear time', (_label, build, body) => {
-    const timings = timeAcrossSizes(build, (inner) => {
-      const xml = `<DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 X.</HEAD>${inner}</DIV8>`;
-      expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(body);
-    });
-    expectLinear(timings);
-  });
+  ])(
+    'scans a section body of %s in linear time',
+    async (_label, build, body) => {
+      const scaling = await timeAcrossSizes(build, (inner) => {
+        const xml = `<DIV8 TYPE="SECTION" N="1.1"><HEAD>§ 1.1 X.</HEAD>${inner}</DIV8>`;
+        expect(parseCfrXml(xml).sections[0]!.bodyText).toBe(body);
+      });
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
-  it('reads past an unclosed <HEAD> in linear time', () => {
-    const timings = timeAcrossSizes(
-      (n) => '<HEAD>'.repeat(n / 6),
-      (inner) => {
-        const xml = `<DIV8 TYPE="SECTION" N="1.1">${inner}<P>Body.</P></DIV8>`;
-        const [section] = parseCfrXml(xml).sections;
-        expect(section).toMatchObject({ section: '1.1', heading: '§ 1.1', bodyText: 'Body.' });
-      },
-    );
-    expectLinear(timings);
-  });
+  it(
+    'reads past an unclosed <HEAD> in linear time',
+    async () => {
+      const scaling = await timeAcrossSizes(
+        (n) => '<HEAD>'.repeat(n / 6),
+        (inner) => {
+          const xml = `<DIV8 TYPE="SECTION" N="1.1">${inner}<P>Body.</P></DIV8>`;
+          const [section] = parseCfrXml(xml).sections;
+          expect(section).toMatchObject({ section: '1.1', heading: '§ 1.1', bodyText: 'Body.' });
+        },
+      );
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 
   it.each([
     ['<DIV8 openers with no >', (n: number) => '<DIV8 '.repeat(n / 6)],
     ['unclosed section elements', (n: number) => '<DIV8 TYPE="SECTION">'.repeat(n / 21)],
     ['unclosed appendix elements', (n: number) => '<DIV9 N="A" TYPE="APPENDIX">'.repeat(n / 28)],
     ['<DIV5 openers with no >', (n: number) => '<DIV5 '.repeat(n / 6)],
-  ])('walks a document of %s in linear time', (_label, build) => {
-    const timings = timeAcrossSizes(build, (xml) => {
-      expect(parseCfrXml(xml)).toMatchObject({ sections: [], appendices: [] });
-    });
-    expectLinear(timings);
-  });
+  ])(
+    'walks a document of %s in linear time',
+    async (_label, build) => {
+      const scaling = await timeAcrossSizes(build, (xml) => {
+        expect(parseCfrXml(xml)).toMatchObject({ sections: [], appendices: [] });
+      });
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('isCompleteXmlDocument', () => {
@@ -829,10 +865,14 @@ describe('isCompleteXmlDocument', () => {
     ['unclosed <!--', (n: number) => '<!--'.repeat(n / 4)],
     ['unclosed <!', (n: number) => '<!'.repeat(n / 2)],
     ['element openers with no >', (n: number) => '<a '.repeat(n / 3)],
-  ])('reads a body of %s as incomplete in linear time (#62)', (_label, build) => {
-    const timings = timeAcrossSizes(build, (xml) => {
-      expect(isCompleteXmlDocument(xml)).toBe(false);
-    });
-    expectLinear(timings);
-  });
+  ])(
+    'reads a body of %s as incomplete in linear time (#62)',
+    async (_label, build) => {
+      const scaling = await timeAcrossSizes(build, (xml) => {
+        expect(isCompleteXmlDocument(xml)).toBe(false);
+      });
+      expectLinear(scaling);
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });

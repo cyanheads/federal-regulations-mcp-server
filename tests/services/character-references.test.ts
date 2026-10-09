@@ -11,6 +11,7 @@ import {
   decodeCharacterReferences,
   decodeNumericReference,
 } from '@/services/character-references.js';
+import { bestCpuMs, CPU_TIMED_TEST_TIMEOUT_MS, expectLinearGrowth } from '../helpers/cpu-time.js';
 
 describe('decodeCharacterReferences', () => {
   it.each([
@@ -61,18 +62,22 @@ describe('decodeCharacterReferences', () => {
     ['repeated openers with no closer', (n: number) => '&a'.repeat(n / 2)],
     ['repeated numeric openers', (n: number) => '&#'.repeat(n / 2)],
     ['one long digit run with no semicolon', (n: number) => `&#${'1'.repeat(n)}`],
-  ])('stays linear over %s', (_label, build) => {
-    const timings: number[] = [];
-    for (const n of [5_000, 20_000, 80_000]) {
-      const text = build(n);
-      const started = performance.now();
-      expect(decodeCharacterReferences(text)).toBe(text);
-      timings.push(performance.now() - started);
-    }
-    const [t5k = 0, , t80k = 0] = timings;
-    expect(t80k / Math.max(t5k, 0.5)).toBeLessThan(64);
-    expect(t80k).toBeLessThan(100);
-  });
+  ])(
+    'stays linear over %s',
+    async (_label, build) => {
+      for (const n of [5_000, 20_000, 80_000]) {
+        const text = build(n);
+        expect(decodeCharacterReferences(text)).toBe(text);
+      }
+      const [small, large] = [build(5_000), build(80_000)];
+      const timings = await bestCpuMs(
+        () => decodeCharacterReferences(small),
+        () => decodeCharacterReferences(large),
+      );
+      expectLinearGrowth(timings, { factor: 16, capMs: 5 });
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('decodeNumericReference', () => {
