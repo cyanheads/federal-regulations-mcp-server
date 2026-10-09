@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-09-25 12:26:32
+Generated on: 2026-10-09 05:00:56
 
 ```text
 federal-regulations-mcp-server/
@@ -135,9 +135,11 @@ federal-regulations-mcp-server/
 │   ├── ecfr-mirror-init.ts
 │   ├── ecfr-mirror-refresh.ts
 │   ├── ecfr-mirror-verify.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/
@@ -203,7 +205,9 @@ federal-regulations-mcp-server/
 │   │   ├── ecfr-structure-7-part-1955.json
 │   │   └── ecfr-title-3-2024-05-17.xml
 │   ├── helpers/
-│   │   └── handler-context.ts
+│   │   ├── cpu-time.ts
+│   │   ├── handler-context.ts
+│   │   └── read-resource.ts
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── scripts/

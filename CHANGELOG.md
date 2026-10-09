@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.3](changelog/0.5.x/0.5.3.md) — 2026-10-08
+
+mcp-ts-core 0.13.6 → 0.13.14: tool error results carry their request ID, upstream failure messages name the API by origin only, numeric strings and nulls are accepted for number and optional fields, the server.json HTTP entry starts the HTTP transport, and the Docker image installs dependencies on the build platform.
+
 ## [0.5.2](changelog/0.5.x/0.5.2.md) — 2026-09-25
 
 eCFR text renders superscripts, subscripts, footnote markers, and diacritics; whole-part reads return the part's heading, Authority, Source, and notes; the cfrCite the server returns reads back as section input; and a mirrored title behind eCFR's latest issue is read live. Existing mirrors need a mirror:refresh.
