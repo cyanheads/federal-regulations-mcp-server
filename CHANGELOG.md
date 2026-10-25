@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.4](changelog/0.5.x/0.5.4.md) — 2026-10-25
+
+Preserve upstream text and links in Markdown responses, and update mcp-ts-core to 0.13.16.
+
 ## [0.5.3](changelog/0.5.x/0.5.3.md) — 2026-10-08
 
 mcp-ts-core 0.13.6 → 0.13.14: tool error results carry their request ID, upstream failure messages name the API by origin only, numeric strings and nulls are accepted for number and optional fields, the server.json HTTP entry starts the HTTP transport, and the Docker image installs dependencies on the build platform.
