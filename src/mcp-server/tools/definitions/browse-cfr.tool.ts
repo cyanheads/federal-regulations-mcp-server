@@ -24,6 +24,7 @@
 
 import { type Context, tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdown } from '@cyanheads/mcp-ts-core/utils';
 import { normalizePart } from '@/services/ecfr/cite.js';
 import {
   ECFR_SEARCH_WINDOW,
@@ -290,6 +291,9 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
         'Guidance: the next page to request, a page past the end, an empty result, or what the count means.',
       ),
   },
+  enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
+  },
   errors: [
     {
       reason: 'query_required',
@@ -514,14 +518,22 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       let placement = '';
       for (const n of result.nodes) {
         const where = [n.subpart, n.subjectGroup].filter(Boolean).join(' › ');
-        if (where !== placement) lines.push('', `_${where || '(not in a subpart)'}_`);
+        if (where !== placement)
+          lines.push('', `_${escapeMarkdownInline(where || '(not in a subpart)')}_`);
         placement = where;
         const reserved = n.reserved ? ' _(reserved)_' : '';
-        const cite = n.cfrCite ? ` — \`${n.cfrCite}\` → regulations_get_cfr_section` : '';
-        const desc = n.description && n.description !== n.label ? ` — ${n.description}` : '';
-        const appendix = n.appendix ? ` (appendix: \`${n.appendix}\`)` : '';
+        const cite = n.cfrCite
+          ? ` — ${markdown().inlineCode(n.cfrCite).build()} → regulations_get_cfr_section`
+          : '';
+        const desc =
+          n.description && n.description !== n.label
+            ? ` — ${escapeMarkdownInline(n.description)}`
+            : '';
+        const appendix = n.appendix
+          ? ` (appendix: ${markdown().inlineCode(n.appendix).build()})`
+          : '';
         lines.push(
-          `- **${n.type}** ${n.identifier}: ${n.label}${desc}${reserved}${cite}${appendix}`,
+          `- **${escapeMarkdownInline(n.type)}** ${escapeMarkdownInline(n.identifier)}: ${escapeMarkdownInline(n.label)}${desc}${reserved}${cite}${appendix}`,
         );
       }
     }
@@ -532,15 +544,17 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       lines.push(
         `**CFR full-text search** (mode: ${result.mode}, source: ${result.source ?? 'live'})`,
       );
-      lines.push(`_${result.sourceScope ?? 'Corpus scope unreported.'}_`);
+      lines.push(`_${escapeMarkdownInline(result.sourceScope ?? 'Corpus scope unreported.')}_`);
       lines.push('');
       for (const h of result.results ?? []) {
         const where = [`Title ${h.title}`, `Part ${h.part}`];
         if (h.section) where.push(`§ ${h.section}`);
         if (h.appendix) where.push(`appendix ${h.appendix}`);
-        lines.push(`### ${h.cfrCite} — ${h.heading} [${where.join(', ')}]`);
-        lines.push(`_${h.hierarchyPath}_`);
-        lines.push(h.excerpt);
+        lines.push(
+          `**${escapeMarkdownInline(h.cfrCite)} — ${escapeMarkdownInline(h.heading)}** (${escapeMarkdownInline(where.join(', '))})`,
+        );
+        lines.push(`_${escapeMarkdownInline(h.hierarchyPath)}_`);
+        lines.push(escapeMarkdownInline(h.excerpt));
         lines.push('');
       }
     }

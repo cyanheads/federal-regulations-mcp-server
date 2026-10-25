@@ -22,6 +22,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdown } from '@cyanheads/mcp-ts-core/utils';
 import {
   appendixCite,
   describePartRewrite,
@@ -211,6 +212,9 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .describe(
         'How a part or section written another way was resolved, and guidance when the offset is at or past the end of the text.',
       ),
+  },
+  enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
   },
   errors: [
     {
@@ -419,19 +423,27 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
 
   format: (result) => {
     const lines: string[] = [];
-    lines.push(`# ${result.cfrCite} — ${result.heading}`);
+    lines.push(
+      `**${escapeMarkdownInline(result.cfrCite)} — ${escapeMarkdownInline(result.heading)}**`,
+    );
     const section = result.section ? ` · § ${result.section}` : '';
-    const appendix = result.appendix ? ` · appendix ${result.appendix}` : '';
+    const appendix = result.appendix ? ` · appendix ${escapeMarkdownInline(result.appendix)}` : '';
     const whole = section || appendix ? '' : ' (whole part)';
     lines.push(`Title ${result.title} · Part ${result.part ?? 'n/a'}${section}${appendix}${whole}`);
-    lines.push(`_${result.hierarchyPath}_ · as of ${result.date} · source: ${result.source}`);
+    lines.push(
+      `_${escapeMarkdownInline(result.hierarchyPath)}_ · as of ${result.date} · source: ${result.source}`,
+    );
     // A whole part's own notes: the three fields ride together, and only there.
     if (result.notes) {
-      lines.push(`Authority: ${result.authority ?? 'none stated for the part'}`);
-      lines.push(`Source: ${result.sourceNote ?? 'none stated for the part'}`);
+      lines.push(
+        `Authority: ${escapeMarkdownInline(result.authority ?? 'none stated for the part')}`,
+      );
+      lines.push(
+        `Source: ${escapeMarkdownInline(result.sourceNote ?? 'none stated for the part')}`,
+      );
       if (result.notes.length > 0) {
         lines.push('Notes:');
-        for (const note of result.notes) lines.push(`- ${note}`);
+        for (const note of result.notes) lines.push(`- ${escapeMarkdownInline(note)}`);
       }
     }
 
@@ -456,10 +468,10 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       );
       if (result.sections.length === 0) lines.push('- none');
       for (const s of result.sections) {
-        const authority = s.authority ? ` · Authority: ${s.authority}` : '';
-        const source = s.sourceNote ? ` · Source: ${s.sourceNote}` : '';
+        const authority = s.authority ? ` · Authority: ${escapeMarkdownInline(s.authority)}` : '';
+        const source = s.sourceNote ? ` · Source: ${escapeMarkdownInline(s.sourceNote)}` : '';
         lines.push(
-          `- \`${s.section}\` · ${s.cfrCite} · offset ${s.offset} — ${s.heading}${authority}${source}`,
+          `- \`${s.section}\` · ${escapeMarkdownInline(s.cfrCite)} · offset ${s.offset} — ${escapeMarkdownInline(s.heading)}${authority}${source}`,
         );
       }
     }
@@ -469,12 +481,14 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         `## Appendices to this part (text not included — re-call with \`appendix\` to read one)`,
       );
       for (const a of result.appendices) {
-        lines.push(`- \`${a.appendix}\` — ${a.heading}`);
+        lines.push(
+          `- ${markdown().inlineCode(a.appendix).build()} — ${escapeMarkdownInline(a.heading)}`,
+        );
       }
     }
     // The window goes last and untrimmed: a window cut mid-text can end in
     // whitespace, and consecutive windows only rebuild the body if it survives.
-    if (result.bodyText) lines.push('', '---', '', result.bodyText);
+    if (result.bodyText) lines.push('', '---', '', escapeMarkdownInline(result.bodyText));
     return [{ type: 'text', text: lines.join('\n') }];
   },
 });

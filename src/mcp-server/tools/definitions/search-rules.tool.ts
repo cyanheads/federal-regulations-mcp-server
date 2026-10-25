@@ -10,6 +10,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { normalizePart } from '@/services/ecfr/cite.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import type {
@@ -338,6 +339,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       ),
   },
   enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
     totalPages: { label: 'Total pages' },
     nextPage: { label: 'Next page' },
   },
@@ -538,13 +540,16 @@ export const searchRulesTool = tool('regulations_search_rules', {
         tail.push(`Regulations.gov document: ${r.regulationsGovDocumentId}`);
       }
       if (r.commentCount !== null) tail.push(`comments: ${r.commentCount}`);
-      if (r.commentUrl) tail.push(`comment at: ${r.commentUrl}`);
       if (cite) tail.push(`CFR: ${cite}`);
       if (r.regulationIdNumbers.length) tail.push(`RIN: ${r.regulationIdNumbers.join(', ')}`);
       if (r.abstract) tail.push(`abstract: ${r.abstract}`);
       if (r.effectiveOn) tail.push(`effective: ${r.effectiveOn}`);
-      tail.push(r.htmlUrl);
-      lines.push(`| | | ${escapePipes(tail.join(' · '))} | | | |`);
+      const commentLink = r.commentUrl
+        ? ` · comment at: ${markdownLink(r.commentUrl, r.commentUrl)}`
+        : '';
+      lines.push(
+        `| | | ${escapePipes(tail.join(' · '))}${commentLink} · ${markdownLink(r.htmlUrl, r.htmlUrl)} | | | |`,
+      );
     }
     return [{ type: 'text', text: lines.join('\n') }];
   },

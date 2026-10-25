@@ -9,23 +9,14 @@
 
 import { describe, expect, it } from 'vitest';
 import { escapePipes } from '@/mcp-server/tools/definitions/format-utils.js';
-
-/**
- * Model of the one Markdown rule these assertions turn on: a backslash before
- * ASCII punctuation is an escape, and the renderer emits the punctuation alone.
- * Applying it here is what makes the expectations below about the cell a client
- * *reads* rather than about the escape sequence a formatter happens to emit.
- */
-function renderMarkdownEscapes(cell: string): string {
-  return cell.replace(/\\([!-/:-@[-`{-~])/g, '$1');
-}
+import { markdownText } from '../helpers/markdown-text.js';
 
 /** Cells whose own text contains a backslash, which is where the loss showed. */
 const backslashBearing = ['x\\|y', 'a\\*b'];
 
 describe('escapePipes', () => {
   it.each(backslashBearing)('renders %j back as its literal value', (value) => {
-    expect(renderMarkdownEscapes(escapePipes(value))).toBe(value);
+    expect(markdownText(escapePipes(value))).toBe(value);
   });
 
   it.each(backslashBearing)('leaves no bare pipe in %j to split the row', (value) => {
@@ -36,11 +27,24 @@ describe('escapePipes', () => {
   });
 
   it('escapes a pipe in a value carrying no backslash', () => {
-    expect(renderMarkdownEscapes(escapePipes('40 CFR 50 | 51'))).toBe('40 CFR 50 | 51');
+    expect(markdownText(escapePipes('40 CFR 50 | 51'))).toBe('40 CFR 50 | 51');
     expect(escapePipes('40 CFR 50 | 51').replace(/\\./g, '')).not.toContain('|');
   });
 
   it('passes ordinary cell text through untouched', () => {
     expect(escapePipes('40 CFR 50.1')).toBe('40 CFR 50.1');
+  });
+
+  it('keeps upstream Markdown syntax literal inside a cell', () => {
+    expect(escapePipes('*rule* [label](https://example.com) <b>')).toBe(
+      '\\*rule\\* \\[label\\](https://example.com) \\<b>',
+    );
+  });
+
+  it('keeps a multiline value inside one table row and preserves its text', () => {
+    const value = 'first line\n*second*\n';
+    const cell = escapePipes(value);
+    expect(cell).not.toContain('\n');
+    expect(markdownText(cell)).toBe(value);
   });
 });

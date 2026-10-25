@@ -9,6 +9,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
 import { escapePipes, formatCommentPeriod, formatCount } from './format-utils.js';
 import { pageSpan, REGULATIONS_GOV_PAGE_CEILING, raisePerPageAdvice } from './paging.js';
@@ -136,6 +137,7 @@ export const getDocketTool = tool('regulations_get_docket', {
       ),
   },
   enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
     totalPages: { label: 'Total pages' },
     nextPage: { label: 'Next page' },
   },
@@ -234,12 +236,14 @@ export const getDocketTool = tool('regulations_get_docket', {
 
   format: (result) => {
     const lines: string[] = [];
-    lines.push(`# Docket ${result.docketId} — ${result.title}`);
     lines.push(
-      `${result.agencyId ?? '—'} · ${result.docketType ?? '—'} · RIN ${result.rin ?? '—'}${result.modifyDate ? ` · modified ${result.modifyDate}` : ''}`,
+      `**Docket ${escapeMarkdownInline(result.docketId)} — ${escapeMarkdownInline(result.title)}**`,
+    );
+    lines.push(
+      `${escapeMarkdownInline(result.agencyId ?? '—')} · ${escapeMarkdownInline(result.docketType ?? '—')} · RIN ${escapeMarkdownInline(result.rin ?? '—')}${result.modifyDate ? ` · modified ${result.modifyDate}` : ''}`,
     );
     lines.push(`Docket object ID: ${result.objectId ?? '—'}`);
-    if (result.abstract) lines.push(`\n${result.abstract}`);
+    if (result.abstract) lines.push(`\n${escapeMarkdownInline(result.abstract)}`);
     lines.push(`\n**${result.documentCount} documents** (showing ${result.documents.length}):\n`);
     lines.push(
       '| Type | Title | Posted | Comments Close | Document ID | Object ID (→ find_comments) |',

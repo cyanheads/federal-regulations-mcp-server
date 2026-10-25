@@ -19,6 +19,7 @@ import type { McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markdownText } from '../helpers/markdown-text.js';
 
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorScope = vi.hoisted(() => vi.fn());
@@ -528,6 +529,15 @@ describe('characterization: search mode, live', () => {
     expect(out.results).toEqual([]);
     expect(out.notice).toMatch(/^No CFR sections matched "zzzznonexistent"/);
     expect(text(result)).toContain('No CFR sections matched');
+  });
+
+  it('preserves caller Markdown in the empty-result notice on both surfaces', async () => {
+    http.reset();
+    serveEcfr([]);
+    const query = '*literal* [label](https://example.com) <b>text</b>';
+    const result = await runToolContract(browseCfrTool, { mode: 'search', query, title: 40 });
+    expect(structured(result).notice).toContain(query);
+    expect(markdownText(text(result))).toContain(query);
   });
 });
 

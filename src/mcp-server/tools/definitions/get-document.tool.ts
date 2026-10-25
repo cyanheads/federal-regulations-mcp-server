@@ -10,6 +10,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS } from '@/services/text-window.js';
 import { frDocumentNumber, normalizeFrDocumentNumber } from './document-number.js';
@@ -180,6 +181,9 @@ export const getDocumentTool = tool('regulations_get_document', {
       .optional()
       .describe('Guidance when the requested offset is at or past the end of the body.'),
   },
+  enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
+  },
   errors: [
     {
       reason: 'full_text_disabled',
@@ -234,14 +238,14 @@ export const getDocumentTool = tool('regulations_get_document', {
 
   format: (result) => {
     const lines: string[] = [];
-    lines.push(`# ${result.title}`);
+    lines.push(`**${escapeMarkdownInline(result.title)}**`);
     lines.push(
-      `**FR ${result.documentNumber}** · ${result.type} · ${formatAgencies(result.agencies)} · published ${result.publicationDate}`,
+      `**FR ${escapeMarkdownInline(result.documentNumber)}** · ${escapeMarkdownInline(result.type)} · ${escapeMarkdownInline(formatAgencies(result.agencies))} · published ${result.publicationDate}`,
     );
     const printed = formatPrintedPages(result);
-    if (printed) lines.push(`**Citation:** ${printed}`);
-    if (result.action) lines.push(`**Action:** ${result.action}`);
-    if (result.dates) lines.push(`**Dates:** ${result.dates}`);
+    if (printed) lines.push(`**Citation:** ${escapeMarkdownInline(printed)}`);
+    if (result.action) lines.push(`**Action:** ${escapeMarkdownInline(result.action)}`);
+    if (result.dates) lines.push(`**Dates:** ${escapeMarkdownInline(result.dates)}`);
     if (result.effectiveOn) lines.push(`**Effective:** ${result.effectiveOn}`);
     if (result.commentsCloseOn) {
       lines.push(
@@ -249,8 +253,8 @@ export const getDocumentTool = tool('regulations_get_document', {
       );
     }
     if (result.regulationIdNumbers.length)
-      lines.push(`**RIN:** ${result.regulationIdNumbers.join(', ')}`);
-    if (result.abstract) lines.push(`\n${result.abstract}`);
+      lines.push(`**RIN:** ${escapeMarkdownInline(result.regulationIdNumbers.join(', '))}`);
+    if (result.abstract) lines.push(`\n${escapeMarkdownInline(result.abstract)}`);
 
     lines.push('\n## Cross-source handles');
     lines.push(
@@ -260,7 +264,7 @@ export const getDocumentTool = tool('regulations_get_document', {
     );
     if (result.docketIds.length) {
       lines.push(
-        `- **Printed docket numbers:** ${result.docketIds.map((d) => `\`${d}\``).join('; ')} → regulations_search_rules(docket_id)`,
+        `- **Printed docket numbers:** ${result.docketIds.map(escapeMarkdownInline).join('; ')} → regulations_search_rules(docket_id)`,
       );
     }
     if (result.regulationsGovDocumentId) {
@@ -271,23 +275,28 @@ export const getDocumentTool = tool('regulations_get_document', {
     lines.push(
       `- **Comment count:** ${result.commentCount ?? 'unknown'} → regulations_find_comments(fr_document_number="${result.documentNumber}")`,
     );
-    if (result.commentUrl) lines.push(`- **Comment on Regulations.gov:** ${result.commentUrl}`);
+    if (result.commentUrl)
+      lines.push(
+        `- **Comment on Regulations.gov:** ${markdownLink(result.commentUrl, result.commentUrl)}`,
+      );
     if (result.cfrReferences.length) {
       const cites = result.cfrReferences.map((c) => `${c.title} CFR ${c.part}`).join(', ');
-      lines.push(`- **Affected CFR parts:** ${cites} → regulations_get_cfr_section`);
+      lines.push(
+        `- **Affected CFR parts:** ${escapeMarkdownInline(cites)} → regulations_get_cfr_section`,
+      );
     } else {
       lines.push('- **Affected CFR parts:** none listed');
     }
     if (result.supportingDocuments.length) {
       lines.push(
-        `- **Supporting documents:** ${result.supportingDocuments.map((d) => `${d.title} (${d.documentId})`).join('; ')}`,
+        `- **Supporting documents:** ${result.supportingDocuments.map((d) => escapeMarkdownInline(`${d.title} (${d.documentId})`)).join('; ')}`,
       );
     }
 
     lines.push('\n## Body');
-    lines.push(`- HTML: ${result.bodyHtmlUrl}`);
-    lines.push(`- Raw text: ${result.rawTextUrl}`);
-    lines.push(`- Federal Register page: ${result.htmlUrl}`);
+    lines.push(`- HTML: ${markdownLink(result.bodyHtmlUrl, result.bodyHtmlUrl)}`);
+    lines.push(`- Raw text: ${markdownLink(result.rawTextUrl, result.rawTextUrl)}`);
+    lines.push(`- Federal Register page: ${markdownLink(result.htmlUrl, result.htmlUrl)}`);
     if (result.fullTextLength !== undefined) {
       const start = result.fullTextOffset ?? 0;
       const end = start + (result.fullText?.length ?? 0);
@@ -302,7 +311,7 @@ export const getDocumentTool = tool('regulations_get_document', {
           `More text follows — resume with offset=${result.fullTextNextOffset} (fullTextNextOffset).`,
         );
       }
-      if (result.fullText) lines.push(`\n---\n\n${result.fullText}`);
+      if (result.fullText) lines.push(`\n---\n\n${escapeMarkdownInline(result.fullText)}`);
     }
 
     return [{ type: 'text', text: lines.join('\n') }];

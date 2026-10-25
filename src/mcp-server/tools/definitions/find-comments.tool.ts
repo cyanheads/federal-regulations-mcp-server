@@ -14,6 +14,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
 import type { ResolvedDocument } from '@/services/regulations-gov/types.js';
 import { isoDate } from './date-input.js';
@@ -311,6 +312,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
       ),
   },
   enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
     totalPages: { label: 'Total pages' },
     nextPage: { label: 'Next page' },
   },
@@ -544,18 +546,18 @@ export const findCommentsTool = tool('regulations_find_comments', {
     // detail keys on the top-level commentId and list keys on comments[].
     if (result.commentId !== undefined) {
       const attachments = result.attachments ?? [];
-      lines.push(`# ${result.title ?? '(untitled comment)'}`);
+      lines.push(`**${escapeMarkdownInline(result.title ?? '(untitled comment)')}**`);
       lines.push(
         `Comment \`${result.commentId ?? '—'}\` · posted ${result.postedDate ?? '—'} · received ${result.receivedDate ?? '—'} · postmarked ${result.postmarkDate ?? '—'}`,
       );
       lines.push(
-        `Submitter: ${result.submitterName ?? '—'} · organization: ${result.organization ?? '—'}`,
+        `Submitter: ${escapeMarkdownInline(result.submitterName ?? '—')} · organization: ${escapeMarkdownInline(result.organization ?? '—')}`,
       );
       lines.push(
         `Docket: ${result.docketId ?? '—'} · on document: ${result.commentOnDocumentId ?? '—'}`,
       );
       lines.push(
-        `attachmentOnly: ${result.attachmentOnly ? 'yes' : 'no'} · withdrawn: ${result.withdrawn ? 'yes' : 'no'} · restrictReason: ${result.restrictReason ?? 'none'} · duplicateComments: ${result.duplicateComments ?? '—'}`,
+        `attachmentOnly: ${result.attachmentOnly ? 'yes' : 'no'} · withdrawn: ${result.withdrawn ? 'yes' : 'no'} · restrictReason: ${escapeMarkdownInline(result.restrictReason ?? 'none')} · duplicateComments: ${result.duplicateComments ?? '—'}`,
       );
       lines.push('');
       if (result.duplicateComments != null && result.duplicateComments > 1) {
@@ -566,24 +568,26 @@ export const findCommentsTool = tool('regulations_find_comments', {
       if (result.attachmentOnly) {
         lines.push(`> The substance of this comment is in ${attachments.length} attachment(s):`);
       }
-      lines.push(result.bodyText ?? '_(no inline body text)_');
+      lines.push(
+        result.bodyText == null ? '_(no inline body text)_' : escapeMarkdownInline(result.bodyText),
+      );
       if (attachments.length) {
         lines.push('\n## Attachments');
         for (const a of attachments) {
           const fmts = a.formats
             .map(
               (f) =>
-                `${f.format}: [${f.fileUrl}](${f.fileUrl}) (${f.size != null ? `${f.size} bytes` : 'size unknown'})`,
+                `${escapeMarkdownInline(f.format)}: ${markdownLink(f.fileUrl, f.fileUrl)} (${f.size != null ? `${f.size} bytes` : 'size unknown'})`,
             )
             .join(', ');
-          lines.push(`- **${a.title}**: ${fmts}`);
+          lines.push(`- **${escapeMarkdownInline(a.title)}**: ${fmts}`);
         }
       }
       lines.push('');
     }
 
     if (result.comments !== undefined) {
-      lines.push(`**Comments on ${result.target ?? 'target'}**`);
+      lines.push(`**Comments on ${escapeMarkdownInline(result.target ?? 'target')}**`);
       lines.push('');
       lines.push(
         '| Commenter | Type | Posted | Agency | Object ID | Comment ID (→ comment_id for body) |',

@@ -11,6 +11,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { easternToday } from '@/services/federal-register/comment-period.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import type { OpenCommentType } from '@/services/federal-register/types.js';
@@ -190,6 +191,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       ),
   },
   enrichmentTrailer: {
+    notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
     totalPages: { label: 'Total pages' },
     nextPage: { label: 'Next page' },
   },
@@ -287,10 +289,12 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       const regulationsGov = [
         r.regulationsGovDocketId && `docket ${r.regulationsGovDocketId}`,
         r.regulationsGovDocumentId && `document ${r.regulationsGovDocumentId}`,
-        r.commentUrl && `comment at ${r.commentUrl}`,
       ].filter(Boolean);
+      const commentLink = r.commentUrl
+        ? ` · comment at ${markdownLink(r.commentUrl, r.commentUrl)}`
+        : '';
       lines.push(
-        `| ${escapePipes(r.title)} [FR ${r.documentNumber}] | ${r.type} | ${escapePipes(formatAgencies(r.agencies))} | ${r.publicationDate} | ${r.commentsCloseOn} | ${r.daysRemaining} | ${count} | ${escapePipes(docket)} | ${escapePipes(regulationsGov.join(' · ') || '—')} |`,
+        `| ${escapePipes(r.title)} [FR ${r.documentNumber}] | ${r.type} | ${escapePipes(formatAgencies(r.agencies))} | ${r.publicationDate} | ${r.commentsCloseOn} | ${r.daysRemaining} | ${count} | ${escapePipes(docket)} | ${escapePipes(regulationsGov.join(' · ') || '—')}${commentLink} |`,
       );
     }
     return [{ type: 'text', text: lines.join('\n') }];

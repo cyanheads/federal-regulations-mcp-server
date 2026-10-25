@@ -10,9 +10,11 @@
  */
 
 import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import MarkdownIt from 'markdown-it';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCommentsResponse } from '@/services/federal-register/types.js';
 import { handlerContext } from '../helpers/handler-context.js';
+import { markdownText } from '../helpers/markdown-text.js';
 
 const listOpenComments = vi.hoisted(() => vi.fn());
 const hasKey = vi.hoisted(() => vi.fn());
@@ -166,9 +168,16 @@ describe('listOpenCommentsTool', () => {
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(text).toContain('Closes sooner');
     expect(text).toContain('| 7 | 12 | EPA-2025-1 |');
-    expect(text).toContain(
+    expect(markdownText(text)).toContain(
       '| docket EPA-2025-1 · document EPA-2025-1-0001 · comment at http://www.regulations.gov/commenton/EPA-2025-1-0001 |',
     );
+    const links = new MarkdownIt('commonmark')
+      .parse(text, {})
+      .flatMap((token) => token.children ?? [])
+      .filter((token) => token.type === 'link_open');
+    expect(links.map((token) => token.attrGet('href'))).toEqual([
+      'http://www.regulations.gov/commenton/EPA-2025-1-0001',
+    ]);
   });
 
   it('closing_before rejects a date that is not a real calendar day', () => {

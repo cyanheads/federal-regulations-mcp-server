@@ -22,6 +22,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handlerContext } from '../helpers/handler-context.js';
+import { markdownText } from '../helpers/markdown-text.js';
 
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorGetSection = vi.hoisted(() => vi.fn());
@@ -246,7 +247,9 @@ describe('characterization: reads that already resolve', () => {
     expect(fullRequests()).toEqual([
       { date: '2026-09-17', title: '40', part: '141', section: '141.61', appendix: null },
     ]);
-    expect(text(result)).toContain('# 40 CFR 141.61 — § 141.61 Maximum contaminant levels');
+    expect(markdownText(text(result))).toContain(
+      '40 CFR 141.61 — § 141.61 Maximum contaminant levels',
+    );
   });
 
   it('reads the dotless 14 CFR 241 "25" as given, with no extra lookup', async () => {
@@ -359,8 +362,8 @@ describe('part heading, Authority, Source, and notes (#52)', () => {
     expect(out.source).toBe('live');
 
     const rendered = text(result);
-    expect(rendered).toContain(
-      '# 40 CFR 141 — PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS',
+    expect(markdownText(rendered)).toContain(
+      '40 CFR 141 — PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS',
     );
     const body = rendered.indexOf('\n---\n');
     for (const line of [
@@ -1290,9 +1293,13 @@ async function walk(input: Record<string, unknown>, maxWindows = 50): Promise<Wi
   while (offset !== undefined && windows.length < maxWindows) {
     const result = await runToolContract(getCfrSectionTool, { ...input, offset } as never);
     const out = structured(result) as Window;
-    // Both surfaces carry the same window, byte for byte: content[] ends in it.
+    // The rendered Markdown body and structured body preserve every window byte.
     const [block] = result.content ?? [];
-    expect(block?.type === 'text' && block.text.endsWith(out.bodyText)).toBe(true);
+    expect(block?.type).toBe('text');
+    if (block?.type === 'text') {
+      const body = block.text.slice(block.text.indexOf('\n---\n\n') + '\n---\n\n'.length);
+      expect(markdownText(body)).toBe(out.bodyText);
+    }
     if (out.bodyTextNextOffset !== undefined) {
       expect(text(result)).toContain(`offset=${out.bodyTextNextOffset}`);
     }
