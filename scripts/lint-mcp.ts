@@ -32,11 +32,7 @@ import { fileURLToPath } from 'node:url';
 // Import validateDefinitions from the installed framework package
 // ---------------------------------------------------------------------------
 
-// The scaffold ships a second branch importing `../src/linter/validate.js` — the
-// path that resolves only in the framework's own repo, where this script also
-// lives. That module does not exist in a consumer server, so the branch is dead
-// here and its type annotation is unresolvable; the package import is the only
-// one this repo can satisfy.
+// Consumer-only: the framework-local src/linter fallback does not exist here.
 const { validateDefinitions } = await import('@cyanheads/mcp-ts-core/linter');
 
 // ---------------------------------------------------------------------------
