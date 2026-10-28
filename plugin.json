@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "federal-regulations-mcp-server",
+  "version": "0.5.4",
+  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
+  "homepage": "https://github.com/cyanheads/federal-regulations-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/federal-regulations-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "federal-register",
+    "ecfr",
+    "cfr",
+    "regulations",
+    "regulations-gov",
+    "rulemaking",
+    "administrative-law",
+    "stdio",
+    "streamable-http"
+  ]
+}

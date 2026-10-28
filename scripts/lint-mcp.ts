@@ -27,13 +27,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-// ---------------------------------------------------------------------------
-// Import validateDefinitions from the installed framework package
-// ---------------------------------------------------------------------------
-
-// Consumer-only: the framework-local src/linter fallback does not exist here.
-const { validateDefinitions } = await import('@cyanheads/mcp-ts-core/linter');
+import { validateDefinitions } from '@cyanheads/mcp-ts-core/linter';
 
 // ---------------------------------------------------------------------------
 // Definition detection (duck-typing)
