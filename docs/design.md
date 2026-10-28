@@ -902,7 +902,7 @@ The cross-source chains are the reason this is one server. Each row is one tool 
 | # | Call | Tool | Handle used |
 |:--|:-----|:-----|:------------|
 | 1 | Pull the docket and its documents | `regulations_get_docket(docket_id)` | → document `objectId` |
-| 2 | List comments on the primary document | `regulations_find_comments(document_object_id)` | → `commentId`, `hasInlineBody` |
+| 2 | List comments on the primary document | `regulations_find_comments(document_object_id)` | → `commentId`; fetch detail to inspect body and attachments |
 | 3 | Read a specific comment (incl. attachments) | `regulations_find_comments(comment_id)` | (attachment URLs when attachment-only) |
 
 ### Cross-server (composes-with)
@@ -922,7 +922,7 @@ The cross-source chains are the reason this is one server. Each row is one tool 
 6. **`RegulationsGovService`** — keyed client (`X-Api-Key`), 429/Retry-After handling, JSON:API unwrapping, the missing-key → `auth_required` guard.
 7. **Keyed tools** — `regulations_get_docket`, `regulations_find_comments` (incl. attachment resolution).
 8. **Resources** — `regulations://document/{documentNumber}`, `regulations://cfr/{title}/{part}/{section}`.
-9. **Tests** — per service + per tool, including: a sparse FR payload (empty `regulation_id_numbers`, null `comments_close_on`), an attachment-only comment (null `comment`, populated `fileFormats`), a missing-key call to a keyed tool (`auth_required`), and a truncation case for both pagination ceilings.
+9. **Tests** — per service + per tool, including: a sparse FR payload (empty `regulation_id_numbers`, null `comments_close_on`), an attachment-only comment (stub or empty `comment`, attachment formats from included records), a missing-key call to a keyed tool (`auth_required`), and a truncation case for both pagination ceilings.
 
 Each step is independently testable; steps 2–4 ship a working keyless server before any key or mirror work.
 
@@ -966,7 +966,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 - **Federal Register caps navigation at 50 pages.** With `per_page=100`, this allows up to 5,000 records per query; at the default 20, 1,000. The `count` field is itself capped at 10,000 (ElasticSearch default window), so for queries with more than 10,000 matches the true total is unknown, and the truncation notice says so. `search_rules` sets `truncated` on every page of a set larger than 50 × `per_page` and steers the agent to date-windowing to narrow results below the navigable ceiling. `list_open_comments` fetches its window at per_page 2,000 instead and reaches the full 10,000.
 - **Regulations.gov serves 40 pages per query** — 10,000 records at 250 per page, 1,000 at the default 25. For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` flags `truncated` and points at `posted_after`/`posted_before` windows, which take the set one reachable slice at a time; `get_docket` points at `document_types`. The server does not crawl the windows itself.
-- **Comment bodies can be attachment-only.** Confirmed live: the inline `comment` field is null when the substance is a PDF/DOCX attachment. `find_comments` flags `attachmentOnly`/`hasInlineBody` and returns the attachment download URLs, but does **not** fetch and OCR/parse the attachment binaries — the agent gets the URLs and the flag, retrieval of the file content is left to the caller.
+- **Comment bodies can be attachment-only.** Detail responses carry stub text such as "See Attached" or an empty body when attachments hold the substance. `find_comments(comment_id)` flags `attachmentOnly` and returns attachment download URLs; list responses expose neither the body nor attachment presence. The server does not fetch or parse attachment binaries; callers retrieve the files separately.
 - **eCFR historical coverage starts ~2017.** Point-in-time reads before 2017-01-01 are rejected as `date_out_of_range`; the server can't synthesize CFR text that eCFR doesn't retain.
 - **Regulations.gov coverage is agency-dependent.** Not every FR document has a Regulations.gov docket, and not every docket accepts comments. `commentCount`/`docketId` are null when absent — the server reports the gap rather than fabricating a docket.
 - **Regulations.gov rate limit (1,000 req/hr per shared key).** A heavy comment-retrieval session can hit it; `find_comments`/`get_docket` surface `rate_limited` distinctly from other 5xx so the agent can back off rather than retry-storm.

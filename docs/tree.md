@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-10-25 10:01:44
+Generated on: 2026-10-28 12:02:37
 
 ```text
 federal-regulations-mcp-server/
@@ -40,6 +40,8 @@ federal-regulations-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -142,6 +144,9 @@ federal-regulations-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── federal-regulations-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -212,6 +217,7 @@ federal-regulations-mcp-server/
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── scripts/
+│   │   ├── bundle-agent-docs.test.ts
 │   │   └── lint-packaging.test.ts
 │   ├── services/
 │   │   ├── character-references.test.ts
@@ -258,7 +264,9 @@ federal-regulations-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

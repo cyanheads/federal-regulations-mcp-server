@@ -1,13 +1,13 @@
 <div align="center">
   <h1>@cyanheads/federal-regulations-mcp-server</h1>
   <p><b>Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.</b>
-  <div>7 Tools • 2 Resources</div>
+  <div>7 Tools • 3 Resources</div>
   </p>
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.5.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.5.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/federal-regulations-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.4.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/federal-regulations-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/federal-regulations-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -49,8 +49,9 @@ US federal regulations from the Federal Register, the eCFR, and Regulations.gov.
 |:---|:---|
 | `regulations://document/{documentNumber}` | One Federal Register document's metadata and cross-source handles |
 | `regulations://cfr/{title}/{part}/{section}` | Codified text of a current CFR section |
+| `skill://federal-regulations-guide/SKILL.md` | Guide to tracing rulemaking, CFR text, and public-comment evidence across sources |
 
-Both resources mirror a tool (`regulations_get_document`, `regulations_get_cfr_section`), so tool-only clients lose nothing.
+The two data resources mirror `regulations_get_document` and `regulations_get_cfr_section`. The [federal-regulations guide](./skills/federal-regulations-guide/SKILL.md) also ships with plugin installs, npm, Docker, and the desktop bundle.
 
 ## Capability reference
 
@@ -141,140 +142,32 @@ Agent-friendly output:
 
 ## Getting started
 
-### Public Hosted Instance
-
-A public instance is available at `https://federal-regulations.caseyjhand.com/mcp` — no installation required. It serves Streamable HTTP; each client takes its own config shape.
-
-For Claude Code:
+Connect to the hosted instance:
 
 ```sh
 claude mcp add --transport http federal-regulations-mcp-server https://federal-regulations.caseyjhand.com/mcp
 ```
 
-For Cline (`cline_mcp_settings.json`):
+Or run it locally:
 
-```json
-{
-  "mcpServers": {
-    "federal-regulations-mcp-server": {
-      "type": "streamableHttp",
-      "url": "https://federal-regulations.caseyjhand.com/mcp"
-    }
-  }
-}
+```sh
+claude mcp add federal-regulations-mcp-server -- npx -y @cyanheads/federal-regulations-mcp-server
 ```
 
-For Cursor (`mcp.json`):
+For other clients, add this to your MCP configuration file:
 
 ```json
 {
   "mcpServers": {
     "federal-regulations-mcp-server": {
-      "url": "https://federal-regulations.caseyjhand.com/mcp"
-    }
-  }
-}
-```
-
-Claude Desktop adds remote servers under Settings → Connectors.
-
-### Self-Hosted / Local
-
-Add the following to your MCP client configuration file. `REGULATIONS_GOV_API_KEY` enables the docket and comment tools; omit it to run the keyless Federal Register and eCFR tools alone.
-
-```json
-{
-  "mcpServers": {
-    "federal-regulations-mcp-server": {
-      "type": "stdio",
-      "command": "bunx",
-      "args": ["@cyanheads/federal-regulations-mcp-server@latest"],
-      "env": {
-        "MCP_TRANSPORT_TYPE": "stdio",
-        "MCP_LOG_LEVEL": "info",
-        "REGULATIONS_GOV_API_KEY": "your-key-here"
-      }
-    }
-  }
-}
-```
-
-Or with npx (no Bun required):
-
-```json
-{
-  "mcpServers": {
-    "federal-regulations-mcp-server": {
-      "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@cyanheads/federal-regulations-mcp-server@latest"],
-      "env": {
-        "MCP_TRANSPORT_TYPE": "stdio",
-        "MCP_LOG_LEVEL": "info",
-        "REGULATIONS_GOV_API_KEY": "your-key-here"
-      }
+      "args": ["-y", "@cyanheads/federal-regulations-mcp-server"]
     }
   }
 }
 ```
 
-Or with Docker:
-
-```json
-{
-  "mcpServers": {
-    "federal-regulations-mcp-server": {
-      "type": "stdio",
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-e", "MCP_TRANSPORT_TYPE=stdio",
-        "-e", "REGULATIONS_GOV_API_KEY=your-key-here",
-        "ghcr.io/cyanheads/federal-regulations-mcp-server:latest"
-      ]
-    }
-  }
-}
-```
-
-For Streamable HTTP, set the transport and start the server:
-
-```sh
-MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
-# Server listens at http://localhost:3010/mcp
-```
-
-### Prerequisites
-
-- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
-- Optional: a free [api.data.gov key](https://api.data.gov/signup/) for the Regulations.gov tools.
-
-### Installation
-
-1. **Clone the repository:**
-
-```sh
-git clone https://github.com/cyanheads/federal-regulations-mcp-server.git
-```
-
-2. **Navigate into the directory:**
-
-```sh
-cd federal-regulations-mcp-server
-```
-
-3. **Install dependencies:**
-
-```sh
-bun install
-```
-
-4. **Configure environment:**
-
-```sh
-cp .env.example .env
-# optionally set REGULATIONS_GOV_API_KEY
-```
+Set optional `REGULATIONS_GOV_API_KEY` to enable docket and comment tools; get a free key at [api.data.gov/signup](https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. For Docker or a source build, see [Running the server](#running-the-server).
 
 ## Configuration
 
@@ -299,6 +192,14 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 ## Running the server
 
 ### Local development
+
+Requires Bun v1.4.0 or higher (or Node.js v24+).
+
+```sh
+git clone https://github.com/cyanheads/federal-regulations-mcp-server.git
+cd federal-regulations-mcp-server && bun install
+cp .env.example .env
+```
 
 - **Build and run:**
 
@@ -330,8 +231,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 ### Docker
 
 ```sh
-docker build -t federal-regulations-mcp-server .
-docker run --rm -e REGULATIONS_GOV_API_KEY=your-key -p 3010:3010 federal-regulations-mcp-server
+docker run --rm -e REGULATIONS_GOV_API_KEY=your-key -p 3010:3010 ghcr.io/cyanheads/federal-regulations-mcp-server:latest
 ```
 
 The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `/var/log/federal-regulations-mcp-server`. Build the mirror inside a running container with `docker exec <container> bun run mirror:init`, and mount a volume over `/usr/src/app/data` so it survives recreation. OpenTelemetry peer dependencies are installed by default; build with `--build-arg OTEL_ENABLED=false` to omit them.
