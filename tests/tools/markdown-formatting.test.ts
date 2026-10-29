@@ -42,7 +42,7 @@ describe('upstream text in tool Markdown', () => {
   it('keeps version headings and identifiers literal', () => {
     // Version headings are plain text by the time they reach format(), so one
     // never carries a line break; every other character must survive as written.
-    const heading = upstream.replace('\n', ' ');
+    const heading = upstream.replaceAll('\n', ' ');
     const appendix = 'Appendix A to Part 50 *[x](y)*';
     const blocks = browseCfrTool.format!({
       mode: 'versions',
