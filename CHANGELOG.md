@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.6.1](changelog/0.6.x/0.6.1.md) — 2026-10-29
+
+Search executive orders and other presidential documents by number, president, and signing date, list a CFR section's amendment dates, search a docket's documents for file downloads, and clamp oversized page sizes instead of rejecting them.
+
 ## [0.6.0](changelog/0.6.x/0.6.0.md) — 2026-10-28
 
 Publish a regulatory research guide over MCP, adopt mcp-ts-core 0.13.18, and repair desktop bundle packaging.
