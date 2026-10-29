@@ -29,6 +29,13 @@
           "isSecret": true
         },
         {
+          "name": "REGULATIONS_CLAMP_LIMITS",
+          "description": "Serve a per_page or max_chars above its ceiling at the ceiling, with a notice. Set false to advertise and enforce the ceiling as a schema maximum instead.",
+          "format": "boolean",
+          "isRequired": false,
+          "default": "true"
+        },
+        {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
           "format": "string",
@@ -93,6 +100,13 @@
           "description": "Cron expression for an in-process eCFR mirror refresh (e.g. '0 4 * * 0'). Unset registers no job. Each run re-harvests every configured title in full, and a tick is skipped until mirror:init has completed once.",
           "format": "string",
           "isRequired": false
+        },
+        {
+          "name": "REGULATIONS_CLAMP_LIMITS",
+          "description": "Serve a per_page or max_chars above its ceiling at the ceiling, with a notice. Set false to advertise and enforce the ceiling as a schema maximum instead.",
+          "format": "boolean",
+          "isRequired": false,
+          "default": "true"
         },
         {
           "name": "MCP_LOG_LEVEL",

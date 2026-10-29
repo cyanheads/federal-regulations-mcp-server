@@ -25,7 +25,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
   name: 'cfr-section',
   title: 'CFR section (current)',
   description:
-    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date and its default 64,000-character window — mirror-backed with a live eCFR fallback. The part and section resolve as the tool resolves them ("Part 141"; "61", "§ 141.61", "141.61(c)", "40 CFR 141.61"); `part` and `section` name what was read and `notice` says how. When bodyTextNextOffset is present the section runs past the window — read on through regulations_get_cfr_section with that offset. Sections only; read an appendix through regulations_get_cfr_section with its `appendix` input.',
+    'Codified text of a current CFR section by title/part/section (e.g. regulations://cfr/40/50/50.1). Mirrors regulations_get_cfr_section at the current date and its default 64,000-character window — mirror-backed with a live eCFR fallback. The part and section resolve as the tool resolves them ("Part 141"; "61", "§ 141.61", "141.61(c)", "40 CFR 141.61"); `part` and `section` name what was read and `notice` says how, and also when hierarchyPath holds only the cited levels because eCFR could not supply the rest. When bodyTextNextOffset is present the section runs past the window — read on through regulations_get_cfr_section with that offset. Sections only; read an appendix through regulations_get_cfr_section with its `appendix` input.',
   mimeType: 'application/json',
   params: z.object({
     title: z
@@ -81,14 +81,16 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       );
     }
     const resolved = read.result.section ?? section;
-    const hierarchyPath = await getEcfrService().hierarchyPath(
+    const path = await getEcfrService().hierarchyPath(
       titleNum,
       { part, section: resolved },
       read.result.date,
       ctx,
     );
     const cut = windowText(read.result.bodyText, { offset: 0, maxChars: DEFAULT_WINDOW_CHARS });
-    const notice = [describePartRewrite(written, part), read.rewrite].filter(Boolean).join(' ');
+    const notice = [describePartRewrite(written, part), read.rewrite, path.notice]
+      .filter(Boolean)
+      .join(' ');
     return {
       cfrCite: sectionCite(titleNum, part, resolved),
       title: titleNum,
@@ -96,7 +98,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       section: resolved,
       appendix: null,
       heading: read.result.heading,
-      hierarchyPath,
+      hierarchyPath: path.path,
       date: read.result.date,
       source: read.source,
       bodyText: cut.text,

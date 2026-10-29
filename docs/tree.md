@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-10-28 12:25:04
+Generated on: 2026-10-29 17:19:45
 
 ```text
 federal-regulations-mcp-server/
@@ -173,7 +173,9 @@ federal-regulations-mcp-server/
 │   │           ├── index.ts
 │   │           ├── list-open-comments.tool.ts
 │   │           ├── paging.ts
-│   │           └── search-rules.tool.ts
+│   │           ├── presidential-schema.ts
+│   │           ├── search-rules.tool.ts
+│   │           └── size-limit.ts
 │   ├── services/
 │   │   ├── ecfr/
 │   │   │   ├── cite.ts
@@ -247,7 +249,8 @@ federal-regulations-mcp-server/
 │   │   ├── markdown-formatting.test.ts
 │   │   ├── paging.test.ts
 │   │   ├── search-rules-citation.test.ts
-│   │   └── search-rules.tool.test.ts
+│   │   ├── search-rules.tool.test.ts
+│   │   └── size-limit.test.ts
 │   └── tsconfig-coverage.test.ts
 ├── .dockerignore
 ├── .env.example

@@ -1390,6 +1390,24 @@ describe('bodyText is one bounded window (#29)', () => {
     const windows = await walk({ title: 40, part: '141', max_chars: 200_000 });
     expect(windows.map((w) => w.bodyText).join('')).toBe(partBody(sections));
     expect(windows[0]?.bodyText.length).toBe(200_000);
+    expect(windows[0]?.notice).toBeUndefined();
+  });
+
+  it('serves max_chars past 200,000 at 200,000, resuming where each window ends', async () => {
+    const sections = variedSections();
+    serveVersioner((req) =>
+      req.part === '141' && !req.section ? xml(partXml('141', sections)) : null,
+    );
+
+    const windows = await walk({ title: 40, part: '141', max_chars: 200_001 });
+    expect(windows.map((w) => w.bodyText).join('')).toBe(partBody(sections));
+    expect(windows.length).toBeGreaterThan(2);
+    expect(windows.map((w) => w.bodyTextOffset)).toEqual(windows.map((_, i) => i * 200_000));
+    for (const w of windows) {
+      expect(w.notice).toBe(
+        'Requested max_chars 200001; applied max_chars 200000, the largest this tool serves.',
+      );
+    }
   });
 
   it('returns a small part whole, with no continuation and its appendices named', async () => {
@@ -1589,7 +1607,7 @@ describe('bodyText is one bounded window (#29)', () => {
   });
 
   const invalidPaging = [
-    { name: 'max_chars above 200,000', paging: { max_chars: 200_001 } },
+    { name: 'a fractional max_chars', paging: { max_chars: 1.5 } },
     { name: 'max_chars of 0', paging: { max_chars: 0 } },
     { name: 'a negative offset', paging: { offset: -1 } },
     { name: 'a fractional offset', paging: { offset: 1.5 } },
@@ -1629,5 +1647,206 @@ describe('bodyText is one bounded window (#29)', () => {
     expect(out.bodyTextLength).toBe(100_000);
     expect(out.bodyTextNextOffset).toBe(64_000);
     expect(out).not.toHaveProperty('notice');
+  });
+});
+
+/**
+ * Which ancestry failures fall back, the single attempt, its deadline, and the
+ * cancellation rule are tabled at the service seam (`tests/services/ecfr-service`).
+ * These prove each read path carries the fallback to both surfaces: one case per
+ * call site, the notice joining the ones already there, and a cancellation that
+ * reaches the caller as the aborted ancestry request.
+ */
+describe('an ancestry failure keeps the read and says so (#71)', () => {
+  const NOTICE =
+    "hierarchyPath lists only the cited levels (title, part, section or appendix): eCFR's hierarchy lookup failed, so the chapter, subchapter, and subpart are missing. Retry the call for the full path.";
+
+  /** Answer every ancestry request with `respond`, ahead of `serveVersioner`'s healthy route. */
+  function serveAncestry(respond: (request: Request) => Response | Promise<Response>): void {
+    http.route({
+      match: (request) => {
+        const url = new URL(request.url);
+        return (
+          url.hostname === 'www.ecfr.gov' && url.pathname.startsWith('/api/versioner/v1/ancestry/')
+        );
+      },
+      respond,
+    });
+  }
+
+  const ancestryRequests = () =>
+    http.calls.filter((c) => new URL(c.request.url).pathname.includes('/ancestry/'));
+
+  const unavailable = () => new Response('{"error":"unavailable"}', { status: 503 });
+
+  it('reads a section with the cited levels and the notice, on both surfaces', async () => {
+    serveAncestry(unavailable);
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const result = await runToolContract(getCfrSectionTool, {
+      title: 40,
+      part: '141',
+      section: '141.61',
+    });
+    const out = structured(result);
+    const rendered = markdownText(text(result));
+
+    expect(out.hierarchyPath).toBe('Title 40 › Part 141 › § 141.61');
+    expect(out.notice).toBe(NOTICE);
+    expect(out.bodyTextLength).toBe(8_956);
+    expect(rendered).toContain('Title 40 › Part 141 › § 141.61 · as of 2026-09-17');
+    expect(rendered).toContain(NOTICE);
+    expect(ancestryRequests()).toHaveLength(1);
+  });
+
+  it('reads a mirror-served section the same way, since its path is still resolved live', async () => {
+    serveAncestry(unavailable);
+    serveVersioner(() => null);
+    mirrorReady.mockResolvedValue(true);
+    mirrorGetSection.mockResolvedValue({
+      title: 40,
+      part: '141',
+      section: '141.61',
+      heading: '§ 141.61 Heading.',
+      date: '2026-09-17',
+      bodyText: 'Mirror text.',
+    });
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61' }),
+    );
+
+    expect(out.source).toBe('mirror');
+    expect(out.hierarchyPath).toBe('Title 40 › Part 141 › § 141.61');
+    expect(out.notice).toBe(NOTICE);
+    expect(fullRequests()).toHaveLength(0);
+    expect(ancestryRequests()).toHaveLength(1);
+  });
+
+  it('reads a whole part the same way when ancestry answers 404', async () => {
+    serveAncestry(() => new Response(NO_MATCH_BODY, { status: 404 }));
+    serveVersioner(() => xml(partXml('9', [{ id: '9.1', heading: '§ 9.1 One.', body: 'Text.' }])));
+    const out = structured(await runToolContract(getCfrSectionTool, { title: 40, part: '9' }));
+
+    expect(out.hierarchyPath).toBe('Title 40 › Part 9');
+    expect(out.notice).toBe(NOTICE);
+    expect(ancestryRequests()).toHaveLength(1);
+  });
+
+  it('reads an appendix the same way when ancestry answers an unparseable body', async () => {
+    serveAncestry(
+      () =>
+        new Response('{"ancestors": [', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    serveVersioner((req) => (req.appendix ? xml(APPENDIX_XML) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: '50',
+        appendix: 'Appendix A-1 to Part 50',
+      }),
+    );
+
+    expect(out.hierarchyPath).toBe('Title 40 › Part 50 › Appendix A-1 to Part 50');
+    expect(out.notice).toBe(NOTICE);
+    expect(ancestryRequests()).toHaveLength(1);
+  });
+
+  it('joins the part rewrite, the section rewrite, and the past-end guidance without replacing them', async () => {
+    serveAncestry(unavailable);
+    serveVersioner((req) =>
+      req.section === '141.61'
+        ? xml(sectionXml('141.61', '§ 141.61 Heading.', 'Short text.'))
+        : null,
+    );
+    const out = structured(
+      await runToolContract(getCfrSectionTool, {
+        title: 40,
+        part: 'Part 141',
+        section: '61',
+        offset: 500,
+      }),
+    );
+    const said = notice(out);
+    const order = [
+      'Part "Part 141" was read as 141.',
+      'Section "61" was read as 141.61',
+      NOTICE,
+      'offset 500 is past the end',
+    ].map((part) => said.indexOf(part));
+
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('appends the notice to the resource’s own notice', async () => {
+    serveAncestry(unavailable);
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const ctx = handlerContext(cfrSectionResource);
+    const params = cfrSectionResource.params!.parse({
+      title: '40',
+      part: 'Part 141',
+      section: '§ 141.61',
+    });
+    const out = (await cfrSectionResource.handler(params, ctx)) as Window;
+
+    expect(out.hierarchyPath).toBe('Title 40 › Part 141 › § 141.61');
+    expect(out.notice).toBe(
+      `Part "Part 141" was read as 141. Section "§ 141.61" was read as 141.61: removed the leading "§". ${NOTICE}`,
+    );
+    expect(ancestryRequests()).toHaveLength(1);
+  });
+
+  it('keeps the full path and no notice when ancestry answers', async () => {
+    serveAncestry(() =>
+      Response.json({
+        ancestors: [
+          { type: 'title', identifier: '40' },
+          { type: 'chapter', identifier: 'I' },
+          { type: 'subchapter', identifier: 'D' },
+          { type: 'part', identifier: '141' },
+          { type: 'subpart', identifier: 'G' },
+          { type: 'section', identifier: '141.61' },
+        ],
+      }),
+    );
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const out = structured(
+      await runToolContract(getCfrSectionTool, { title: 40, part: '141', section: '141.61' }),
+    );
+
+    expect(out.hierarchyPath).toBe(
+      'Title 40 › Chapter I › Subchapter D › Part 141 › Subpart G › § 141.61',
+    );
+    expect(out).not.toHaveProperty('notice');
+  });
+
+  it('answers a cancellation during the ancestry request as the aborted request, never a fallback', async () => {
+    const controller = new AbortController();
+    serveAncestry(
+      (request) =>
+        new Promise<Response>((_, reject) => {
+          request.signal.addEventListener('abort', () => reject(request.signal.reason), {
+            once: true,
+          });
+          controller.abort(new DOMException('client left', 'AbortError'));
+        }),
+    );
+    serveVersioner((req) => (req.section === '141.61' ? xml(XML_141_61) : null));
+    const result = await runToolContract(
+      getCfrSectionTool,
+      { title: 40, part: '141', section: '141.61' },
+      { context: { signal: controller.signal } },
+    );
+    const error = failure(result);
+
+    // The aborted ancestry fetch's own message (the framework redacts its path and
+    // query) — not the caller's reason, which is all a swallowed abort leaves.
+    expect(error.code).toBe(-32011);
+    expect(error.message).toBe('fetch GET https://www.ecfr.gov/…?… was aborted.');
+    expect(markdownText(text(result))).toContain('fetch GET https://www.ecfr.gov/…?… was aborted.');
+    expect(text(result)).not.toContain(NOTICE);
+    expect(ancestryRequests()).toHaveLength(1);
   });
 });

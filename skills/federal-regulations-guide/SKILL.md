@@ -22,11 +22,13 @@ The server reads records. It neither submits comments nor downloads and parses a
 | FR document number | documentNumber in regulations_search_rules or regulations_list_open_comments; frDocNum on a regulations_get_docket document | Open the publication with regulations_get_document, or locate its comments with regulations_find_comments |
 | Printed docket number | docketIds on Federal Register results or document detail | Find related Federal Register publications with regulations_search_rules; this is not necessarily a Regulations.gov docket ID |
 | RIN | regulationIdNumbers on Federal Register results or detail | Follow related rulemaking publications with regulations_search_rules |
-| Regulations.gov docket ID | regulationsGovDocketId on discovery results; docketId on regulations_get_document | Read the docket or list docket-wide comments |
-| Regulations.gov document ID | regulationsGovDocumentId on Federal Register results or detail; documentId in a docket | List comments on that document |
+| Executive order number | presidential.number on a presidential document (proclamation and determination numbers appear there too) | Find the order itself with regulations_search_rules executive_order_number; a full-text query on the number matches every document that cites it |
+| Regulations.gov docket ID | regulationsGovDocketId on discovery results; docketId on regulations_get_document | Read the docket (search its documents with search_term) or list docket-wide comments |
+| Regulations.gov document ID | regulationsGovDocumentId on Federal Register results or detail; documentId in a docket | List comments on that document, or read its files and attachments with regulations_get_docket document_id |
 | Document object ID | objectId on a document in regulations_get_docket | List comments on that document; do not substitute a docket's or comment's object ID |
 | Comment ID | commentId in regulations_find_comments list results | Read that comment's body, status, and attachment URLs |
 | CFR location | cfrReferences supplies title and part; regulations_browse_cfr supplies sections and complete appendix identifiers | Read codified text with regulations_get_cfr_section |
+| CFR version date | date on a row from regulations_browse_cfr versions mode | Read the text as it stood from that day with regulations_get_cfr_section date |
 
 ## Gates
 
@@ -34,7 +36,7 @@ The server reads records. It neither submits comments nor downloads and parses a
 
 2. **Read comments before characterizing their arguments.** A list supplies neither bodies nor attachment details. Open individual comment records. When attachmentOnly is true, retrieve and read the attachment separately before summarizing its substance; a stub body is not the submission. Preserve withdrawn or restricted status and report duplicateComments separately from the number of records inspected; do not infer a total submission count from it.
 
-3. **Establish coverage before asserting absence or completeness.** Inspect scope, filters, pagination, and truncation notices. An empty comment list establishes only that the requested scope and filters returned none. Broaden from a document to its rulemaking docket when appropriate. For CFR search, read sourceScope and countBasis: a section_versions count is not a count of distinct sections. A missing or partial result is not evidence that no regulation or public reaction exists.
+3. **Establish coverage before asserting absence or completeness.** Inspect scope, filters, pagination, and truncation notices. An empty docket-wide comment list means the docket exists on Regulations.gov and holds no posted comments matching the request; a docket ID Regulations.gov does not hold, such as a printed docket number, answers not_found instead. An empty list under a filter says nothing about the unfiltered docket, so drop the filter to see it. An empty document-level list checks nothing about the document: broaden from a document to its rulemaking docket when appropriate. For CFR search, read sourceScope and countBasis: a section_versions count is not a count of distinct sections. A missing or partial result is not evidence that no regulation or public reaction exists.
 
 4. **Finish the relevant text before quoting a conclusion from it.** Federal Register bodies and CFR reads return text windows. Follow the returned next offset when the answer depends on text beyond the window. A whole-part read does not inline appendix bodies. Single-section reads omit enclosing part, subpart, and subject-group Authority and Source notes; read the whole part when those notes matter.
 
@@ -54,12 +56,16 @@ Discover the publication with regulations_search_rules and open it with regulati
 
 Search codified text with regulations_browse_cfr or start from a known cite. Read the section and, when needed, its enclosing Authority and Source notes. Take a Federal Register page citation together with the date printed beside it to regulations_search_rules. A cited page may fall inside a publication, and several publications can share a page; open the candidates before attributing the amendment. This server's page-citation lookup starts in 1994. Check the returned coverage notice before interpreting an unresolved older citation as evidence the publication is absent.
 
+### Find when codified text changed
+
+List a part's or one section's versions with regulations_browse_cfr in versions mode, then read an earlier text by passing a row's date to regulations_get_cfr_section. A removed row's date reads nothing, so use the previous row's date for the last text; a row dated before 2017 is the text in force when coverage begins and reads at the start of 2017. A source note's Federal Register cites omit editorial changes, so the versions list, not the note, is the record of when the text changed.
+
 ### Assess public comments
 
-For one known publication, regulations_find_comments can resolve its FR number directly. Use regulations_get_docket when the task needs supporting materials, several rule documents, or the wider docket context. Select the relevant document handles or the docket-wide scope, then open comment details and relevant attachments. State which scope, filters, and records support the assessment; do not treat an initial page as representative of the entire corpus.
+For one known publication, regulations_find_comments can resolve its FR number directly. Use regulations_get_docket when the task needs supporting materials, several rule documents, or the wider docket context. In a large docket, find a supporting document by search_term and open its download URLs and attachments with document_id. Select the relevant document handles or the docket-wide scope, then open comment details and relevant attachments. An attachment listed with no downloadable file is withheld for the reason it states; report it as unread rather than describing its content. State which scope, filters, and records support the assessment; do not treat an initial page as representative of the entire corpus.
 
 ### Retrieve a large result set
 
-Follow continuation metadata. When Federal Register navigation is capped, divide publication dates into smaller windows. For comments, divide posted dates into smaller windows; for docket documents, narrow document types. Deduplicate records where windows overlap. If a slice still exceeds the reachable window, report the remaining gap rather than claiming complete retrieval.
+Follow continuation metadata. When Federal Register navigation is capped, divide publication dates into smaller windows. For comments, divide posted dates into smaller windows; for docket documents, narrow with search_term or document types. Deduplicate records where windows overlap. If a slice still exceeds the reachable window, report the remaining gap rather than claiming complete retrieval.
 
 Start with ordinary search terms and inspect sourceScope. Do not assume the same Boolean or quoted-phrase syntax works across all three sources.

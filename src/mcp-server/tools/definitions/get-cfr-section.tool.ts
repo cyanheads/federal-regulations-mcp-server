@@ -36,8 +36,9 @@ import {
 } from '@/services/ecfr/ecfr-service.js';
 import { citedTitle, readSection } from '@/services/ecfr/read-section.js';
 import type { EcfrSectionIndexEntry } from '@/services/ecfr/types.js';
-import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS, windowText } from '@/services/text-window.js';
+import { windowText } from '@/services/text-window.js';
 import { isoDate } from './date-input.js';
+import { clampSize, MAX_CHARS_LIMIT, maxCharsInput } from './size-limit.js';
 
 export const getCfrSectionTool = tool('regulations_get_cfr_section', {
   title: 'regulations_get_cfr_section',
@@ -86,13 +87,10 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .describe(
         'Character offset into the text where the window starts (default 0). Pass bodyTextNextOffset from the previous call to read on, or a sections[].offset from a whole-part read to jump to that section.',
       ),
-    max_chars: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_WINDOW_CHARS)
-      .optional()
-      .describe('Most text characters to return in this window (1–200,000, default 64,000).'),
+    max_chars: maxCharsInput(
+      MAX_CHARS_LIMIT,
+      (bounds) => `Most text characters to return in this window (${bounds}).`,
+    ),
   }),
   output: z.object({
     cfrCite: z
@@ -122,7 +120,11 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .describe(
         'Section, part, or appendix heading — for a whole part, the part\'s own ("PART 141—NATIONAL PRIMARY DRINKING WATER REGULATIONS").',
       ),
-    hierarchyPath: z.string().describe('Human-readable hierarchy path.'),
+    hierarchyPath: z
+      .string()
+      .describe(
+        'Human-readable hierarchy path, title down to the location read ("Title 40 › Chapter I › Subchapter D › Part 141 › Subpart G › § 141.61"). When eCFR cannot supply it, only the cited levels ("Title 40 › Part 141 › § 141.61"), and notice says so.',
+      ),
     date: z.string().describe('The issue/point-in-time date the text reflects (ISO 8601).'),
     source: z
       .enum(['mirror', 'live'])
@@ -210,7 +212,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       .string()
       .optional()
       .describe(
-        'How a part or section written another way was resolved, and guidance when the offset is at or past the end of the text.',
+        'That max_chars was above its ceiling, how a part or section written another way was resolved, that hierarchyPath holds only the cited levels when eCFR could not supply the rest, and guidance when the offset is at or past the end of the text.',
       ),
   },
   enrichmentTrailer: {
@@ -264,7 +266,6 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
     const section = input.section?.trim() || undefined;
     const appendix = input.appendix?.trim() || undefined;
     const requestedDate = input.date?.trim() || undefined;
-    const paging = { offset: input.offset ?? 0, maxChars: input.max_chars ?? DEFAULT_WINDOW_CHARS };
 
     if (section && appendix) {
       throw ctx.fail(
@@ -298,7 +299,9 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       }
     }
 
-    const notices: string[] = [];
+    const size = clampSize(input.max_chars, MAX_CHARS_LIMIT, 'regulations_get_cfr_section', ctx);
+    const paging = { offset: input.offset ?? 0, maxChars: size.value };
+    const notices = size.notice ? [size.notice] : [];
     const partRewrite = describePartRewrite(input.part, part);
     if (partRewrite) notices.push(partRewrite);
     const cutWindow = (text: string) => {
@@ -314,6 +317,11 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       if (notices.length > 0) ctx.enrich.notice(notices.join(' '));
       return result;
     };
+    const pathTo = async (target: Parameters<typeof service.hierarchyPath>[1], date: string) => {
+      const { path, notice } = await service.hierarchyPath(input.title, target, date, ctx);
+      if (notice) notices.push(notice);
+      return path;
+    };
 
     // Appendices are not mirrored — the index holds section text alone — so an
     // appendix read always goes to the live versioner.
@@ -327,11 +335,9 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
           { title: input.title, part: part ?? null, appendix },
         );
       }
-      const hierarchyPath = await service.hierarchyPath(
-        input.title,
+      const hierarchyPath = await pathTo(
         { part: result.part ?? undefined, appendix: result.appendix },
         result.date,
-        ctx,
       );
       return finish({
         cfrCite: appendixCite(result.appendix, input.title),
@@ -370,12 +376,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
       }
       if (read.rewrite) notices.push(read.rewrite);
       const resolved = read.result.section ?? section;
-      const hierarchyPath = await service.hierarchyPath(
-        input.title,
-        { part, section: resolved },
-        read.result.date,
-        ctx,
-      );
+      const hierarchyPath = await pathTo({ part, section: resolved }, read.result.date);
       return finish({
         cfrCite: sectionCite(input.title, part, resolved),
         title: input.title,
@@ -400,7 +401,7 @@ export const getCfrSectionTool = tool('regulations_get_cfr_section', {
         { title: input.title, part, section: null, date },
       );
     }
-    const hierarchyPath = await service.hierarchyPath(input.title, { part }, result.date, ctx);
+    const hierarchyPath = await pathTo({ part }, result.date);
     const cut = cutWindow(result.bodyText);
     return finish({
       cfrCite: `${input.title} CFR ${part}`,

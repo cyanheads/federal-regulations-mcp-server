@@ -7,7 +7,9 @@
  * are removed before the first lookup, and every other rewrite runs one lookup
  * at a time, only after the form before it missed, so an identifier that
  * resolves as given is never rewritten. Shared by regulations_get_cfr_section
- * and the cfr-section resource so both resolve the same inputs the same way.
+ * and the cfr-section resource so both resolve the same inputs the same way;
+ * regulations_browse_cfr's versions mode resolves its `section` through the same
+ * candidates.
  * @module services/ecfr/read-section
  */
 
@@ -19,8 +21,9 @@ import type { EcfrSectionResult } from './types.js';
 /**
  * Most live lookups a read makes beyond the as-given one. Each versioner call
  * answers in ~0.2 s or ~5 s, and every lookup shares the request's 45 s budget
- * with the titles and ancestry reads, so four `/full/` calls at the slow speed
- * is the ceiling that still leaves room for both.
+ * with the titles read and the ancestry read's single attempt of at most 8 s, so
+ * four `/full/` calls at the slow speed is the ceiling that still leaves room for
+ * both.
  */
 export const MAX_EXTRA_LOOKUPS = 3;
 
@@ -132,8 +135,12 @@ export function sectionCandidates(value: string, part: string): SectionCandidate
   ];
 }
 
-/** Say how the identifier read differs from the one asked for. */
-function describeRewrite(
+/**
+ * Say how the identifier read differs from the one asked for. Shared with the
+ * browse tool's versions mode, which resolves a section through the same
+ * candidates.
+ */
+export function describeRewrite(
   asked: string,
   prefix: string | undefined,
   candidate: SectionCandidate,

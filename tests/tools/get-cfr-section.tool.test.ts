@@ -68,7 +68,7 @@ describe('getCfrSectionTool', () => {
     mirrorReady.mockReset();
     mirrorGetSection.mockReset();
     isLatestIssue.mockReset().mockResolvedValue(true);
-    hierarchyPath.mockResolvedValue('Title 40 › Part 50');
+    hierarchyPath.mockResolvedValue({ path: 'Title 40 › Part 50' });
     upToDateAsOf.mockReset();
     upToDateAsOf.mockResolvedValue('2026-09-18');
   });
@@ -154,7 +154,9 @@ describe('getCfrSectionTool', () => {
     // The issue's repro: 40 CFR 50 Appendix A-1, which browse lists but the read
     // surface could not fetch.
     latestIssueDate.mockResolvedValue('2026-08-05');
-    hierarchyPath.mockResolvedValue('Title 40 › Chapter I › Part 50 › Appendix A-1 to Part 50');
+    hierarchyPath.mockResolvedValue({
+      path: 'Title 40 › Chapter I › Part 50 › Appendix A-1 to Part 50',
+    });
     getAppendixText.mockResolvedValue({
       title: 40,
       part: '50',

@@ -12,14 +12,21 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
-import { DEFAULT_WINDOW_CHARS, MAX_WINDOW_CHARS } from '@/services/text-window.js';
 import { frDocumentNumber, normalizeFrDocumentNumber } from './document-number.js';
-import { formatAgencies, formatCommentPeriod, formatPrintedPages } from './format-utils.js';
+import {
+  formatAgencies,
+  formatCommentPeriod,
+  formatPresidential,
+  formatPrintedPages,
+  formatSignificant,
+} from './format-utils.js';
+import { presidentialSchema } from './presidential-schema.js';
+import { clampSize, joinNotices, MAX_CHARS_LIMIT, maxCharsInput } from './size-limit.js';
 
 export const getDocumentTool = tool('regulations_get_document', {
   title: 'regulations_get_document',
   description:
-    "Fetch one Federal Register document by its FR document number — full metadata (title, type, agencies, abstract, action, effective/comment dates, RINs) plus the cross-source handles that make this a workflow server. The output carries the Regulations.gov docket ID (chain into regulations_get_docket or regulations_find_comments), the docket numbers the Federal Register prints (chain back into regulations_search_rules as docket_id), the comment count and comment URL, and the affected CFR parts (chain into regulations_get_cfr_section). Set include_full_text only when the rule body itself is needed: it returns the plain-text body as a window of up to 64,000 characters (max_chars raises it to 200,000), with the body's total length and, when text remains, the offset to resume from. Short documents return whole; major final rules run past a million characters, so page through with offset rather than reading them in one call.",
+    "Fetch one Federal Register document by its FR document number — full metadata (title, type, agencies, abstract, action, effective/comment dates, RINs, EO 12866 significance, and for a presidential document its subtype, number, signing date, and president) plus the cross-source handles that make this a workflow server. The output carries the Regulations.gov docket ID (chain into regulations_get_docket or regulations_find_comments), the docket numbers the Federal Register prints (chain back into regulations_search_rules as docket_id), the comment count and comment URL, and the affected CFR parts (chain into regulations_get_cfr_section). Set include_full_text only when the rule body itself is needed: it returns the plain-text body as a window of up to 64,000 characters (max_chars raises it to 200,000), with the body's total length and, when text remains, the offset to resume from. Short documents return whole; major final rules run past a million characters, so page through with offset rather than reading them in one call.",
   annotations: { readOnlyHint: true, idempotentHint: true },
   input: z.object({
     document_number: frDocumentNumber().describe(
@@ -39,15 +46,11 @@ export const getDocumentTool = tool('regulations_get_document', {
       .describe(
         'Character offset into the plain-text body where the window starts (default 0). Pass the fullTextNextOffset from the previous call to read on. Implies include_full_text.',
       ),
-    max_chars: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_WINDOW_CHARS)
-      .optional()
-      .describe(
-        'Most body characters to return in this window (1–200,000, default 64,000). Implies include_full_text.',
-      ),
+    max_chars: maxCharsInput(
+      MAX_CHARS_LIMIT,
+      (bounds) =>
+        `Most body characters to return in this window (${bounds}). Implies include_full_text.`,
+    ),
   }),
   output: z.object({
     documentNumber: z.string().describe('Federal Register document number.'),
@@ -74,6 +77,13 @@ export const getDocumentTool = tool('regulations_get_document', {
         'Last Federal Register page the document is printed on; null when unrecorded. A CFR source-note cite to any page from startPage to endPage points at this document.',
       ),
     effectiveOn: z.string().nullable().describe('Effective date (ISO 8601), or null.'),
+    significant: z
+      .boolean()
+      .nullable()
+      .describe(
+        'Whether the Federal Register flags the document significant under EO 12866; null when no determination is recorded (every presidential document, most notices).',
+      ),
+    presidential: presidentialSchema(),
     commentsCloseOn: z
       .string()
       .nullable()
@@ -179,7 +189,9 @@ export const getDocumentTool = tool('regulations_get_document', {
     notice: z
       .string()
       .optional()
-      .describe('Guidance when the requested offset is at or past the end of the body.'),
+      .describe(
+        'Guidance when max_chars was above its ceiling, or when the requested offset is at or past the end of the body.',
+      ),
   },
   enrichmentTrailer: {
     notice: { render: (value) => (value === undefined ? '' : `> ${escapeMarkdownInline(value)}`) },
@@ -217,9 +229,10 @@ export const getDocumentTool = tool('regulations_get_document', {
         'offset and max_chars select a window of the body text, which include_full_text: false turns off.',
       );
     }
+    const size = clampSize(input.max_chars, MAX_CHARS_LIMIT, 'regulations_get_document', ctx);
     const window =
       (input.include_full_text ?? windowed)
-        ? { offset: input.offset ?? 0, maxChars: input.max_chars ?? DEFAULT_WINDOW_CHARS }
+        ? { offset: input.offset ?? 0, maxChars: size.value }
         : undefined;
 
     const detail = await getFederalRegisterService().getDocument(
@@ -230,7 +243,10 @@ export const getDocumentTool = tool('regulations_get_document', {
     // An empty window over a non-empty body means the offset ran past the end.
     if (detail.fullText === '' && detail.fullTextLength) {
       ctx.enrich.notice(
-        `offset ${detail.fullTextOffset} is past the end of the body, which is ${detail.fullTextLength.toLocaleString('en-US')} characters long. Pass an offset below that, or omit offset to start from the beginning.`,
+        joinNotices(
+          size.notice,
+          `offset ${detail.fullTextOffset} is past the end of the body, which is ${detail.fullTextLength.toLocaleString('en-US')} characters long. Pass an offset below that, or omit offset to start from the beginning.`,
+        ),
       );
     }
     return detail;
@@ -244,6 +260,13 @@ export const getDocumentTool = tool('regulations_get_document', {
     );
     const printed = formatPrintedPages(result);
     if (printed) lines.push(`**Citation:** ${escapeMarkdownInline(printed)}`);
+    if (result.presidential) {
+      lines.push(
+        `**Presidential document:** ${escapeMarkdownInline(formatPresidential(result.presidential))}`,
+      );
+    }
+    const significance = formatSignificant(result.significant);
+    if (significance) lines.push(`**Significance:** ${significance}`);
     if (result.action) lines.push(`**Action:** ${escapeMarkdownInline(result.action)}`);
     if (result.dates) lines.push(`**Dates:** ${escapeMarkdownInline(result.dates)}`);
     if (result.effectiveOn) lines.push(`**Effective:** ${result.effectiveOn}`);

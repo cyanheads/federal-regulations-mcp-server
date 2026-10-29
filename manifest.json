@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "federal-regulations-mcp-server",
   "version": "0.6.0",
-  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
+  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules, notices, and presidential documents), the eCFR (codified, point-in-time CFR full text and amendment history, locally mirrored), and Regulations.gov (rulemaking dockets, document files, and public comments) via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",
     "email": "casey@caseyjhand.com",
@@ -24,7 +24,8 @@
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_AUTH_MODE": "none",
         "NODE_ENV": "production",
-        "REGULATIONS_GOV_API_KEY": "${user_config.regulations_gov_api_key}"
+        "REGULATIONS_GOV_API_KEY": "${user_config.regulations_gov_api_key}",
+        "REGULATIONS_CLAMP_LIMITS": "${user_config.clamp_limits}"
       }
     }
   },
@@ -41,6 +42,13 @@
       "sensitive": true,
       "required": false,
       "default": ""
+    },
+    "clamp_limits": {
+      "type": "boolean",
+      "title": "Clamp page sizes",
+      "description": "Serve a per_page or max_chars above its ceiling at the ceiling, with a notice. Turn off to reject a larger value instead.",
+      "required": false,
+      "default": true
     }
   }
 }

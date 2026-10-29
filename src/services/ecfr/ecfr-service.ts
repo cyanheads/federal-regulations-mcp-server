@@ -28,7 +28,11 @@ import { fetchWithTimeout, withExtra } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { decodeCharacterReferences } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
-import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
+import {
+  rethrowTransportFailure,
+  runUpstream,
+  type UpstreamSpec,
+} from '@/services/upstream-failure.js';
 import { appendixCite, sectionCite } from './cite.js';
 import type {
   EcfrAppendixResult,
@@ -37,10 +41,15 @@ import type {
   EcfrSectionResult,
   EcfrStructureNode,
   EcfrTitle,
+  EcfrVersion,
+  EcfrVersionPage,
+  EcfrVersionScope,
   RawEcfrSearchResponse,
   RawEcfrSearchResult,
   RawEcfrStructureNode,
   RawEcfrTitle,
+  RawEcfrVersion,
+  RawEcfrVersionsResponse,
 } from './types.js';
 import { parseCfrXml } from './xml.js';
 
@@ -49,6 +58,17 @@ const XML_TIMEOUT_MS = 60_000;
 /** Bulk whole-title XML can be ~150 MB (Title 40); allow up to 10 minutes. */
 const FULL_TITLE_TIMEOUT_MS = 600_000;
 const BASE_DELAY_MS = 400;
+/**
+ * The ancestry read's one attempt. It runs once the text is in hand, so all of
+ * its cost lands on an answer that is already final. Sampled healthy calls
+ * (titles 12–40, three dates, section, part, and appendix lookups) answered in
+ * 0.23–0.42 s; 8 s clears that tail and the versioner's ~5 s slow band, and caps
+ * what a hung lookup adds at 8 s rather than the request's whole budget.
+ */
+const ANCESTRY_TIMEOUT_MS = 8_000;
+/** What a read says when its path holds only the levels the cite itself names. */
+const CITED_LEVELS_NOTICE =
+  "hierarchyPath lists only the cited levels (title, part, section or appendix): eCFR's hierarchy lookup failed, so the chapter, subchapter, and subpart are missing. Retry the call for the full path.";
 /** The titles document advances at most once a day; re-read it at most this often. */
 const TITLES_TTL_MS = 15 * 60_000;
 
@@ -86,6 +106,12 @@ const SEARCH_CHUNK = 1_000;
 
 /** What a whole-part body puts between one section and the next. */
 const PART_BODY_SEPARATOR = '\n\n';
+
+/**
+ * Rows per page of the versioner's versions listing. Fixed upstream: `per_page`
+ * answers 400 "unpermitted parameter", so only `page` selects a window.
+ */
+export const ECFR_VERSIONS_PAGE_ROWS = 1_000;
 
 /**
  * The message for a date outside the versioner's window for a title. Shared by
@@ -128,6 +154,20 @@ interface TitlesDocument {
   /** `meta.date` — the day eCFR serves as "now"; null when the document omits it. */
   indexDate: string | null;
   titles: EcfrTitle[];
+}
+
+/** A location a read names: a part, a section in it, or an appendix. */
+interface CfrLocation {
+  appendix?: string | undefined;
+  part?: string | undefined;
+  section?: string | undefined;
+}
+
+/** A read's hierarchy path, and what to tell the caller when ancestry could not supply it. */
+export interface HierarchyPath {
+  /** Set when `path` holds only the levels the cite names. */
+  notice?: string;
+  path: string;
 }
 
 /** Node types that carry a citable identifier into get_cfr_section. */
@@ -359,6 +399,83 @@ export class EcfrService {
   }
 
   /**
+   * List the versions of a title's sections and appendices
+   * (`/versioner/v1/versions/title-{n}.json`), rows `start` through
+   * `start + count - 1` of the filtered set, in eCFR's own order: document order
+   * by identifier, oldest first within each.
+   *
+   * eCFR pages the listing at a fixed {@link ECFR_VERSIONS_PAGE_ROWS} rows, so
+   * the window is read from the upstream page holding its first row and, when it
+   * straddles a boundary, the next one — sequentially, inside the request's
+   * shared budget. A short upstream page ends the list, so the second read is
+   * skipped when there is nothing past it. The count and latest amendment date
+   * describe the whole filtered set whatever page answered.
+   *
+   * `part` and `section` match exactly (case aside); a section written with a
+   * marker eCFR cannot parse (`§ 141.61`) answers 404, which reads the same as
+   * one that matches nothing: an empty set. `changedSince` filters on the issue
+   * that published each version (`issue_date[gte]`).
+   */
+  async listVersions(
+    title: number,
+    scope: EcfrVersionScope,
+    start: number,
+    count: number,
+    ctx: Context,
+  ): Promise<EcfrVersionPage> {
+    const firstPage = Math.floor(start / ECFR_VERSIONS_PAGE_ROWS) + 1;
+    const lastPage = Math.floor((start + count - 1) / ECFR_VERSIONS_PAGE_ROWS) + 1;
+    const rows: RawEcfrVersion[] = [];
+    let meta: RawEcfrVersionsResponse['meta'];
+    for (let page = firstPage; page <= lastPage; page++) {
+      const raw = await this.versionsPage(title, scope, page, ctx);
+      meta ??= raw.meta;
+      const pageRows = raw.content_versions ?? [];
+      rows.push(...pageRows);
+      if (pageRows.length < ECFR_VERSIONS_PAGE_ROWS) break;
+    }
+
+    const totalCount = Number(meta?.result_count);
+    if (!Number.isInteger(totalCount)) {
+      throw serviceUnavailable('eCFR returned a versions listing with no result count.', {
+        reason: 'upstream_unavailable',
+      });
+    }
+    const offset = start - (firstPage - 1) * ECFR_VERSIONS_PAGE_ROWS;
+    return {
+      versions: rows.slice(offset, offset + count).map((row) => normalizeVersion(row, title)),
+      totalCount,
+      latestAmendmentDate: meta?.latest_amendment_date ?? null,
+    };
+  }
+
+  /** Read one {@link ECFR_VERSIONS_PAGE_ROWS}-row page of the raw versions listing. */
+  private async versionsPage(
+    title: number,
+    scope: EcfrVersionScope,
+    page: number,
+    ctx: Context,
+  ): Promise<RawEcfrVersionsResponse> {
+    const search = new URLSearchParams();
+    if (scope.part) search.set('part', scope.part);
+    if (scope.section) search.set('section', scope.section);
+    if (scope.changedSince) search.set('issue_date[gte]', scope.changedSince);
+    search.set('page', String(page));
+    const url = `${this.baseUrl}/versioner/v1/versions/title-${title}.json?${search.toString()}`;
+    try {
+      return await this.fetchJson<RawEcfrVersionsResponse>(
+        url,
+        ctx,
+        'EcfrService.listVersions',
+        [404],
+      );
+    } catch (err) {
+      if (!(err instanceof McpError) || err.code !== JsonRpcErrorCode.NotFound) throw err;
+      return { content_versions: [], meta: { result_count: '0' } };
+    }
+  }
+
+  /**
    * Fetch codified text for a section (or whole part) from the versioner
    * `/full/{date}/title-{n}.xml` endpoint, parsed into plain text.
    *
@@ -536,39 +653,44 @@ export class EcfrService {
    * names the deepest level being read — a section, an appendix, or neither for
    * a whole part. The endpoint accepts all three filters, so an appendix path
    * runs down to the appendix itself rather than stopping at its part.
+   *
+   * Every caller already holds the text it read, so the path decorates a final
+   * answer: one attempt, under {@link ANCESTRY_TIMEOUT_MS} or what the request's
+   * budget has left if that is less. When it yields no path — any failure, a 404
+   * included, since the read just proved the location exists — the path falls
+   * back to the levels the cite names, with a notice that the rest are missing.
+   * A caller's cancellation is the one failure that propagates. Only the request
+   * is guarded: labelling what it returned is this server's own code, and a
+   * defect there throws.
    */
   async hierarchyPath(
     title: number,
-    target: {
-      appendix?: string | undefined;
-      part?: string | undefined;
-      section?: string | undefined;
-    },
+    target: CfrLocation,
     date: string,
     ctx: Context,
-  ): Promise<string> {
+  ): Promise<HierarchyPath> {
     const { appendix, part, section } = target;
     const search = new URLSearchParams();
     if (part) search.set('part', part);
     if (section) search.set('section', section);
     if (appendix) search.set('appendix', appendix);
     const url = `${this.baseUrl}/versioner/v1/ancestry/${date}/title-${title}.json?${search.toString()}`;
+    let ancestors: RawEcfrStructureNode[] = [];
     try {
       const raw = await this.fetchJson<{ ancestors?: RawEcfrStructureNode[] }>(
         url,
         ctx,
         'EcfrService.hierarchyPath',
         [404],
+        { attemptMs: ANCESTRY_TIMEOUT_MS, maxRetries: 0 },
       );
-      const ancestors = raw.ancestors ?? [];
-      const parts = ancestors
-        .map((a) => labelForAncestor(a))
-        .filter((s): s is string => s !== null);
-      return parts.length > 0 ? parts.join(' › ') : `Title ${title}`;
-    } catch {
-      // Hierarchy is a nicety; never fail the whole read because ancestry 404s.
-      return `Title ${title}`;
+      ancestors = raw.ancestors ?? [];
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
     }
+    const labels = ancestors.map(labelForAncestor).filter((s): s is string => s !== null);
+    if (labels.length > 0) return { path: labels.join(' › ') };
+    return { path: citedLevels(title, target), notice: CITED_LEVELS_NOTICE };
   }
 
   /**
@@ -722,12 +844,13 @@ export class EcfrService {
     ctx: Context,
     operation: string,
     expectedStatuses?: number[],
+    leg: Pick<UpstreamSpec, 'attemptMs' | 'maxRetries'> = { attemptMs: TIMEOUT_MS },
   ): Promise<T> {
     const reqCtx = withExtra(ctx, { operation });
     return runUpstream(
       ctx,
       requestBudget(ctx),
-      { operation, context: reqCtx, attemptMs: TIMEOUT_MS, baseDelayMs: BASE_DELAY_MS },
+      { operation, context: reqCtx, baseDelayMs: BASE_DELAY_MS, ...leg },
       async (deadlineMs, signal) => {
         const response = await fetchWithTimeout(url, deadlineMs, reqCtx, {
           signal,
@@ -905,6 +1028,13 @@ function findPartNode(root: RawEcfrStructureNode, part: string): RawEcfrStructur
   return null;
 }
 
+/** The path a cite names on its own: title, part, then the section or appendix read. */
+function citedLevels(title: number, { appendix, part, section }: CfrLocation): string {
+  return [`Title ${title}`, part && `Part ${part}`, section && `§ ${section}`, appendix]
+    .filter((level): level is string => Boolean(level))
+    .join(' › ');
+}
+
 function labelForAncestor(node: RawEcfrStructureNode): string | null {
   if (!node.type || !node.identifier) return null;
   const typeLabel = node.type.charAt(0).toUpperCase() + node.type.slice(1);
@@ -1014,6 +1144,29 @@ function normalizeSearchHit(r: RawEcfrSearchResult): EcfrSearchHit {
 /** Today's date as YYYY-MM-DD (UTC). */
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * A versions row as a caller reads it. The cite is the one a structure node of
+ * the same identifier carries, so it round-trips into the read tool; eCFR's
+ * `name` pads the section number with runs of spaces, which plain text collapses.
+ */
+function normalizeVersion(row: RawEcfrVersion, title: number): EcfrVersion {
+  return {
+    type: row.type,
+    identifier: row.identifier,
+    heading: plainText(row.name),
+    part: row.part,
+    subpart: row.subpart ?? null,
+    cfrCite:
+      row.type === 'appendix'
+        ? appendixCite(row.identifier, title)
+        : sectionCite(title, row.part, row.identifier),
+    date: row.date,
+    issueDate: row.issue_date,
+    substantive: row.substantive,
+    removed: row.removed,
+  };
 }
 
 // --- Init/accessor pattern ---

@@ -196,6 +196,61 @@ describe('regulations_search_rules citation resolution', () => {
     expect(sent.get('conditions[cfr][part]')).toBe('141');
   });
 
+  it('ANDs the presidential, significance, and effective-date filters into the day request', async () => {
+    // 90 FR 9065, February 6, 2025: EO 14192 (2025-02345) runs 9065–9067.
+    const eo = {
+      ...doc('2025-02345', '2025-02-06', 9065, 9067),
+      type: 'Presidential Document',
+      subtype: 'Executive Order',
+      presidential_document_number: '14192',
+      signing_date: '2025-01-31',
+      president: { identifier: 'donald-trump', name: 'Donald Trump' },
+      significant: null,
+    };
+    serveDays({ '2025-02-06': [eo] });
+    const result = await runToolContract(searchRulesTool, {
+      citation: '90 FR 9065',
+      citation_date: '2025-02-06',
+      executive_order_number: 14192,
+      signed_after: '2025-01-01',
+    });
+    const sent = new URL(http.calls[0]!.request.url).searchParams;
+    expect(sent.get('conditions[publication_date][is]')).toBe('2025-02-06');
+    expect(sent.getAll('conditions[executive_order_numbers][]')).toEqual(['14192']);
+    expect(sent.get('conditions[signing_date][gte]')).toBe('2025-01-01');
+    expect((result.structuredContent as Structured).results).toMatchObject([
+      { documentNumber: '2025-02345', presidential: { type: 'Executive Order', number: '14192' } },
+    ]);
+
+    http.reset();
+    serveDays({ '2024-06-11': june11 });
+    const rule = await runToolContract(searchRulesTool, {
+      citation: '89 FR 49102',
+      citation_date: '2024-06-11',
+      significant: true,
+      effective_after: '2024-07-01',
+      effective_before: '2024-12-31',
+    });
+    // The signing and effective windows are other axes than the cite's day.
+    expect(rule.isError).toBeFalsy();
+    const ruleSent = new URL(http.calls[0]!.request.url).searchParams;
+    expect(ruleSent.get('conditions[significant]')).toBe('1');
+    expect(ruleSent.get('conditions[effective_date][gte]')).toBe('2024-07-01');
+    expect(ruleSent.get('conditions[effective_date][lte]')).toBe('2024-12-31');
+  });
+
+  it('names the new filters when they narrowed the day to nothing', async () => {
+    serveDays({});
+    const result = await runToolContract(searchRulesTool, {
+      citation: '90 FR 9065',
+      citation_date: '2025-02-06',
+      president: 'joe-biden',
+    });
+    expect((result.structuredContent as Structured).notice).toBe(
+      'No Federal Register documents were published on 2025-02-06 matching president joe-biden. Check citation_date against the date the source note prints beside 90 FR 9065.',
+    );
+  });
+
   describe('when nothing is printed on the page', () => {
     it("gives the day's page span", async () => {
       serveDays({ '2024-06-11': june11 });

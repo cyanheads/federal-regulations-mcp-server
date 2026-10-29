@@ -6,7 +6,9 @@
  * handler counts the supplied targets before doing any work, so neither zero nor
  * two can resolve by branch order. A document named by document ID or FR number
  * resolves to its object ID first, and one that resolves to nothing is not_found
- * rather than an empty list. List mode narrows by comment text and posted date,
+ * rather than an empty list; a docket that lists no comments is looked up itself,
+ * so one Regulations.gov does not hold is not_found too. Docket, document, and
+ * comment IDs are sent uppercase. List mode narrows by comment text and posted date,
  * validated before any request. Flags when a comment's substance lives in an
  * attachment rather than inline text, surfacing the attachment download URLs.
  * @module mcp-server/tools/definitions/find-comments.tool
@@ -14,16 +16,17 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
+import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
 import type { ResolvedDocument } from '@/services/regulations-gov/types.js';
 import { isoDate } from './date-input.js';
 import { frDocumentNumber, normalizeFrDocumentNumber } from './document-number.js';
-import { escapePipes, formatCount } from './format-utils.js';
+import { escapePipes, formatAttachment, formatCount } from './format-utils.js';
 import { pageSpan, REGULATIONS_GOV_PAGE_CEILING, raisePerPageAdvice } from './paging.js';
+import { clampSize, joinNotices, perPageInput, type SizeLimit } from './size-limit.js';
 
-/** The largest per_page this tool takes. */
-const MAX_PER_PAGE = 250;
+/** per_page bounds; Regulations.gov serves pages of 5 to 250. */
+const PER_PAGE: SizeLimit = { name: 'per_page', min: 5, max: 250, default: 25 };
 
 /**
  * The four mutually exclusive targeting parameters, in the order the error
@@ -56,6 +59,23 @@ const OBJECT_ID = /^[0-9a-f]{16}$/i;
  * answers not_found without a request.
  */
 const REGULATIONS_GOV_ID = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A target ID in the one case Regulations.gov serves it. Docket, document, and
+ * comment IDs carry no lowercase letter, and the single-record endpoints answer
+ * one with HTTP 400 `Invalid ID`, so they go up uppercased; an object ID is the
+ * reverse, matched by `filter[commentOnId]` only in lowercase. An FR number is
+ * not a Regulations.gov ID and keeps its own normalization.
+ */
+function canonicalTarget(param: TargetParam, value: string): string {
+  if (param === 'fr_document_number') return value;
+  if (param === 'document_object_id' && OBJECT_ID.test(value)) return value.toLowerCase();
+  return value.toUpperCase();
+}
+
+/** The recovery for a docket_id Regulations.gov holds no docket for. */
+const UNKNOWN_DOCKET_RECOVERY =
+  "Pass the Regulations.gov docket ID — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document — not an entry of the printed docketIds, which are often the agency's own numbers.";
 
 /** What each ID-valued target must be, for the not_found a malformed one answers. */
 const NOT_AN_ID: Record<Exclude<TargetParam, 'fr_document_number'>, string> = {
@@ -136,16 +156,11 @@ export const findCommentsTool = tool('regulations_find_comments', {
       .describe(
         'List mode: latest posted date, inclusive, ISO 8601 (YYYY-MM-DD), a real calendar day. The same date as posted_after selects that one day.',
       ),
-    per_page: z
-      .number()
-      .int()
-      .min(5)
-      .max(MAX_PER_PAGE)
-      .optional()
-      .default(25)
-      .describe(
-        'Comments per page (5–250, default 25). Regulations.gov requires a minimum page size of 5.',
-      ),
+    per_page: perPageInput(
+      PER_PAGE,
+      (bounds) =>
+        `Comments per page (${bounds}). Regulations.gov requires a minimum page size of 5.`,
+    ),
     page: z
       .number()
       .int()
@@ -259,13 +274,21 @@ export const findCommentsTool = tool('regulations_find_comments', {
                   })
                   .describe('One downloadable file format.'),
               )
-              .describe('Available file formats for the attachment.'),
+              .describe(
+                'Available file formats for the attachment; empty when the file is withheld.',
+              ),
+            restrictReasonType: z
+              .string()
+              .nullable()
+              .describe(
+                'Why the file is withheld (e.g. "Copyrighted"), or null when Regulations.gov gives no reason.',
+              ),
           })
           .describe('One attachment with its available formats.'),
       )
       .optional()
       .describe(
-        'Attachment files — substance lives here when attachmentOnly is true (detail mode).',
+        'Attachments in upload order, withheld ones included — substance lives here when attachmentOnly is true (detail mode).',
       ),
     withdrawn: z
       .boolean()
@@ -308,7 +331,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
       .string()
       .optional()
       .describe(
-        'Guidance — no comments matched, the page is past the end, comments lie beyond the last page, or the substance of a comment is in its attachments.',
+        'Guidance — per_page above its ceiling, no comments matched, the page is past the end, comments lie beyond the last page, or the substance of a comment is in its attachments.',
       ),
   },
   enrichmentTrailer: {
@@ -355,7 +378,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The target docket, document, or comment does not exist on Regulations.gov, or no Regulations.gov document carries the FR number.',
+      when: 'The target docket, document, or comment does not exist on Regulations.gov (a docket_id that lists no comments is looked up to tell), or no Regulations.gov document carries the FR number.',
       recovery:
         'Verify the ID or number — a document ID looks like "EPA-HQ-OW-2022-0114-0027", an object ID like "0900006485883ec6", and a docket ID ("EPA-HQ-OW-2022-0114") goes in docket_id. An FR document that regulations_get_document shows with no regulationsGovDocumentId has no Regulations.gov record; when it names a docketId, list that docket with docket_id instead.',
     },
@@ -402,10 +425,11 @@ export const findCommentsTool = tool('regulations_find_comments', {
         `regulations_find_comments takes exactly one targeting parameter; ${given.length} were given (${given.map(([name]) => name).join(', ')}).`,
       );
     }
-    const [targetParam, targetValue] = targeted;
-    if (targetParam !== 'fr_document_number' && !REGULATIONS_GOV_ID.test(targetValue)) {
-      throw ctx.fail('not_found', `"${targetValue}" is not ${NOT_AN_ID[targetParam]}.`);
+    const [targetParam, givenValue] = targeted;
+    if (targetParam !== 'fr_document_number' && !REGULATIONS_GOV_ID.test(givenValue)) {
+      throw ctx.fail('not_found', `"${givenValue}" is not ${NOT_AN_ID[targetParam]}.`);
     }
+    const targetValue = canonicalTarget(targetParam, givenValue);
 
     /**
      * The list filters, validated before any request: a filter on detail mode
@@ -440,8 +464,9 @@ export const findCommentsTool = tool('regulations_find_comments', {
     if (targetParam === 'comment_id') {
       const detail = await service.getComment(targetValue, ctx);
       if (detail.attachmentOnly) {
+        const withheld = detail.attachments.filter((a) => a.formats.length === 0).length;
         ctx.enrich.notice(
-          `The substance of this comment is in ${detail.attachments.length} attachment(s) — see the attachment download URLs.`,
+          `The substance of this comment is in ${detail.attachments.length} attachment(s) — see the attachment download URLs.${withheld ? ` ${withheld} of them have no downloadable file (see restrictReasonType).` : ''}`,
         );
       }
       return { mode: 'detail' as const, ...detail };
@@ -456,7 +481,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
     let base: string;
     if (targetParam === 'document_object_id') {
       if (OBJECT_ID.test(targetValue)) {
-        commentOnId = targetValue.toLowerCase();
+        commentOnId = targetValue;
         base = `document ${commentOnId}`;
       } else {
         resolved = await service.resolveDocument(targetValue, ctx);
@@ -482,19 +507,32 @@ export const findCommentsTool = tool('regulations_find_comments', {
     const narrowing = filterPhrase(filters);
     const target = narrowing ? `${base} ${narrowing}` : base;
 
+    const size = clampSize(input.per_page, PER_PAGE, 'regulations_find_comments', ctx);
+    const perPage = size.value;
     const result = await service.listComments(
       {
         filter: commentOnId ? { commentOnId } : { docketId: targetValue },
         ...filters,
-        perPage: input.per_page,
+        perPage,
         page: input.page,
       },
       ctx,
     );
     const total = result.totalCount;
+    if (
+      total === 0 &&
+      targetParam === 'docket_id' &&
+      !(await service.docketExists(targetValue, ctx))
+    ) {
+      throw ctx.fail(
+        'not_found',
+        `Regulations.gov has no docket ${targetValue}, so there are no comments to list.`,
+        { docketId: targetValue, recovery: { hint: UNKNOWN_DOCKET_RECOVERY } },
+      );
+    }
     const span = pageSpan({
       total,
-      perPage: input.per_page,
+      perPage,
       page: input.page,
       ceiling: REGULATIONS_GOV_PAGE_CEILING,
     });
@@ -505,29 +543,38 @@ export const findCommentsTool = tool('regulations_find_comments', {
     });
 
     if (total === 0) {
+      const loosen =
+        activeFilters.length > 0
+          ? `Loosen or drop ${activeFilters.join(' / ')} to see comments outside the filter.`
+          : undefined;
+      // The docket was confirmed to exist above; under a filter, loosening is the whole advice.
       const widen = resolved?.docketId
         ? `A rulemaking's comments are often filed on another of its documents, usually the proposed rule — widen to the whole docket with docket_id "${resolved.docketId}".`
         : targetParam === 'docket_id'
-          ? "A docket number the Federal Register prints (a row's docketIds) is often not a Regulations.gov docket ID — pass regulationsGovDocketId from a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. Otherwise check that the comment period has opened."
+          ? loosen
+            ? undefined
+            : 'The docket exists, but no comments have been posted to it — check that its comment period has opened.'
           : "Comments often attach to the docket's primary document — widen to the docket this object ID was listed in with docket_id, or check the comment period has opened.";
-      const loosen =
-        activeFilters.length > 0
-          ? ` Loosen or drop ${activeFilters.join(' / ')} to see comments outside the filter.`
-          : '';
-      ctx.enrich.notice(`No comments found for ${target}.${loosen} ${widen}`);
+      ctx.enrich.notice(
+        joinNotices(size.notice, `No comments found for ${target}.`, loosen, widen),
+      );
     } else if (span.pastEnd) {
       ctx.enrich.notice(
-        `Page ${input.page} is past the end: ${formatCount(total)} comments matched, so the last page is ${span.totalPages} at per_page ${input.per_page}.`,
+        joinNotices(
+          size.notice,
+          `Page ${input.page} is past the end: ${formatCount(total)} comments matched, so the last page is ${span.totalPages} at per_page ${perPage}.`,
+        ),
       );
     } else if (span.truncated) {
       const raise = raisePerPageAdvice({
         total,
-        perPage: input.per_page,
-        maxPerPage: MAX_PER_PAGE,
+        perPage,
+        maxPerPage: PER_PAGE.max,
         ceiling: REGULATIONS_GOV_PAGE_CEILING,
       });
       const guidance = [
-        `Only ${formatCount(span.reachable)} of ${formatCount(total)} comments are reachable: Regulations.gov serves ${REGULATIONS_GOV_PAGE_CEILING} pages of ${input.per_page}.`,
+        size.notice,
+        `Only ${formatCount(span.reachable)} of ${formatCount(total)} comments are reachable: Regulations.gov serves ${REGULATIONS_GOV_PAGE_CEILING} pages of ${perPage}.`,
         raise,
         `${raise ? 'Or take' : 'Take'} the set one posted_after / posted_before window at a time, or narrow it with search_term, to bring the rest within reach.`,
       ]
@@ -573,15 +620,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
       );
       if (attachments.length) {
         lines.push('\n## Attachments');
-        for (const a of attachments) {
-          const fmts = a.formats
-            .map(
-              (f) =>
-                `${escapeMarkdownInline(f.format)}: ${markdownLink(f.fileUrl, f.fileUrl)} (${f.size != null ? `${f.size} bytes` : 'size unknown'})`,
-            )
-            .join(', ');
-          lines.push(`- **${escapeMarkdownInline(a.title)}**: ${fmts}`);
-        }
+        for (const a of attachments) lines.push(formatAttachment(a));
       }
       lines.push('');
     }

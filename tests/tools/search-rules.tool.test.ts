@@ -38,6 +38,8 @@ const sampleRow = {
   commentsCloseOn: '2025-08-01',
   commentPeriodOpen: false,
   effectiveOn: null,
+  significant: null,
+  presidential: null,
   htmlUrl: 'https://www.federalregister.gov/d/2025-14555',
 };
 
@@ -287,7 +289,7 @@ describe('searchRulesTool', () => {
       });
       // Order: reachable count, then per_page, then the narrowing filters.
       expect(structured.notice).toBe(
-        '4,429 documents matched, but the Federal Register serves 50 pages, so only the first 1,000 are reachable at per_page 20. Raise per_page to 89 or more (max 100) to reach all 4,429. Or narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin) to bring the rest within reach.',
+        '4,429 documents matched, but the Federal Register serves 50 pages, so only the first 1,000 are reachable at per_page 20. Raise per_page to 89 or more (max 100) to reach all 4,429. Or narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin, significant, effective_after / effective_before; for presidential documents, president, presidential_document_type, signed_after / signed_before) to bring the rest within reach.',
       );
       const text = contentText(result);
       expect(text).toContain('**Total pages:** 50');
@@ -339,7 +341,7 @@ describe('searchRulesTool', () => {
       expect(structured).toMatchObject({ truncated: true, totalPages: 50, cap: 5000 });
       expect(structured).not.toHaveProperty('nextPage');
       expect(structured.notice).toBe(
-        'At least 10,000 documents matched (the Federal Register stops counting at 10,000), but it serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin) to bring the rest within reach.',
+        'At least 10,000 documents matched (the Federal Register stops counting at 10,000), but it serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin, significant, effective_after / effective_before; for presidential documents, president, presidential_document_type, signed_after / signed_before) to bring the rest within reach.',
       );
       // Live: an unfiltered search reports count 10,000. A capped count is a
       // floor, so no surface may state it as the number of matches.
@@ -365,6 +367,27 @@ describe('searchRulesTool', () => {
       const notice = String((result.structuredContent as Record<string, unknown>).notice);
       expect(notice).toContain('Raise per_page (max 100) to reach 5,000. Or narrow');
       expect(notice).not.toMatch(/reach all/);
+    });
+
+    it('serves per_page past 100 at 100, and pages and truncates at the size it served', async () => {
+      // 5,050 matches fit in 50 pages of 101 but not of 100.
+      searchFn.mockResolvedValue({
+        totalCount: 5_050,
+        results: rows(100),
+      } satisfies FrSearchResponse);
+      const result = await runToolContract(searchRulesTool, {
+        query: 'ozone',
+        per_page: 101,
+        page: 2,
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      expect(searchFn.mock.calls[0]![0]).toMatchObject({ perPage: 100, page: 2 });
+      expect(structured).toMatchObject({ totalPages: 50, nextPage: 3, truncated: true, cap: 5000 });
+      expect(structured.notice).toBe(
+        'Requested per_page 101; applied per_page 100, the largest this tool serves. 5,050 documents matched, but the Federal Register serves 50 pages, so only the first 5,000 are reachable at per_page 100. Narrow with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin, significant, effective_after / effective_before; for presidential documents, president, presidential_document_type, signed_after / signed_before) to bring the rest within reach.',
+      );
+      expect(contentText(result)).toContain('Requested per_page 101; applied per_page 100');
     });
   });
 
@@ -501,6 +524,246 @@ describe('searchRulesTool', () => {
       expect(shape.docket_id.description).toMatch(/docketIds/);
       expect(shape.docket_id.description).toMatch(/complete/);
       expect(shape.rin.description).toMatch(/complete/);
+    });
+  });
+
+  describe('presidential, significance, and effective-date filters', () => {
+    beforeEach(() =>
+      searchFn.mockResolvedValue({ totalCount: 0, results: [] } satisfies FrSearchResponse),
+    );
+
+    async function sent(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+      await runToolContract(searchRulesTool, args);
+      return searchFn.mock.calls.at(-1)![0] as Record<string, unknown>;
+    }
+
+    function failure(result: Awaited<ReturnType<typeof runToolContract>>) {
+      const error = (
+        result.structuredContent as {
+          error?: { code: number; message: string; data?: { reason?: string } };
+        }
+      ).error;
+      const text = (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('');
+      return { error, text };
+    }
+
+    it('passes each filter through with the others', async () => {
+      expect(
+        await sent({
+          query: 'deregulation',
+          type: ['PRESDOCU'],
+          executive_order_number: 14192,
+          presidential_document_type: ['executive_order', 'proclamation'],
+          president: 'donald-trump',
+          signed_after: '2025-01-20',
+          signed_before: '2025-01-31',
+          effective_after: '2025-02-01',
+          effective_before: '2025-12-31',
+        }),
+      ).toMatchObject({
+        query: 'deregulation',
+        types: ['PRESDOCU'],
+        executiveOrderNumber: 14192,
+        presidentialDocumentTypes: ['executive_order', 'proclamation'],
+        president: 'donald-trump',
+        signedAfter: '2025-01-20',
+        signedBefore: '2025-01-31',
+        effectiveAfter: '2025-02-01',
+        effectiveBefore: '2025-12-31',
+      });
+      expect((await sent({ type: ['RULE'], significant: false })).significant).toBe(false);
+    });
+
+    it('treats empty form-client values as unset', async () => {
+      const params = await sent({
+        presidential_document_type: [],
+        president: '  ',
+        signed_after: '',
+        signed_before: '',
+        effective_after: '',
+        effective_before: '',
+      });
+      for (const key of [
+        'executiveOrderNumber',
+        'presidentialDocumentTypes',
+        'president',
+        'signedAfter',
+        'signedBefore',
+        'significant',
+        'effectiveAfter',
+        'effectiveBefore',
+      ]) {
+        expect(params[key]).toBeUndefined();
+      }
+    });
+
+    it('takes executive_order_number as a positive integer only', () => {
+      for (const value of [0, -1, 1.5, '14192']) {
+        expect(searchRulesTool.input.safeParse({ executive_order_number: value }).success).toBe(
+          false,
+        );
+      }
+      expect(
+        searchRulesTool.input.parse({ executive_order_number: 1 }).executive_order_number,
+      ).toBe(1);
+    });
+
+    it('takes only the seven Federal Register presidential document types', () => {
+      const all = [
+        'determination',
+        'executive_order',
+        'memorandum',
+        'notice',
+        'other',
+        'presidential_order',
+        'proclamation',
+      ];
+      expect(searchRulesTool.input.safeParse({ presidential_document_type: all }).success).toBe(
+        true,
+      );
+      for (const value of ['executive-order', 'Executive_Order', 'NOTICE', 'executive order']) {
+        expect(
+          searchRulesTool.input.safeParse({ presidential_document_type: [value] }).success,
+        ).toBe(false);
+      }
+    });
+
+    it.each(['signed_after', 'signed_before', 'effective_after', 'effective_before'])(
+      '%s takes only a real calendar day or the empty form-client value',
+      (field) => {
+        for (const value of ['2025-02-30', '2025-13-01', '2025-1-1']) {
+          expect(searchRulesTool.input.safeParse({ [field]: value }).success).toBe(false);
+        }
+        for (const value of ['2024-02-29', '']) {
+          expect(searchRulesTool.input.safeParse({ [field]: value }).success).toBe(true);
+        }
+      },
+    );
+
+    it.each([
+      ['executive_order_number with type RULE', { type: ['RULE'], executive_order_number: 14192 }],
+      ['president with type RULE/NOTICE', { type: ['RULE', 'NOTICE'], president: 'donald-trump' }],
+      [
+        'presidential_document_type with type PRORULE',
+        { type: ['PRORULE'], presidential_document_type: ['proclamation'] },
+      ],
+      ['signed_after with type NOTICE', { type: ['NOTICE'], signed_after: '2025-01-20' }],
+      ['signed_before with type RULE', { type: ['RULE'], signed_before: '2025-01-31' }],
+      ['significant with type PRESDOCU', { type: ['PRESDOCU'], significant: true }],
+      ['significant false with type PRESDOCU', { type: ['PRESDOCU'], significant: false }],
+      ['significant with president', { significant: true, president: 'joe-biden' }],
+    ])('type_conflict: %s, before any request', async (_label, args: Record<string, unknown>) => {
+      const { error, text } = failure(await runToolContract(searchRulesTool, args));
+      expect(error?.code).toBe(-32007);
+      expect(error?.data?.reason).toBe('type_conflict');
+      expect(text).toMatch(/^Recovery: Add PRESDOCU to type/m);
+      expect(searchFn).not.toHaveBeenCalled();
+    });
+
+    it('type_conflict names the filters and the type that leaves out PRESDOCU', async () => {
+      const { error } = failure(
+        await runToolContract(searchRulesTool, {
+          type: ['RULE'],
+          executive_order_number: 14192,
+          signed_after: '2025-01-20',
+        }),
+      );
+      expect(error?.message).toBe(
+        'The presidential filters (executive_order_number, signed_after) match only presidential documents, but type RULE leaves out PRESDOCU.',
+      );
+    });
+
+    it.each([
+      ['president with type omitted', { president: 'donald-trump' }],
+      ['president with type RULE/PRESDOCU', { type: ['RULE', 'PRESDOCU'], president: 'joe-biden' }],
+      ['significant with type omitted', { significant: true }],
+      ['significant with type PRESDOCU/RULE', { type: ['PRESDOCU', 'RULE'], significant: true }],
+      [
+        'significant with an effective window',
+        { significant: true, effective_after: '2026-11-01' },
+      ],
+    ])('sends %s', async (_label, args: Record<string, unknown>) => {
+      const result = await runToolContract(searchRulesTool, args);
+      expect(result.isError).toBeFalsy();
+      expect(searchFn).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['signed_after', 'signed_before'],
+      ['effective_after', 'effective_before'],
+    ])('rejects %s later than %s before any request', async (after, before) => {
+      const { error, text } = failure(
+        await runToolContract(searchRulesTool, { [after]: '2025-02-01', [before]: '2025-01-31' }),
+      );
+      expect(error?.data?.reason).toBe('date_range_inverted');
+      expect(error?.message).toBe(
+        `${after} (2025-02-01) is later than ${before} (2025-01-31), so no document can fall in the window.`,
+      );
+      expect(text).toMatch(/^Recovery: Swap the two dates/m);
+      expect(searchFn).not.toHaveBeenCalled();
+    });
+
+    it('names every new filter when nothing matched', async () => {
+      const result = await runToolContract(searchRulesTool, {
+        executive_order_number: 99999,
+        presidential_document_type: ['executive_order', 'memorandum'],
+        president: 'barack-obama',
+        signed_after: '2010-01-01',
+        signed_before: '2010-12-31',
+        effective_after: '2010-02-01',
+        effective_before: '2010-03-01',
+      });
+      expect(String((result.structuredContent as Record<string, unknown>).notice)).toBe(
+        'No Federal Register documents matched executive_order_number 99999, presidential_document_type executive_order/memorandum, president barack-obama, signed_after 2010-01-01, signed_before 2010-12-31, effective_after 2010-02-01, effective_before 2010-03-01. Broaden or drop a filter, or widen the date range.',
+      );
+      const significance = await runToolContract(searchRulesTool, { significant: false });
+      expect(String((significance.structuredContent as Record<string, unknown>).notice)).toBe(
+        'No Federal Register documents matched significant false. Broaden or drop a filter, or widen the date range.',
+      );
+    });
+
+    describe('format()', () => {
+      const presidentialRow = {
+        ...sampleRow,
+        documentNumber: '2025-02345',
+        type: 'Presidential Document',
+        significant: null,
+        presidential: {
+          type: 'Executive Order',
+          number: '14192',
+          signingDate: '2025-01-31',
+          president: { name: 'Donald Trump', slug: 'donald-trump' },
+        },
+      };
+
+      function render(rows: unknown[]): string {
+        const blocks = searchRulesTool.format!({ results: rows } as never);
+        return blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
+      }
+
+      it('renders every presidential field and the significance flag', () => {
+        expect(render([presidentialRow])).toContain(
+          'presidential: Executive Order 14192, signed 2025-01-31, Donald Trump (donald-trump)',
+        );
+        expect(render([{ ...sampleRow, significant: true }])).toContain(
+          ' · significant (EO 12866)',
+        );
+        expect(render([{ ...sampleRow, significant: false }])).toContain(
+          ' · not significant (EO 12866)',
+        );
+      });
+
+      it('renders a field the Federal Register did not record as absent, never invented', () => {
+        const text = render([
+          {
+            ...presidentialRow,
+            presidential: { type: null, number: null, signingDate: null, president: null },
+          },
+        ]);
+        expect(text).toContain('presidential: Presidential document ·');
+        expect(text).not.toMatch(/signed|donald-trump|EO 12866/);
+        expect(render([sampleRow])).not.toMatch(/presidential:|EO 12866/);
+      });
     });
   });
 

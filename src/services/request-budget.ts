@@ -4,8 +4,8 @@
  *
  * A per-attempt deadline does not bound a tool call. Attempts multiply — four of
  * them at 15s each, plus backoff, is already past a client's timeout — and so do
- * the calls a tool makes: `regulations_get_cfr_section` reads a date, then the
- * text, then the hierarchy, each with a retry loop of its own. Bounding those
+ * the calls a tool makes: `regulations_get_cfr_section` reads a date and then the
+ * text, each with a retry loop of its own, then the hierarchy. Bounding those
  * separately bounds nothing a caller can act on, so all of them draw down one
  * clock, started at the first upstream call of a request and shared by every
  * attempt, backoff, and service that request touches afterwards.

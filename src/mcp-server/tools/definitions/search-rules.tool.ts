@@ -2,7 +2,8 @@
  * @fileoverview regulations_search_rules — the 80% entry point. Searches the
  * Federal Register for proposed rules, final rules, notices, and presidential
  * documents, filterable by agency, document type, date range, topic, CFR title
- * and part, printed docket number, and RIN, ranked by relevance or date; or
+ * and part, printed docket number, RIN, significance, effective date, and the
+ * presidential-document identifiers, ranked by relevance or date; or
  * resolves a page cite and its date to the documents printed on that page.
  * Keyless (Federal Register API).
  * @module mcp-server/tools/definitions/search-rules.tool
@@ -13,10 +14,11 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
 import { normalizePart } from '@/services/ecfr/cite.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
-import type {
-  FrCitationResponse,
-  FrSearchParams,
-  FrSearchResult,
+import {
+  type FrCitationResponse,
+  type FrSearchParams,
+  type FrSearchResult,
+  PRESIDENTIAL_DOCUMENT_TYPES,
 } from '@/services/federal-register/types.js';
 import { isoDate } from './date-input.js';
 import {
@@ -24,13 +26,20 @@ import {
   formatAgencies,
   formatCommentPeriod,
   formatCount,
+  formatPresidential,
   formatPrintedPages,
+  formatSignificant,
 } from './format-utils.js';
 import { FIRST_FR_API_VOLUME, frCitation, parseFrCitation } from './fr-citation.js';
 import { FEDERAL_REGISTER_PAGE_CEILING, pageSpan, raisePerPageAdvice } from './paging.js';
+import { presidentialSchema } from './presidential-schema.js';
+import { clampSize, joinNotices, perPageInput, type SizeLimit } from './size-limit.js';
 
-/** The largest per_page this tool takes. */
-const MAX_PER_PAGE = 100;
+/**
+ * per_page bounds. The Federal Register serves at most 100 a page, and treats
+ * exactly 1 as its default page size rather than one result.
+ */
+const PER_PAGE: SizeLimit = { name: 'per_page', min: 2, max: 100, default: 20 };
 
 /** The Federal Register's `count` saturates here; a larger set reports this number. */
 const FR_COUNT_CAP = 10_000;
@@ -50,7 +59,47 @@ function describeFilters(f: SearchFilters): string[] {
     f.cfrPart && `cfr_part ${f.cfrPart}`,
     f.docketId && `docket_id ${f.docketId}`,
     f.rin && `rin ${f.rin}`,
+    f.executiveOrderNumber !== undefined && `executive_order_number ${f.executiveOrderNumber}`,
+    f.presidentialDocumentTypes &&
+      `presidential_document_type ${f.presidentialDocumentTypes.join('/')}`,
+    f.president && `president ${f.president}`,
+    f.signedAfter && `signed_after ${f.signedAfter}`,
+    f.signedBefore && `signed_before ${f.signedBefore}`,
+    f.significant !== undefined && `significant ${f.significant}`,
+    f.effectiveAfter && `effective_after ${f.effectiveAfter}`,
+    f.effectiveBefore && `effective_before ${f.effectiveBefore}`,
   ].filter((part): part is string => typeof part === 'string');
+}
+
+/** Presidential-only filters the caller set, by parameter name. */
+function presidentialFilters(f: SearchFilters): string[] {
+  return [
+    f.executiveOrderNumber !== undefined && 'executive_order_number',
+    f.presidentialDocumentTypes && 'presidential_document_type',
+    f.president && 'president',
+    f.signedAfter && 'signed_after',
+    f.signedBefore && 'signed_before',
+  ].filter((part): part is string => typeof part === 'string');
+}
+
+/**
+ * Why a filter combination can only answer empty, or undefined when it can
+ * match: a presidential filter with a type that leaves out PRESDOCU, or
+ * significant scoped to presidential documents, which carry no determination.
+ */
+function typeConflict(f: SearchFilters): string | undefined {
+  const presidential = presidentialFilters(f);
+  const types = f.types;
+  if (presidential.length && types && !types.includes('PRESDOCU')) {
+    return `The presidential filters (${presidential.join(', ')}) match only presidential documents, but type ${types.join('/')} leaves out PRESDOCU.`;
+  }
+  if (f.significant === undefined) return;
+  if (types?.every((t) => t === 'PRESDOCU')) {
+    return 'significant matches only documents with a significance determination, and the Federal Register records none on presidential documents (type PRESDOCU).';
+  }
+  return presidential.length
+    ? `significant matches only documents with a significance determination, but the presidential filters (${presidential.join(', ')}) limit the search to presidential documents, which carry none.`
+    : undefined;
 }
 
 /** The empty-result notice, naming every filter that narrowed the search. */
@@ -96,7 +145,7 @@ function citationNotice(
 export const searchRulesTool = tool('regulations_search_rules', {
   title: 'regulations_search_rules',
   description:
-    'Search the Federal Register — the daily journal of US proposed rules, final rules, notices, and presidential documents (1994–present) — filtering by full-text query, document type, agency slug, publication date range, affected CFR title and part, printed docket number, and RIN, all combined. A page cite from a CFR source note ("89 FR 49102", with its date) resolves to the documents printed on that page. The primary discovery entry point: results carry the document number (open with regulations_get_document), its citation and page range, each issuing agency with its filterable slug, printed docket numbers, Regulations.gov docket and document IDs, comment count and comment URL, whether the comment period is open, RINs, and affected CFR parts that chain into the comment and codified-text tools. A query ranks by relevance unless order says otherwise; filter-only browsing lists newest first. The Federal Register caps navigation at 50 pages and the match count at 10,000; when a result set is larger, narrow with published_after/published_before rather than paging deeper.',
+    'Search the Federal Register — the daily journal of US proposed rules, final rules, notices, and presidential documents (1994–present) — filtering by full-text query, document type, agency slug, publication date range, affected CFR title and part, printed docket number, RIN, EO 12866 significance, effective date range, and for presidential documents the executive order number, subtype, president, and signing date range, all combined. A page cite from a CFR source note ("89 FR 49102", with its date) resolves to the documents printed on that page. The primary discovery entry point: results carry the document number (open with regulations_get_document), its citation and page range, each issuing agency with its filterable slug, printed docket numbers, Regulations.gov docket and document IDs, comment count and comment URL, whether the comment period is open, RINs, significance, presidential-document identifiers, and affected CFR parts that chain into the comment and codified-text tools. A query ranks by relevance unless order says otherwise; filter-only browsing lists newest first. The Federal Register caps navigation at 50 pages and the match count at 10,000; when a result set is larger, narrow with published_after/published_before rather than paging deeper.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     query: z
@@ -154,6 +203,50 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .describe(
         'Only documents carrying this Regulation Identifier Number — a regulationIdNumbers entry such as "2040-AG18", which follows one rulemaking from proposal to final rule. Pass the complete RIN: a fragment ("2040") matches every RIN that contains it.',
       ),
+    executive_order_number: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        'Only the executive order with this number (14192), as presidential.number on a result carries it. A full-text query on the number instead matches every document that cites the order.',
+      ),
+    presidential_document_type: z
+      .array(z.enum(PRESIDENTIAL_DOCUMENT_TYPES))
+      .optional()
+      .describe(
+        'Only presidential documents of these subtypes. notice is a presidential notice, not type NOTICE.',
+      ),
+    president: z
+      .string()
+      .optional()
+      .describe(
+        'Only presidential documents issued by this president, by slug: william-j-clinton, george-w-bush, barack-obama, donald-trump, joe-biden (presidential.president.slug on a result). An unknown slug fails the request.',
+      ),
+    signed_after: z
+      .union([z.literal(''), isoDate()])
+      .optional()
+      .describe(
+        'Earliest signing date of a presidential document (YYYY-MM-DD). Signing precedes publication by days to weeks, so this window differs from published_after/published_before.',
+      ),
+    signed_before: z
+      .union([z.literal(''), isoDate()])
+      .optional()
+      .describe('Latest signing date of a presidential document (YYYY-MM-DD).'),
+    significant: z
+      .boolean()
+      .optional()
+      .describe(
+        'true: only documents the Federal Register flags significant under EO 12866. false: only documents flagged not significant. Documents with no determination — every presidential document and most notices — match neither.',
+      ),
+    effective_after: z
+      .union([z.literal(''), isoDate()])
+      .optional()
+      .describe('Earliest effective date (YYYY-MM-DD) — documents taking effect on or after it.'),
+    effective_before: z
+      .union([z.literal(''), isoDate()])
+      .optional()
+      .describe('Latest effective date (YYYY-MM-DD).'),
     citation: z
       .union([z.literal(''), frCitation()])
       .optional()
@@ -172,16 +265,11 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .describe(
         'Result order. Defaults to relevance with a query, newest without one. relevance without a query falls back to newest first; oldest lists the earliest publications first. Ignored with citation, whose matches come in page order.',
       ),
-    per_page: z
-      .number()
-      .int()
-      .min(2)
-      .max(MAX_PER_PAGE)
-      .optional()
-      .default(20)
-      .describe(
-        'Results per page (2–100, default 20). The Federal Register API treats exactly 1 as its default page size instead of returning one result.',
-      ),
+    per_page: perPageInput(
+      PER_PAGE,
+      (bounds) =>
+        `Results per page (${bounds}). The Federal Register API treats exactly 1 as its default page size instead of returning one result.`,
+    ),
     page: z
       .number()
       .int()
@@ -297,6 +385,13 @@ export const searchRulesTool = tool('regulations_search_rules', {
                 'Whether that comment period is open today: true through 11:59 PM Eastern on commentsCloseOn, false after it, null when commentsCloseOn is null.',
               ),
             effectiveOn: z.string().nullable().describe('Effective date (ISO 8601), or null.'),
+            significant: z
+              .boolean()
+              .nullable()
+              .describe(
+                'Whether the Federal Register flags the document significant under EO 12866; null when no determination is recorded (every presidential document, most notices).',
+              ),
+            presidential: presidentialSchema(),
             htmlUrl: z.string().describe('Federal Register web URL for the document.'),
           })
           .describe('One matching Federal Register document.'),
@@ -335,7 +430,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .string()
       .optional()
       .describe(
-        'Guidance when nothing matched, when the page is past the end, or when matches lie beyond the last page.',
+        'Guidance when per_page was above its ceiling, when nothing matched, when the page is past the end, or when matches lie beyond the last page.',
       ),
   },
   enrichmentTrailer: {
@@ -356,9 +451,16 @@ export const searchRulesTool = tool('regulations_search_rules', {
       code: JsonRpcErrorCode.ValidationError,
       when: 'The Federal Register rejected a filter value — most often an agency name or acronym passed where a slug belongs.',
       recovery:
-        'Correct the parameter the message names: agencies takes Federal Register slugs in lowercase kebab-case (e.g. "environmental-protection-agency"; read one off agencies[].slug in a result), dates must be real YYYY-MM-DD days, and cfr_part takes a part number or a range such as "140-143".',
+        'Correct the parameter the message names: agencies takes Federal Register slugs in lowercase kebab-case (e.g. "environmental-protection-agency"; read one off agencies[].slug in a result), president takes a slug such as "donald-trump", dates must be real YYYY-MM-DD days, and cfr_part takes a part number or a range such as "140-143".',
       severity: 'notice',
       thrownBy: 'service',
+    },
+    {
+      reason: 'type_conflict',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'A presidential filter (executive_order_number, presidential_document_type, president, signed_after/signed_before) was combined with a type that leaves out PRESDOCU, or significant with a search limited to presidential documents, which carry no significance determination.',
+      recovery:
+        'Add PRESDOCU to type (or omit type) for the presidential filters; drop significant when searching presidential documents.',
     },
     {
       reason: 'date_range_inverted',
@@ -417,12 +519,22 @@ export const searchRulesTool = tool('regulations_search_rules', {
         );
       }
     }
+    const signedAfter = input.signed_after || undefined;
+    const signedBefore = input.signed_before || undefined;
+    const effectiveAfter = input.effective_after || undefined;
+    const effectiveBefore = input.effective_before || undefined;
     // An inverted window can only answer empty; it reads as "nothing matched".
-    if (publishedAfter && publishedBefore && publishedAfter > publishedBefore) {
-      throw ctx.fail(
-        'date_range_inverted',
-        `published_after (${publishedAfter}) is later than published_before (${publishedBefore}), so no document can fall in the window.`,
-      );
+    for (const [afterName, after, beforeName, before] of [
+      ['published_after', publishedAfter, 'published_before', publishedBefore],
+      ['signed_after', signedAfter, 'signed_before', signedBefore],
+      ['effective_after', effectiveAfter, 'effective_before', effectiveBefore],
+    ] as const) {
+      if (after && before && after > before) {
+        throw ctx.fail(
+          'date_range_inverted',
+          `${afterName} (${after}) is later than ${beforeName} (${before}), so no document can fall in the window.`,
+        );
+      }
     }
 
     const cfrPart = normalizePart(input.cfr_part);
@@ -433,7 +545,6 @@ export const searchRulesTool = tool('regulations_search_rules', {
       );
     }
 
-    const service = getFederalRegisterService();
     const query = input.query || undefined;
     const filters = {
       query,
@@ -443,7 +554,24 @@ export const searchRulesTool = tool('regulations_search_rules', {
       cfrPart,
       docketId: input.docket_id?.trim() || undefined,
       rin: input.rin?.trim() || undefined,
+      executiveOrderNumber: input.executive_order_number,
+      presidentialDocumentTypes: input.presidential_document_type?.length
+        ? input.presidential_document_type
+        : undefined,
+      president: input.president?.trim() || undefined,
+      signedAfter,
+      signedBefore,
+      significant: input.significant,
+      effectiveAfter,
+      effectiveBefore,
     };
+    // Each conflicting combination answers 0 upstream; refuse it before the request.
+    const conflict = typeConflict(filters);
+    if (conflict) throw ctx.fail('type_conflict', conflict);
+
+    const size = clampSize(input.per_page, PER_PAGE, 'regulations_search_rules', ctx);
+    const perPage = size.value;
+    const service = getFederalRegisterService();
     let total: number;
     let results: FrSearchResult[];
     let noMatch: string;
@@ -453,9 +581,9 @@ export const searchRulesTool = tool('regulations_search_rules', {
         { ...filters, publicationDate: citationDate, frPage: citation.page },
         ctx,
       );
-      const start = (input.page - 1) * input.per_page;
+      const start = (input.page - 1) * perPage;
       total = day.results.length;
-      results = day.results.slice(start, start + input.per_page);
+      results = day.results.slice(start, start + perPage);
       const cite = `${citation.volume} FR ${citation.page}`;
       noMatch = citationNotice(cite, citationDate, citation.page, day, filters);
     } else {
@@ -465,7 +593,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
           publishedAfter,
           publishedBefore,
           order: input.order ?? (query ? 'relevance' : 'newest'),
-          perPage: input.per_page,
+          perPage,
           page: input.page,
         },
         ctx,
@@ -477,7 +605,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
 
     const span = pageSpan({
       total,
-      perPage: input.per_page,
+      perPage,
       page: input.page,
       ceiling: FEDERAL_REGISTER_PAGE_CEILING,
     });
@@ -488,16 +616,19 @@ export const searchRulesTool = tool('regulations_search_rules', {
     });
 
     if (total === 0) {
-      ctx.enrich.notice(noMatch);
+      ctx.enrich.notice(joinNotices(size.notice, noMatch));
     } else if (span.pastEnd) {
       ctx.enrich.notice(
-        `Page ${input.page} is past the end: ${formatCount(total)} documents matched, so the last page is ${span.totalPages} at per_page ${input.per_page}.`,
+        joinNotices(
+          size.notice,
+          `Page ${input.page} is past the end: ${formatCount(total)} documents matched, so the last page is ${span.totalPages} at per_page ${perPage}.`,
+        ),
       );
     } else if (span.truncated) {
       const raise = raisePerPageAdvice({
         total,
-        perPage: input.per_page,
-        maxPerPage: MAX_PER_PAGE,
+        perPage,
+        maxPerPage: PER_PAGE.max,
         ceiling: FEDERAL_REGISTER_PAGE_CEILING,
       });
       // A count at the cap is a floor; per_page advice never promises to reach it,
@@ -507,9 +638,10 @@ export const searchRulesTool = tool('regulations_search_rules', {
           ? `At least ${formatCount(FR_COUNT_CAP)} documents matched (the Federal Register stops counting at ${formatCount(FR_COUNT_CAP)}), but it serves`
           : `${formatCount(total)} documents matched, but the Federal Register serves`;
       const guidance = [
-        `${matched} ${FEDERAL_REGISTER_PAGE_CEILING} pages, so only the first ${formatCount(span.reachable)} are reachable at per_page ${input.per_page}.`,
+        size.notice,
+        `${matched} ${FEDERAL_REGISTER_PAGE_CEILING} pages, so only the first ${formatCount(span.reachable)} are reachable at per_page ${perPage}.`,
         raise,
-        `${raise ? 'Or narrow' : 'Narrow'} with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin) to bring the rest within reach.`,
+        `${raise ? 'Or narrow' : 'Narrow'} with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin, significant, effective_after / effective_before; for presidential documents, president, presidential_document_type, signed_after / signed_before) to bring the rest within reach.`,
       ]
         .filter(Boolean)
         .join(' ');
@@ -542,6 +674,9 @@ export const searchRulesTool = tool('regulations_search_rules', {
       if (r.commentCount !== null) tail.push(`comments: ${r.commentCount}`);
       if (cite) tail.push(`CFR: ${cite}`);
       if (r.regulationIdNumbers.length) tail.push(`RIN: ${r.regulationIdNumbers.join(', ')}`);
+      if (r.presidential) tail.push(`presidential: ${formatPresidential(r.presidential)}`);
+      const significance = formatSignificant(r.significant);
+      if (significance) tail.push(significance);
       if (r.abstract) tail.push(`abstract: ${r.abstract}`);
       if (r.effectiveOn) tail.push(`effective: ${r.effectiveOn}`);
       const commentLink = r.commentUrl

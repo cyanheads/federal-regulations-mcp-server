@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   citedTitle,
+  describeRewrite,
   MAX_EXTRA_LOOKUPS,
   sectionCandidates,
   stripCitePrefix,
@@ -162,5 +163,36 @@ describe('sectionCandidates', () => {
       const forms = tried(value, '141');
       expect(new Set(forms).size).toBe(forms.length);
     }
+  });
+});
+
+describe('describeRewrite', () => {
+  /** The notice for one form of `asked`, built the way a read builds it. */
+  function rewriteOf(asked: string, formIndex: number): string {
+    const { prefix, value } = stripCitePrefix(asked, 40, '141');
+    const candidate = sectionCandidates(value, '141')[formIndex];
+    if (!candidate) throw new Error(`no form ${formIndex} for ${asked}`);
+    return describeRewrite(asked, prefix, candidate, '141');
+  }
+
+  it.each([
+    ['§ 141.61', 0, 'Section "§ 141.61" was read as 141.61: removed the leading "§".'],
+    [
+      '141.61(c)',
+      1,
+      'Section "141.61(c)" was read as 141.61: dropped the paragraph designator "(c)", which is not part of any section identifier here, so the whole section is returned.',
+    ],
+    [
+      '61',
+      1,
+      'Section "61" was read as 141.61: no section in part 141 is numbered without its part, so it was joined to it.',
+    ],
+    [
+      '40 CFR 61(c)',
+      2,
+      'Section "40 CFR 61(c)" was read as 141.61: removed the leading "40 CFR"; dropped the paragraph designator "(c)", which is not part of any section identifier here, so the whole section is returned; no section in part 141 is numbered without its part, so it was joined to it.',
+    ],
+  ])('says how %s was read as its form %i', (asked, formIndex, notice) => {
+    expect(rewriteOf(asked, formIndex)).toBe(notice);
   });
 });

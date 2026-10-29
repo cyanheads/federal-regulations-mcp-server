@@ -9,9 +9,10 @@
  * @module tests/tools/browse-cfr.tool.test
  */
 
-import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handlerContext } from '../helpers/handler-context.js';
+import { markdownText } from '../helpers/markdown-text.js';
 
 const listTitleNodes = vi.hoisted(() => vi.fn());
 const browseStructure = vi.hoisted(() => vi.fn());
@@ -23,6 +24,7 @@ const isLatestIssue = vi.hoisted(() => vi.fn());
 const mirrorReady = vi.hoisted(() => vi.fn());
 const mirrorScope = vi.hoisted(() => vi.fn());
 const mirrorSearch = vi.hoisted(() => vi.fn());
+const listVersions = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/ecfr/ecfr-service.js', () => ({
   getEcfrService: () => ({
@@ -33,9 +35,11 @@ vi.mock('@/services/ecfr/ecfr-service.js', () => ({
     currentDate,
     upToDateAsOf,
     isLatestIssue,
+    listVersions,
   }),
   today: () => '2026-06-13',
   ECFR_SEARCH_WINDOW: 10_000,
+  ECFR_EARLIEST_DATE: '2017-01-01',
 }));
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
   mirrorReady,
@@ -127,6 +131,7 @@ describe('browseCfrTool', () => {
     mirrorReady.mockReset();
     mirrorScope.mockReset();
     mirrorSearch.mockReset();
+    listVersions.mockReset();
   });
 
   it("resolves a title's latest issue date (not today) when expanding structure without a date", async () => {
@@ -571,6 +576,152 @@ describe('browseCfrTool', () => {
     expect(result.nodes).toEqual([]);
     expect(getEnrichment(ctx)).toMatchObject({ totalCount: 0, page: 1 });
     expect(getEnrichment(ctx).notice).toMatch(/lists no sections or appendices.*reserved/);
+  });
+
+  it('passes a versions page window to the service as a row offset and count', async () => {
+    listVersions.mockResolvedValue({
+      versions: [],
+      totalCount: 120,
+      latestAmendmentDate: '2025-09-10',
+    });
+    const ctx = handlerContext(browseCfrTool);
+    await browseCfrTool.handler(
+      browseCfrTool.input.parse({
+        mode: 'versions',
+        title: 40,
+        part: 'Part 141',
+        page: 3,
+        per_page: 30,
+      }),
+      ctx,
+    );
+
+    expect(listVersions).toHaveBeenCalledTimes(1);
+    expect(listVersions).toHaveBeenCalledWith(
+      40,
+      { part: '141', section: undefined, changedSince: undefined },
+      60,
+      30,
+      ctx,
+    );
+  });
+
+  describe('per_page past 50', () => {
+    const clamped = 'Requested per_page 51; applied per_page 50, the largest this tool serves.';
+
+    it("pages a part's listing at 50, on both surfaces", async () => {
+      latestIssueDate.mockResolvedValue('2026-08-05');
+      browseStructure.mockResolvedValue(
+        Array.from({ length: 120 }, (_, i) => ({
+          type: 'section',
+          identifier: `141.${i + 1}`,
+          label: `§ 141.${i + 1}`,
+          description: null,
+          reserved: false,
+          cfrCite: `40 CFR 141.${i + 1}`,
+          appendix: null,
+          subpart: null,
+          subjectGroup: null,
+        })),
+      );
+      const result = await runToolContract(browseCfrTool, {
+        mode: 'structure',
+        title: 40,
+        part: '141',
+        page: 2,
+        per_page: 51,
+      });
+      const structured = result.structuredContent as {
+        nodes: { identifier: string }[];
+        [key: string]: unknown;
+      };
+
+      expect(structured.nodes.map((n) => n.identifier)).toEqual(
+        Array.from({ length: 50 }, (_, i) => `141.${51 + i}`),
+      );
+      const notice = `${clamped} Part 141 holds 120 sections and appendices; this is page 2 of 3. Request page 3 for the next 50.`;
+      expect(structured).toMatchObject({
+        page: 2,
+        totalCount: 120,
+        truncated: true,
+        shown: 50,
+        notice,
+      });
+      const text = (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+      expect(markdownText(text)).toContain(notice);
+    });
+
+    it('asks for versions 50 at a time', async () => {
+      listVersions.mockResolvedValue({ versions: [], totalCount: 0, latestAmendmentDate: null });
+      const ctx = handlerContext(browseCfrTool);
+      await browseCfrTool.handler(
+        browseCfrTool.input.parse({
+          mode: 'versions',
+          title: 40,
+          part: '141',
+          page: 2,
+          per_page: 51,
+        }),
+        ctx,
+      );
+      expect(listVersions).toHaveBeenCalledWith(40, expect.anything(), 50, 50, ctx);
+      expect(getEnrichment(ctx).notice).toBe(
+        `${clamped} eCFR lists no versions of part 141 of title 40: no such part exists there. Verify the cite with mode "structure", which lists a part's sections.`,
+      );
+    });
+
+    it('searches 50 at a time', async () => {
+      mirrorReady.mockResolvedValue(true);
+      mirrorScope.mockResolvedValue(PARTIAL_MIRROR);
+      mirrorSearch.mockImplementation(mirrorIndex([14], ['25']));
+      const ctx = handlerContext(browseCfrTool);
+      await browseCfrTool.handler(
+        browseCfrTool.input.parse({
+          mode: 'search',
+          query: 'oxygen',
+          title: 14,
+          page: 2,
+          per_page: 51,
+        }),
+        ctx,
+      );
+      expect(mirrorSearch).toHaveBeenCalledWith('oxygen', 14, undefined, 50, 50);
+      expect(getEnrichment(ctx).notice).toBe(
+        `${clamped} Page 2 is past the last page of results: 1 matches end on page 1 at per_page 50. Request page 1 or earlier.`,
+      );
+    });
+  });
+
+  it('settles on the first section form that has versions, even on a page past its end', async () => {
+    // The form is chosen by the whole set's count, not by this page's rows, so a
+    // late page of a resolved section does not go on to try the joined form.
+    listVersions.mockImplementation((_t: number, scope: { section?: string }) =>
+      Promise.resolve(
+        scope.section === '61'
+          ? { versions: [], totalCount: 0, latestAmendmentDate: null }
+          : { versions: [], totalCount: 7, latestAmendmentDate: '2025-09-10' },
+      ),
+    );
+    const ctx = handlerContext(browseCfrTool);
+    const result = await browseCfrTool.handler(
+      browseCfrTool.input.parse({
+        mode: 'versions',
+        title: 40,
+        part: '141',
+        section: '61',
+        page: 9,
+      }),
+      ctx,
+    );
+
+    expect(listVersions.mock.calls.map((c) => (c[1] as { section?: string }).section)).toEqual([
+      '61',
+      '141.61',
+    ]);
+    expect(result.latestAmendmentDate).toBe('2025-09-10');
+    expect(getEnrichment(ctx).notice).toMatch(
+      /^Section "61" was read as 141\.61: .+ Page 9 is past the end/,
+    );
   });
 
   it('format() renders structure nodes and search hits', () => {

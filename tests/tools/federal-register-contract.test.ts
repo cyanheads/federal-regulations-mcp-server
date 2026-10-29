@@ -449,8 +449,117 @@ describe('regulations_get_document and its resource', () => {
   });
 
   it('describes the document resource with the handles the tool returns', () => {
-    for (const handle of ['printed docket numbers', 'citation', 'comment URL']) {
+    for (const handle of [
+      'printed docket numbers',
+      'citation',
+      'comment URL',
+      'significance',
+      'presidential-document identifiers',
+    ]) {
       expect(documentResource.description).toContain(handle);
     }
+  });
+});
+
+describe('significance and presidential-document identifiers', () => {
+  /** 2025-02345 (EO 14192) as the Federal Register served it on 2026-10-29. */
+  const eo14192 = {
+    document_number: '2025-02345',
+    title: 'Unleashing Prosperity Through Deregulation',
+    type: 'Presidential Document',
+    subtype: 'Executive Order',
+    executive_order_number: '14192',
+    presidential_document_number: '14192',
+    signing_date: '2025-01-31',
+    president: { identifier: 'donald-trump', name: 'Donald Trump' },
+    significant: null,
+    effective_on: null,
+    publication_date: '2025-02-06',
+    agencies: [
+      {
+        raw_name: 'Executive Office of the President',
+        name: 'Executive Office of the President',
+        slug: 'executive-office-of-the-president',
+      },
+    ],
+    html_url: 'https://www.federalregister.gov/d/2025-02345',
+  };
+  /** 2026-19071, a final rule flagged significant; `president` is set on every document. */
+  const significantRule = {
+    ...jointRule,
+    document_number: '2026-19071',
+    significant: true,
+    president: { identifier: 'donald-trump', name: 'Donald Trump' },
+    subtype: null,
+    signing_date: null,
+    presidential_document_number: null,
+    html_url: 'https://www.federalregister.gov/d/2026-19071',
+  };
+  const eoPresidential = {
+    type: 'Executive Order',
+    number: '14192',
+    signingDate: '2025-01-31',
+    president: { name: 'Donald Trump', slug: 'donald-trump' },
+  };
+  const eoLine = 'Executive Order 14192, signed 2025-01-31, Donald Trump (donald-trump)';
+
+  function serve(documentNumber: string, body: unknown): void {
+    http.route({
+      match: new RegExp(`federalregister\\.gov/api/v1/documents/${documentNumber}\\.json`),
+      respond: () => Response.json(body),
+    });
+  }
+
+  it('regulations_search_rules finds an executive order by number and names it on both surfaces', async () => {
+    http.route({
+      match: /federalregister\.gov\/api\/v1\/documents\.json/,
+      respond: () => Response.json({ count: 2, results: [eo14192, significantRule] }),
+    });
+    const result = await runToolContract(searchRulesTool, { executive_order_number: 14192 });
+    const sent = new URL(http.calls[0]!.request.url).searchParams;
+    expect(sent.getAll('conditions[executive_order_numbers][]')).toEqual(['14192']);
+
+    const [eo, rule] = (result.structuredContent as { results: Array<Record<string, unknown>> })
+      .results;
+    expect(eo).toMatchObject({ significant: null, presidential: eoPresidential });
+    expect(rule).toMatchObject({ significant: true, presidential: null });
+    const rendered = text(result);
+    const line = (n: string) => {
+      const rows = rendered.split('\n');
+      return rows[rows.findIndex((l) => l.startsWith(`| ${n} `)) + 1]!;
+    };
+    expect(line('2025-02345')).toContain(`presidential: ${eoLine}`);
+    expect(line('2025-02345')).not.toContain('EO 12866');
+    expect(line('2026-19071')).toContain('significant (EO 12866)');
+    expect(line('2026-19071')).not.toMatch(/presidential:|donald-trump/);
+  });
+
+  it('regulations_get_document returns them on both surfaces', async () => {
+    serve('2025-02345', eo14192);
+    serve('2026-19071', significantRule);
+    const eo = await runToolContract(getDocumentTool, { document_number: '2025-02345' });
+    expect(eo.structuredContent).toMatchObject({ significant: null, presidential: eoPresidential });
+    expect(text(eo)).toContain(`**Presidential document:** ${eoLine}`);
+    expect(text(eo)).not.toContain('**Significance:**');
+
+    const rule = await runToolContract(getDocumentTool, { document_number: '2026-19071' });
+    expect(rule.structuredContent).toMatchObject({ significant: true, presidential: null });
+    expect(text(rule)).toContain('**Significance:** significant (EO 12866)');
+    expect(text(rule)).not.toContain('Presidential document');
+  });
+
+  it('the document resource returns what the tool does', async () => {
+    serve('2025-02345', eo14192);
+    const tool = (await runToolContract(getDocumentTool, { document_number: '2025-02345' }))
+      .structuredContent as Record<string, unknown>;
+    const resource = (await documentResource.handler(
+      { documentNumber: '2025-02345' },
+      handlerContext(documentResource),
+    )) as Record<string, unknown>;
+    expect({ significant: resource.significant, presidential: resource.presidential }).toEqual({
+      significant: tool.significant,
+      presidential: tool.presidential,
+    });
+    expect(resource.presidential).toEqual(eoPresidential);
   });
 });

@@ -12,6 +12,13 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createFetchMock, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/**
+ * Unkeyed, set before any import: building a tool reads the server config (its
+ * size inputs advertise a schema that depends on it), which is parsed once, so
+ * the key state is fixed per file.
+ */
+vi.hoisted(() => vi.stubEnv('REGULATIONS_GOV_API_KEY', ''));
+
 /** Noon UTC — the same calendar day in UTC and in Eastern time. */
 const MIDDAY = new Date('2026-09-22T12:00:00Z');
 
@@ -66,8 +73,6 @@ type Structured = {
 };
 
 beforeAll(() => {
-  // Unkeyed: the server config is parsed once, so the key state is fixed per file.
-  vi.stubEnv('REGULATIONS_GOV_API_KEY', '');
   const stub = {} as AppConfig & StorageService;
   initFederalRegisterService(stub, stub);
   initRegulationsGovService(stub, stub);

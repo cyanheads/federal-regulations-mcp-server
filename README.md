@@ -1,6 +1,6 @@
 <div align="center">
   <h1>@cyanheads/federal-regulations-mcp-server</h1>
-  <p><b>Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.</b>
+  <p><b>Search and trace US federal rules across the Federal Register (proposed/final rules, notices, and presidential documents), the eCFR (codified, point-in-time CFR full text and amendment history, locally mirrored), and Regulations.gov (rulemaking dockets, document files, and public comments) via MCP. STDIO or Streamable HTTP.</b>
   <div>7 Tools • 3 Resources</div>
   </p>
 </div>
@@ -35,11 +35,11 @@ US federal regulations from the Federal Register, the eCFR, and Regulations.gov.
 
 | Tool | Description |
 |:---|:---|
-| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, date range, CFR part, docket number, and RIN, or resolve a page cite to its document |
-| `regulations_get_document` | Fetch one Federal Register document by number, with the docket IDs, CFR parts, citation, comment count, and comment URL that chain into other tools |
-| `regulations_browse_cfr` | List CFR titles, a title's chapters, or every section and appendix in a part, or full-text-search the codified CFR |
+| `regulations_search_rules` | Search Federal Register proposed rules, final rules, notices, and presidential documents by query, type, agency, date range, CFR part, docket number, RIN, significance, effective date, and executive order number, president, or signing date, or resolve a page cite to its document |
+| `regulations_get_document` | Fetch one Federal Register document by number, with the docket IDs, CFR parts, citation, significance, comment count, and comment URL that chain into other tools |
+| `regulations_browse_cfr` | List CFR titles, a title's chapters, or every section and appendix in a part, full-text-search the codified CFR, or list when a part's or section's text changed |
 | `regulations_get_cfr_section` | Read codified CFR text for a section, whole part, or appendix, current or as of a past date |
-| `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov (key required) |
+| `regulations_get_docket` | Pull a rulemaking docket and its filed documents from Regulations.gov, or read one document's files and attachments (key required) |
 | `regulations_find_comments` | Fetch public comments on a document or docket, or one comment's full body and attachments (key required) |
 | `regulations_list_open_comments` | List documents currently open for public comment, soonest closing first |
 
@@ -57,22 +57,24 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 
 ### `regulations_search_rules` <sub>tool</sub>
 
-- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), `published_after` / `published_before`, `cfr_title` + `cfr_part` (a part number or range such as `140-143`; `cfr_part` needs `cfr_title`, else `title_required_for_part`), `docket_id` (a docket number as the Federal Register prints it), and `rin`, all combined; `per_page` 2–100 (default 20), `page` 1–50
-- `citation` (`"89 FR 49102"`) with `citation_date` (the date its source note prints beside it) returns the documents printed on that page, in page order, volume 59 (1994) onward. A cite missing its date, or combined with the date window, fails with `citation_incomplete`; a volume before 59 or a date from another year fails with `citation_out_of_range`. When no document spans the page, the notice gives that day's page range
-- Each result carries `documentNumber`, `citation` / `startPage` / `endPage`, `agencies[].slug`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, `commentUrl`, `commentsCloseOn` with `commentPeriodOpen` (open through 11:59 PM Eastern on the close date), `regulationIdNumbers`, and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
+- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), `published_after` / `published_before`, `cfr_title` + `cfr_part` (a part number or range such as `140-143`; `cfr_part` needs `cfr_title`, else `title_required_for_part`), `docket_id` (a docket number as the Federal Register prints it), `rin`, `significant` (the Federal Register's EO 12866 flag: `true` and `false` each match only documents with a determination), and `effective_after` / `effective_before`, all combined; `per_page` from 2 (default 20; above 100 serves 100 with a notice), `page` 1–50
+- Presidential documents narrow by `executive_order_number` (bare digits, `14192`), `presidential_document_type` (`executive_order`, `proclamation`, `memorandum`, `determination`, `notice`, `presidential_order`, `other`), `president` (a slug such as `donald-trump`), and a `signed_after` / `signed_before` window, which differs from the publication window because signing precedes publication. These filters beside a `type` that leaves out `PRESDOCU`, or `significant` beside them or beside `type` of `PRESDOCU` alone, fail with `type_conflict`
+- `citation` (`"89 FR 49102"`) with `citation_date` (the date its source note prints beside it) returns the documents printed on that page, in page order, volume 59 (1994) onward, narrowed by any other filter. A cite missing its date, or combined with the publication date window, fails with `citation_incomplete`; a volume before 59 or a date from another year fails with `citation_out_of_range`. When no document spans the page, the notice gives that day's page range
+- Each result carries `documentNumber`, `citation` / `startPage` / `endPage`, `agencies[].slug`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, `commentUrl`, `commentsCloseOn` with `commentPeriodOpen` (open through 11:59 PM Eastern on the close date), `regulationIdNumbers`, `significant` (null when no determination is recorded), `presidential` (`type`, `number`, `signingDate`, and `president`; null unless the document is a presidential document), and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end (publication, signing, or effective) fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
 
 ---
 
 ### `regulations_get_document` <sub>tool</sub>
 
-- `document_number` in any form the Federal Register issues: `2024-07773` from 2010 on, and older and correction numbers such as `98-1572`, `E9-25990`, or `C1-2009-30484`; `include_full_text` adds the plain-text body as one window of `max_chars` (default 64,000, max 200,000) starting at `offset`, and passing either of those implies it
-- Returns metadata plus the handles other tools take: the Regulations.gov `docketId` and `regulationsGovDocumentId`, the printed `docketIds`, `citation` / `startPage` / `endPage`, `commentCount`, `commentUrl`, `commentPeriodOpen`, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
+- `document_number` in any form the Federal Register issues: `2024-07773` from 2010 on, and older and correction numbers such as `98-1572`, `E9-25990`, or `C1-2009-30484`; `include_full_text` adds the plain-text body as one window of `max_chars` (default 64,000; above 200,000 serves 200,000 with a notice) starting at `offset`, and passing either of those implies it
+- Returns metadata plus the handles other tools take: the Regulations.gov `docketId` and `regulationsGovDocumentId`, the printed `docketIds`, `citation` / `startPage` / `endPage`, `commentCount`, `commentUrl`, `commentPeriodOpen`, `significant`, `presidential` for a presidential document, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
 
 ---
 
 ### `regulations_browse_cfr` <sub>tool</sub>
 
-- `mode: "structure"` lists the 50 titles, a title's top-level divisions, or, with `title` + `part`, every section and appendix in the part with its `subpart` and `subjectGroup`; `mode: "search"` full-text-searches the codified CFR and requires `query`. `title`, `part` (needs `title`), and a point-in-time `date` scope both modes, and `per_page` 1–50 (default 20) pages search results and part listings
+- `mode: "structure"` lists the 50 titles, a title's top-level divisions, or, with `title` + `part`, every section and appendix in the part with its `subpart` and `subjectGroup`; `mode: "search"` full-text-searches the codified CFR and requires `query`; `mode: "versions"` lists the dates a part's or one section's text changed. `title`, `part` (needs `title`), and a point-in-time `date` scope structure and search, and `per_page` from 1 (default 20; above 50 serves 50 with a notice) pages search results, part listings, and versions
+- Versions mode takes `title` with `part` (and optionally `section`, written as `regulations_get_cfr_section` accepts it) or with `changed_since` (`YYYY-MM-DD`: versions published by an eCFR issue on or after it, across the whole title when no `part` is given); any other scope fails with `versions_scope_required`, and a `section` citing another title fails with `conflicting_title`. `versions[]` rows carry `cfrCite`, `heading`, `part`, `subpart`, `date`, `issueDate`, `substantive`, and `removed`, in eCFR's order (by identifier, oldest first within each), and `latestAmendmentDate` covers the whole filtered set. Pass a row's `date` as `date` to `regulations_get_cfr_section` to read that version: a row dated before 2017-01-01 reads at 2017-01-01, and a removed row's date reads nothing
 - Search rows carry `cfrCite`, `heading`, `hierarchyPath`, and `excerpt`, one per section. `source` (`mirror` / `live`) and `sourceScope` name the corpus that answered and what it covers, and `countBasis` says whether `totalCount` counts `sections` or `section_versions`; live search reaches eCFR's first 10,000 hits only (`page_out_of_window` past them)
 
 ---
@@ -80,7 +82,8 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 ### `regulations_get_cfr_section` <sub>tool</sub>
 
 - One section (`title` + `part` + `section`), a whole part (`section` omitted), or one appendix (`appendix`, verbatim as `regulations_browse_cfr` emits it, e.g. `Appendix A-1 to Part 50`). `section` also takes cites as people write them (`"61"`, `"§ 141.61"`, `"141.61(c)"`) and the `cfrCite` the server returns (`"40 CFR 141.61"`, `"14 CFR 241 § 25"`; a cite naming another title fails with `conflicting_title`), `part` takes `"Part 141"`, and `date` reads text from 2017-01-01 through the title's up-to-date date
-- Text comes back as one `bodyText` window (`max_chars` default 64,000, max 200,000, from `offset`), paged by `bodyTextLength` and `bodyTextNextOffset`. A whole-part read adds a `sections[]` index with each section's `offset` and names its `appendices` without their text; `source` (`mirror` / `live`) reports provenance
+- Text comes back as one `bodyText` window (`max_chars` default 64,000, above 200,000 serves 200,000 with a notice, from `offset`), paged by `bodyTextLength` and `bodyTextNextOffset`. A whole-part read adds a `sections[]` index with each section's `offset` and names its `appendices` without their text; `source` (`mirror` / `live`) reports provenance
+- `hierarchyPath` runs from the title down to the location read. If eCFR cannot supply it, the read still answers, with only the cited levels (`Title 40 › Part 141 › § 141.61`), and `notice` says so
 - A whole-part read also returns the part's `heading`, `authority`, `sourceNote`, and `notes`, and each `sections[]` entry carries the Authority or Source its subpart or subject group states for it
 - Superscripts read `^x` and subscripts `_x` (`3 × 10^−8`, `CO_{2}e`), footnote markers `[n]`, and diacritics and overlines are combining marks (`x̄`)
 
@@ -88,23 +91,26 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 
 ### `regulations_get_docket` <sub>tool</sub> · key required
 
-- `docket_id`, the Regulations.gov docket ID (e.g. `EPA-HQ-OAR-2025-0194`) — `regulationsGovDocketId` on a search or open-comments row, `docketId` from `regulations_get_document`, not a printed `docketIds` entry; `document_types` filters to `Proposed Rule`, `Rule`, `Notice`, `Supporting & Related Material`, or `Other`; `per_page` 5–250 (default 25), `page` 1–40
-- Returns the docket's metadata, `documentCount`, and `documents[]`, each with an `objectId` for `regulations_find_comments`, a `frDocNum` back to `regulations_get_document`, and `commentPeriodOpen` as Regulations.gov reports it. `totalPages` and `nextPage` page the documents; Regulations.gov serves 40 pages, so `truncated` marks a docket larger than 40 × `per_page` (10,000 at 250)
+- Exactly one of `docket_id` (list mode) or `document_id` (detail mode): neither fails with `target_required`, both with `multiple_targets`, and `search_term` or `document_types` beside `document_id` with `filter_requires_list_mode`. IDs are case-insensitive
+- List mode takes `docket_id`, the Regulations.gov docket ID (e.g. `EPA-HQ-OAR-2025-0194`) — `regulationsGovDocketId` on a search or open-comments row, `docketId` from `regulations_get_document`, not a printed `docketIds` entry. `search_term` keeps the documents whose text matches, ranked by relevance instead of newest first; `document_types` filters to `Proposed Rule`, `Rule`, `Notice`, `Supporting & Related Material`, or `Other`, and combines with it; `per_page` from 5 (default 25; above 250 serves 250 with a notice), `page` 1–40
+- List mode returns the docket's metadata, `documentCount`, and `documents[]`, each with an `objectId` for `regulations_find_comments`, a `frDocNum` back to `regulations_get_document`, and `commentPeriodOpen` as Regulations.gov reports it. `totalPages` and `nextPage` page the documents; Regulations.gov serves 40 pages, so `truncated` marks a docket larger than 40 × `per_page` (10,000 at 250)
+- Detail mode takes `document_id` (`documentId` from a listing, or `regulationsGovDocumentId` from `regulations_get_document`) and returns one `document` with `fileFormats` (the main file's download URLs), `attachments` in upload order with withheld ones kept, `pageCount`, `abstract`, and `restrictReasonType`. A document whose content is only in attachments, or that has no file at all, gets a notice saying so
 
 ---
 
 ### `regulations_find_comments` <sub>tool</sub> · key required
 
-- Exactly one of `docket_id`, `document_object_id`, `fr_document_number`, or `comment_id`; list scopes take `per_page` 5–250 (default 25) and `page` 1–40
-- `document_object_id` takes an object ID (`0900006485883ec6`) or a document ID (`EPA-HQ-OW-2022-0114-0027`). `fr_document_number` resolves to the Regulations.gov document carrying that exact number and answers `not_found` when none does
+- Exactly one of `docket_id`, `document_object_id`, `fr_document_number`, or `comment_id`; list scopes take `per_page` from 5 (default 25; above 250 serves 250 with a notice) and `page` 1–40
+- `document_object_id` takes an object ID (`0900006485883ec6`) or a document ID (`EPA-HQ-OW-2022-0114-0027`). `fr_document_number` resolves to the Regulations.gov document carrying that exact number and answers `not_found` when none does. Docket, document, and comment IDs are case-insensitive
+- A `docket_id` that lists no comments is looked up: a docket Regulations.gov does not hold (a printed docket number such as `REG-101355-26`) answers `not_found`, and an existing docket answers an empty list with a notice
 - Lists narrow by comment text with `search_term`, and each hit then carries `highlightedContent`, the matched passages. `posted_after` / `posted_before` set an inclusive posted-date window. A backwards window fails with `date_range_inverted`, and filters passed with `comment_id` fail with `filter_requires_list_mode`
-- `mode` is `list` or `detail`. Lists return comment summaries without body text. `comment_id` returns the body, submitter, `receivedDate`, `postmarkDate`, `duplicateComments` (above 1 marks a mass-mail campaign record), and `attachments`, with `attachmentOnly: true` when the substance is in a PDF/DOCX file. Lists carry `totalPages` and `nextPage`; `truncated` marks a set larger than the 40 pages Regulations.gov serves reach (40 × `per_page`, 10,000 at 250), and posted-date windows take it one slice at a time
+- `mode` is `list` or `detail`. Lists return comment summaries without body text. `comment_id` returns the body, submitter, `receivedDate`, `postmarkDate`, `duplicateComments` (above 1 marks a mass-mail campaign record), and `attachments` in upload order, with `attachmentOnly: true` when the substance is in a PDF/DOCX file. An attachment whose file is withheld stays in the list with empty `formats` and its `restrictReasonType` (e.g. `Copyrighted`). Lists carry `totalPages` and `nextPage`; `truncated` marks a set larger than the 40 pages Regulations.gov serves reach (40 × `per_page`, 10,000 at 250), and posted-date windows take it one slice at a time
 
 ---
 
 ### `regulations_list_open_comments` <sub>tool</sub>
 
-- Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (Federal Register slugs), and `closing_before`; `per_page` 1–100 (default 20)
+- Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (Federal Register slugs), and `closing_before`; `per_page` from 1 (default 20; above 100 serves 100 with a notice)
 - Rows sort by closing date, soonest first, and carry `commentsCloseOn`, `daysRemaining`, `documentNumber`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, and `commentUrl`. `asOf` is today's date in Eastern time, so a document stays listed through its close day. `totalPages` and `nextPage` page the window; `truncated` means the Federal Register's 10,000-document limit was reached
 - Keyless. `keyed` reports whether `REGULATIONS_GOV_API_KEY` is set, which `regulations_get_docket` and `regulations_find_comments` need to follow up on a row
 
@@ -120,7 +126,7 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 ### `regulations://cfr/{title}/{part}/{section}` <sub>resource</sub>
 
 - Sections only, at the current date and the tool's default 64,000-character window; the `part` and `section` segments resolve the way the tool resolves them (`"Part 141"`; `"61"`, `"§ 141.61"`, `"40 CFR 141.61"`)
-- `source` (`mirror` / `live`) reports provenance. `bodyTextNextOffset` marks a section longer than the window; read the rest through `regulations_get_cfr_section` with `offset`
+- `source` (`mirror` / `live`) reports provenance, and `notice` says how a part or section written another way resolved and when `hierarchyPath` holds only the cited levels. `bodyTextNextOffset` marks a section longer than the window; read the rest through `regulations_get_cfr_section` with `offset`
 
 ## Features
 
@@ -180,6 +186,7 @@ Set optional `REGULATIONS_GOV_API_KEY` to enable docket and comment tools; get a
 | `ECFR_MIRROR_PATH` | Path to the eCFR SQLite mirror database. | `./data/ecfr-mirror.sqlite` |
 | `ECFR_MIRROR_REFRESH_CRON` | Cron expression for an in-process mirror refresh (HTTP transport only), e.g. `0 4 * * 0`. Each run re-harvests every configured title in full. | none (no job) |
 | `ECFR_MIRROR_TITLES` | Comma-separated CFR titles to mirror (e.g. `21,40`). Reads and searches outside the set, and all-titles searches, go to the live eCFR API. | all 50 titles |
+| `REGULATIONS_CLAMP_LIMITS` | Serve a `per_page` or `max_chars` above its ceiling at the ceiling, with a notice. `false` advertises the ceiling as a schema maximum and rejects a larger value instead. | `true` |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | HTTP server port. | `3010` |
 | `MCP_AUTH_MODE` | Authentication: `none`, `jwt`, or `oauth`. | `none` |

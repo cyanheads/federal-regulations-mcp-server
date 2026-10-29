@@ -9,7 +9,7 @@
  * @module tests/tools/list-open-comments.tool.test
  */
 
-import { getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import MarkdownIt from 'markdown-it';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCommentsResponse } from '@/services/federal-register/types.js';
@@ -28,6 +28,11 @@ vi.mock('@/services/regulations-gov/regulations-gov-service.js', () => ({
 const { listOpenCommentsTool } = await import(
   '@/mcp-server/tools/definitions/list-open-comments.tool.js'
 );
+
+/** Every text block of a result, joined — enrichment rides in its own trailing block. */
+function contentText(result: Awaited<ReturnType<typeof runToolContract>>): string {
+  return (result.content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+}
 
 // The service hands back the window already sorted by close date.
 const response: OpenCommentsResponse = {
@@ -70,11 +75,37 @@ describe('listOpenCommentsTool', () => {
     hasKey.mockReset();
   });
 
-  it('bounds per_page to 1–100 and page to at least 1', () => {
+  it('holds per_page to whole numbers from 1 and page to at least 1', () => {
     expect(listOpenCommentsTool.input.parse({ per_page: 1 }).per_page).toBe(1);
     expect(listOpenCommentsTool.input.safeParse({ per_page: 0 }).success).toBe(false);
-    expect(listOpenCommentsTool.input.safeParse({ per_page: 101 }).success).toBe(false);
+    expect(listOpenCommentsTool.input.safeParse({ per_page: 1.5 }).success).toBe(false);
     expect(listOpenCommentsTool.input.safeParse({ page: 0 }).success).toBe(false);
+  });
+
+  it('serves per_page past 100 at 100, paging the window at the size it served', async () => {
+    hasKey.mockReturnValue(true);
+    const first = response.results[0]!;
+    listOpenComments.mockResolvedValue({
+      truncated: false,
+      results: Array.from({ length: 250 }, (_, i) => ({ ...first, documentNumber: `2025-${i}` })),
+    } satisfies OpenCommentsResponse);
+    const result = await runToolContract(listOpenCommentsTool, {
+      per_page: 1_000_000_000,
+      page: 2,
+    });
+    const structured = result.structuredContent as {
+      results: { documentNumber: string }[];
+      [key: string]: unknown;
+    };
+
+    expect(structured.results.map((r) => r.documentNumber)).toEqual(
+      Array.from({ length: 100 }, (_, i) => `2025-${100 + i}`),
+    );
+    expect(structured).toMatchObject({ totalCount: 250, totalPages: 3, nextPage: 3 });
+    const notice =
+      'Requested per_page 1000000000; applied per_page 100, the largest this tool serves.';
+    expect(structured.notice).toBe(notice);
+    expect(markdownText(contentText(result))).toContain(notice);
   });
 
   it('asks the service for the default types the same way whatever the key state', async () => {

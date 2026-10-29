@@ -222,8 +222,8 @@ describe('regulations_get_document full-text window', () => {
     expect(http.calls).toHaveLength(0);
   });
 
-  it('bounds max_chars to 1–200,000 at the schema', () => {
-    for (const max_chars of [0, 200_001]) {
+  it('holds max_chars to whole numbers from 1 at the schema', () => {
+    for (const max_chars of [0, 1.5]) {
       expect(
         getDocumentTool.input.safeParse({ document_number: '2024-07773', max_chars }).success,
       ).toBe(false);
@@ -236,6 +236,35 @@ describe('regulations_get_document full-text window', () => {
     expect(
       getDocumentTool.input.safeParse({ document_number: '2024-07773', offset: -1 }).success,
     ).toBe(false);
+  });
+
+  it('serves max_chars past 200,000 at 200,000, resuming where that window ends', async () => {
+    const whole = body(450_000);
+    serve(whole);
+    const result = await runToolContract(getDocumentTool, {
+      document_number: '2024-07773',
+      offset: 200_000,
+      max_chars: 1_000_000_000,
+    });
+    const structured = result.structuredContent as Structured;
+    expect(structured.fullText).toBe(whole.slice(200_000, 400_000));
+    expect(structured.fullTextNextOffset).toBe(400_000);
+    const clamped =
+      'Requested max_chars 1000000000; applied max_chars 200000, the largest this tool serves.';
+    expect(structured.notice).toBe(clamped);
+    expect(text(result)).toContain(`> ${clamped}`);
+
+    // A later notice on the same call leads with the clamp rather than replacing it.
+    const past = (
+      await runToolContract(getDocumentTool, {
+        document_number: '2024-07773',
+        offset: 500_000,
+        max_chars: 200_001,
+      })
+    ).structuredContent as Structured;
+    expect(past.notice).toBe(
+      'Requested max_chars 200001; applied max_chars 200000, the largest this tool serves. offset 500000 is past the end of the body, which is 450,000 characters long. Pass an offset below that, or omit offset to start from the beginning.',
+    );
   });
 
   it('never splits a surrogate pair across two windows', async () => {

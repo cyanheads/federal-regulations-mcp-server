@@ -3,7 +3,8 @@
  * target_required, and multiple_targets guards, the empty-target tolerance the
  * exactly-one rule is counted against, list mode, detail mode (the
  * attachment-only flag must reach the structured output), the detail dates and
- * campaign count on both surfaces, FR-number and document-ID resolution, and the
+ * campaign count on both surfaces, withheld attachments, FR-number and document-ID
+ * resolution, ID case, the existence check behind an empty docket list, the
  * list-mode filters with their validation, and list mode's paging contract (the
  * 1–40 page range, totalPages, nextPage, the past-end page, truncation past 40
  * pages). The RegulationsGovService accessor is mocked; both-surface assertions
@@ -23,6 +24,7 @@ const listComments = vi.hoisted(() => vi.fn());
 const getComment = vi.hoisted(() => vi.fn());
 const resolveFrDocument = vi.hoisted(() => vi.fn());
 const resolveDocument = vi.hoisted(() => vi.fn());
+const docketExists = vi.hoisted(() => vi.fn());
 vi.mock('@/services/regulations-gov/regulations-gov-service.js', () => ({
   getRegulationsGovService: () => ({
     hasKey,
@@ -30,6 +32,7 @@ vi.mock('@/services/regulations-gov/regulations-gov-service.js', () => ({
     getComment,
     resolveFrDocument,
     resolveDocument,
+    docketExists,
   }),
 }));
 
@@ -81,6 +84,7 @@ const attachmentOnlyDetail: CommentDetailResult = {
       formats: [
         { format: 'pdf', fileUrl: 'https://downloads.regulations.gov/x.pdf', size: 102400 },
       ],
+      restrictReasonType: null,
     },
   ],
   withdrawn: false,
@@ -94,7 +98,9 @@ describe('findCommentsTool', () => {
     getComment.mockReset();
     resolveFrDocument.mockReset();
     resolveDocument.mockReset();
+    docketExists.mockReset();
     hasKey.mockReturnValue(true);
+    docketExists.mockResolvedValue(true);
   });
 
   it('throws auth_required when no key is configured', async () => {
@@ -421,16 +427,132 @@ describe('findCommentsTool', () => {
     expect(contentText(result)).toContain('widen to the docket this object ID was listed in');
   });
 
-  it('points an empty docket list at the Regulations.gov docket ID, not a printed docket number', async () => {
-    // Live: "REG-101355-26" is the IRS's printed number for Regulations.gov docket
-    // IRS-2026-0925, which holds the comments; as docket_id it lists nothing.
-    listComments.mockResolvedValue({ totalCount: 0, comments: [] });
-    const result = await runToolContract(findCommentsTool, { docket_id: 'REG-101355-26' });
-    const notice = String((result.structuredContent as { notice?: string }).notice);
-    expect(notice).toBe(
-      "No comments found for docket REG-101355-26. A docket number the Federal Register prints (a row's docketIds) is often not a Regulations.gov docket ID — pass regulationsGovDocketId from a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. Otherwise check that the comment period has opened.",
+  describe('an empty docket list', () => {
+    it.each([
+      ['a printed docket number', { docket_id: 'REG-101355-26' }],
+      ['a docket that never existed', { docket_id: 'NOPE-2099-0001' }],
+      ['a filtered list', { docket_id: 'REG-101355-26', search_term: 'withholding' }],
+    ])('answers not_found for %s Regulations.gov has no docket for', async (_label, args) => {
+      // Live: filter[docketId]=REG-101355-26 answers 200 with zero comments, while
+      // /dockets/REG-101355-26 is a 404 — the IRS's printed number for IRS-2026-0925.
+      listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+      docketExists.mockResolvedValue(false);
+      const result = await runToolContract(findCommentsTool, args);
+      const error = errorOf(result);
+      expect(error.data?.reason).toBe('not_found');
+      expect(error.message).toContain(args.docket_id);
+      const hint = String((error.data?.recovery as { hint?: string })?.hint);
+      expect(hint).toMatch(/regulationsGovDocketId/);
+      expect(hint).toMatch(/docketId from regulations_get_document/);
+      expect(contentText(result)).toMatch(/^Recovery: .*regulationsGovDocketId/m);
+      expect(docketExists).toHaveBeenCalledTimes(1);
+      expect(docketExists).toHaveBeenCalledWith(args.docket_id, expect.anything());
+    });
+
+    it('keeps an existing docket with no comments a success, without the printed-number hedge', async () => {
+      // Live: WHD_FRDOC_0001 exists and lists zero comments.
+      listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+      const result = await runToolContract(findCommentsTool, { docket_id: 'WHD_FRDOC_0001' });
+      expect(result.isError).toBeFalsy();
+      const structured = result.structuredContent as { notice?: string; totalCount?: number };
+      expect(structured.totalCount).toBe(0);
+      expect(structured.notice).toBe(
+        'No comments found for docket WHD_FRDOC_0001. The docket exists, but no comments have been posted to it — check that its comment period has opened.',
+      );
+      expect(contentText(result)).toContain(
+        '> No comments found for docket WHD_FRDOC_0001. The docket exists, but no comments',
+      );
+      expect(contentText(result)).not.toMatch(/docketIds|prints/);
+      expect(docketExists).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the loosen-filters notice when an existing docket matches nothing under a filter', async () => {
+      listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+      const result = await runToolContract(findCommentsTool, {
+        docket_id: 'EPA-HQ-OW-2022-0114',
+        search_term: 'zzqxvplorbt',
+      });
+      expect(result.isError).toBeFalsy();
+      expect((result.structuredContent as { notice?: string }).notice).toBe(
+        'No comments found for docket EPA-HQ-OW-2022-0114 matching "zzqxvplorbt". Loosen or drop search_term to see comments outside the filter.',
+      );
+      expect(docketExists).toHaveBeenCalledTimes(1);
+    });
+
+    it('never checks the docket when the list holds comments, or on a page past its end', async () => {
+      listComments.mockResolvedValue(listResult);
+      await runToolContract(findCommentsTool, { docket_id: 'EPA-HQ-OW-2022-0114' });
+      listComments.mockResolvedValue({ totalCount: 1629, comments: [] });
+      const past = await runToolContract(findCommentsTool, {
+        docket_id: 'EPA-HQ-OW-2022-0114',
+        per_page: 250,
+        page: 8,
+      });
+      expect((past.structuredContent as { notice?: string }).notice).toMatch(/past the end/);
+      expect(docketExists).not.toHaveBeenCalled();
+    });
+
+    it('never checks a docket for an empty document list', async () => {
+      listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+      const result = await runToolContract(findCommentsTool, {
+        document_object_id: '0900006485883ec6',
+      });
+      expect(result.isError).toBeFalsy();
+      expect(docketExists).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ID case', () => {
+    // Live: every docket, document, and comment ID sampled is uppercase, and the
+    // single-record endpoints answer a lowercase letter with HTTP 400 "Invalid ID".
+    it.each(['epa-hq-ow-2022-0114', 'Epa-HQ-OW-2022-0114'])(
+      'lists docket_id %j under its uppercase ID and echoes that ID',
+      async (value) => {
+        listComments.mockResolvedValue(listResult);
+        const result = await runToolContract(findCommentsTool, { docket_id: value });
+        expect(listComments).toHaveBeenCalledWith(
+          expect.objectContaining({ filter: { docketId: 'EPA-HQ-OW-2022-0114' } }),
+          expect.anything(),
+        );
+        expect((result.structuredContent as { target?: string }).target).toBe(
+          'docket EPA-HQ-OW-2022-0114',
+        );
+        expect(contentText(result)).toContain('Comments on docket EPA-HQ-OW-2022-0114');
+      },
     );
-    expect(contentText(result)).toContain('pass regulationsGovDocketId');
+
+    it('checks an empty lowercase docket under its uppercase ID', async () => {
+      listComments.mockResolvedValue({ totalCount: 0, comments: [] });
+      docketExists.mockResolvedValue(false);
+      const result = await runToolContract(findCommentsTool, { docket_id: 'reg-101355-26' });
+      expect(errorOf(result).message).toContain('REG-101355-26');
+      expect(docketExists).toHaveBeenCalledWith('REG-101355-26', expect.anything());
+    });
+
+    it('reads comment_id under its uppercase ID', async () => {
+      getComment.mockResolvedValue(attachmentOnlyDetail);
+      await runToolContract(findCommentsTool, { comment_id: 'epa-hq-ow-2022-0114-3047' });
+      expect(getComment).toHaveBeenCalledWith('EPA-HQ-OW-2022-0114-3047', expect.anything());
+    });
+
+    it('resolves a lowercase document ID under its uppercase ID', async () => {
+      resolveDocument.mockResolvedValue({
+        documentId: 'EPA-HQ-OW-2022-0114-0027',
+        objectId: '0900006485883ec6',
+        docketId: 'EPA-HQ-OW-2022-0114',
+      });
+      listComments.mockResolvedValue(listResult);
+      await runToolContract(findCommentsTool, { document_object_id: 'epa-hq-ow-2022-0114-0027' });
+      expect(resolveDocument).toHaveBeenCalledWith('EPA-HQ-OW-2022-0114-0027', expect.anything());
+    });
+
+    it('still answers not_found for an ID shape with no request, quoting it as given', async () => {
+      const result = await runToolContract(findCommentsTool, { docket_id: 'epa hq' });
+      const error = errorOf(result);
+      expect(error.data?.reason).toBe('not_found');
+      expect(error.message).toContain('"epa hq"');
+      expect(listComments).not.toHaveBeenCalled();
+    });
   });
 
   it('names the resolved document and its docket when a resolved document has no comments', async () => {
@@ -811,6 +933,24 @@ describe('findCommentsTool', () => {
       expect(notice).toContain('posted_after');
     });
 
+    it('serves per_page past 250 at 250, and pages at the size it served', async () => {
+      // 1,756 comments are 8 pages of 250 but 7 of 251.
+      listComments.mockResolvedValue({ totalCount: 1756, comments: comments(250) });
+      const result = await runToolContract(findCommentsTool, {
+        document_object_id: '0900006485883ec6',
+        per_page: 251,
+        page: 7,
+      });
+      const structured = result.structuredContent as Record<string, unknown>;
+
+      expect(listComments.mock.calls[0]![0]).toMatchObject({ perPage: 250, page: 7 });
+      expect(structured).toMatchObject({ totalPages: 8, nextPage: 8 });
+      expect(structured).not.toHaveProperty('truncated');
+      const notice = 'Requested per_page 251; applied per_page 250, the largest this tool serves.';
+      expect(structured.notice).toBe(notice);
+      expect(contentText(result)).toContain(`> ${notice}`);
+    });
+
     it('accepts pages 21 through 40 and rejects 41 at the schema', () => {
       const parse = (page: number) =>
         findCommentsTool.input.safeParse({ docket_id: 'EPA-HQ-OW-2022-0114', page }).success;
@@ -828,6 +968,80 @@ describe('findCommentsTool', () => {
       for (const key of ['totalCount', 'totalPages', 'nextPage', 'truncated', 'notice']) {
         expect(structured).not.toHaveProperty(key);
       }
+    });
+  });
+
+  describe('attachments without a file', () => {
+    // Live: EPA-HQ-OW-2022-0114-1759 lists four appendices withheld as copyrighted.
+    const withheldDetail: CommentDetailResult = {
+      ...attachmentOnlyDetail,
+      commentId: 'EPA-HQ-OW-2022-0114-1759',
+      bodyText: 'See attached',
+      attachmentOnly: true,
+      attachments: [
+        {
+          title: 'Comment',
+          formats: [
+            {
+              format: 'pdf',
+              fileUrl:
+                'https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-1759/attachment_1.pdf',
+              size: 1145474,
+            },
+          ],
+          restrictReasonType: null,
+        },
+        { title: 'Appendix B', formats: [], restrictReasonType: 'Copyrighted' },
+        { title: 'Appendix F', formats: [], restrictReasonType: null },
+      ],
+    };
+
+    it('relays a withheld attachment on both surfaces instead of dropping it', async () => {
+      getComment.mockResolvedValue(withheldDetail);
+      const result = await runToolContract(findCommentsTool, {
+        comment_id: 'EPA-HQ-OW-2022-0114-1759',
+      });
+      const structured = result.structuredContent as {
+        attachments?: Array<{ title: string; formats: unknown[]; restrictReasonType: unknown }>;
+      };
+      expect(
+        structured.attachments?.map((a) => [a.title, a.formats.length, a.restrictReasonType]),
+      ).toEqual([
+        ['Comment', 1, null],
+        ['Appendix B', 0, 'Copyrighted'],
+        ['Appendix F', 0, null],
+      ]);
+
+      const lines = contentText(result).split('\n');
+      const row = (title: string) => lines.find((l) => l.startsWith(`- **${title}**`));
+      expect(row('Comment')).toContain('attachment_1.pdf');
+      expect(row('Comment')).not.toContain('restrictReasonType');
+      expect(row('Appendix B')).toBe(
+        '- **Appendix B**: file withheld · restrictReasonType: Copyrighted',
+      );
+      expect(row('Appendix F')).toBe('- **Appendix F**: file withheld · restrictReasonType: none');
+      // Upload order survives the render.
+      expect(lines.indexOf(row('Comment')!)).toBeLessThan(lines.indexOf(row('Appendix B')!));
+    });
+
+    it('counts the withheld attachments in the attachment-only notice', async () => {
+      getComment.mockResolvedValue(withheldDetail);
+      const result = await runToolContract(findCommentsTool, {
+        comment_id: 'EPA-HQ-OW-2022-0114-1759',
+      });
+      expect((result.structuredContent as { notice?: string }).notice).toBe(
+        'The substance of this comment is in 3 attachment(s) — see the attachment download URLs. 2 of them have no downloadable file (see restrictReasonType).',
+      );
+    });
+
+    it('keeps the attachment-only notice as it was when every attachment has a file', async () => {
+      getComment.mockResolvedValue(attachmentOnlyDetail);
+      const result = await runToolContract(findCommentsTool, {
+        comment_id: 'EPA-HQ-OAR-2025-0194-31102',
+      });
+      expect((result.structuredContent as { notice?: string }).notice).toBe(
+        'The substance of this comment is in 1 attachment(s) — see the attachment download URLs.',
+      );
     });
   });
 

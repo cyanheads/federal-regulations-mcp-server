@@ -3,7 +3,9 @@
  * @module mcp-server/tools/definitions/format-utils
  */
 
-import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
+import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils';
+import type { FrPresidential } from '@/services/federal-register/types.js';
+import type { Attachment, FileFormat } from '@/services/regulations-gov/types.js';
 
 /** A count with thousands separators (`1608` → `1,608`), as notices print it. */
 export function formatCount(n: number): string {
@@ -53,4 +55,43 @@ export function formatAgencies(
 ): string {
   if (agencies.length === 0) return '—';
   return agencies.map((a) => (a.slug ? `${a.name} (${a.slug})` : a.name)).join('; ');
+}
+
+/**
+ * A presidential document's identifiers as one line — "Executive Order 14192,
+ * signed 2025-01-31, Donald Trump (donald-trump)" — each part present only when
+ * recorded. Not escaped.
+ */
+export function formatPresidential(p: FrPresidential): string {
+  return [
+    `${p.type ?? 'Presidential document'}${p.number ? ` ${p.number}` : ''}`,
+    p.signingDate && `signed ${p.signingDate}`,
+    p.president && `${p.president.name} (${p.president.slug})`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** The significance flag as text; undefined when no determination is recorded. */
+export function formatSignificant(significant: boolean | null): string | undefined {
+  if (significant === null) return;
+  return significant ? 'significant (EO 12866)' : 'not significant (EO 12866)';
+}
+
+/** A downloadable file as Markdown: `pdf: [url](url) (1234 bytes)`. */
+export function formatFileLink(f: FileFormat): string {
+  return `${escapeMarkdownInline(f.format)}: ${markdownLink(f.fileUrl, f.fileUrl)} (${f.size != null ? `${f.size} bytes` : 'size unknown'})`;
+}
+
+/**
+ * An attachment as one Markdown list item. A withheld file always says why,
+ * "none" included; a downloadable one only when restricted.
+ */
+export function formatAttachment(a: Attachment): string {
+  const files = a.formats.length ? a.formats.map(formatFileLink).join(', ') : 'file withheld';
+  const restriction =
+    a.restrictReasonType != null || a.formats.length === 0
+      ? ` · restrictReasonType: ${escapeMarkdownInline(a.restrictReasonType ?? 'none')}`
+      : '';
+  return `- **${escapeMarkdownInline(a.title)}**: ${files}${restriction}`;
 }

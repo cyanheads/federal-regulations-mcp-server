@@ -18,7 +18,7 @@ export const documentResource = resource('regulations://document/{documentNumber
   name: 'federal-register-document',
   title: 'Federal Register document',
   description:
-    'A single Federal Register document by FR number: metadata, citation and pages, and the cross-source handles (Regulations.gov docket and document IDs, printed docket numbers, affected CFR parts, comment count and comment URL) that chain into the search, comment, and codified-text tools. Mirrors regulations_get_document (full text omitted).',
+    'A single Federal Register document by FR number: metadata, citation and pages, EO 12866 significance, presidential-document identifiers (subtype, number, signing date, president), and the cross-source handles (Regulations.gov docket and document IDs, printed docket numbers, affected CFR parts, comment count and comment URL) that chain into the search, comment, and codified-text tools. Mirrors regulations_get_document (full text omitted).',
   mimeType: 'application/json',
   /**
    * Validated as the template hands it over: the pattern admits only unreserved

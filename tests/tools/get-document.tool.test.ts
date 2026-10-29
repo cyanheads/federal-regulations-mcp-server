@@ -28,6 +28,8 @@ const detail: FrDocumentDetail = {
   startPage: 23001,
   endPage: 23050,
   effectiveOn: '2025-08-01',
+  significant: true,
+  presidential: null,
   commentsCloseOn: null,
   commentPeriodOpen: null,
   agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
@@ -202,6 +204,39 @@ describe('getDocumentTool', () => {
     ];
     expect(getDocumentTool.output.parse({ ...detail, agencies }).agencies).toEqual(agencies);
     expect(getDocumentTool.output.safeParse({ ...detail, agencies: ['EPA'] }).success).toBe(false);
+  });
+
+  it('format() renders significance and each presidential field, and nothing unrecorded', () => {
+    const render = (d: FrDocumentDetail) =>
+      getDocumentTool.format!(d)
+        .map((b) => (b.type === 'text' ? b.text : ''))
+        .join('');
+    expect(render(detail)).toContain('**Significance:** significant (EO 12866)');
+    expect(render({ ...detail, significant: false })).toContain(
+      '**Significance:** not significant (EO 12866)',
+    );
+    const proclamation = render({
+      ...detail,
+      type: 'Presidential Document',
+      significant: null,
+      presidential: {
+        type: 'Proclamation',
+        number: '10886',
+        signingDate: '2025-01-20',
+        president: { name: 'Donald Trump', slug: 'donald-trump' },
+      },
+    });
+    expect(proclamation).toContain(
+      '**Presidential document:** Proclamation 10886, signed 2025-01-20, Donald Trump (donald-trump)',
+    );
+    expect(proclamation).not.toContain('**Significance:**');
+    const memorandum = render({
+      ...detail,
+      significant: null,
+      presidential: { type: 'Memorandum', number: null, signingDate: null, president: null },
+    });
+    expect(memorandum).toContain('**Presidential document:** Memorandum\n');
+    expect(render({ ...detail, presidential: null })).not.toContain('Presidential document');
   });
 
   it('format() names the issuing agency in the header line', () => {

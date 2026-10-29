@@ -43,15 +43,31 @@ export interface RawDocketAttributes {
   title?: string | null;
 }
 
-/** Raw document attributes. */
+/** One downloadable file format, as Regulations.gov serves it. */
+export interface RawFileFormat {
+  fileUrl?: string | null;
+  format?: string | null;
+  size?: number | null;
+}
+
+/**
+ * Raw document attributes. `docAbstract`, `fileFormats`, `pageCount`, and
+ * `restrictReasonType` ride on the single-document endpoint only; a document with
+ * no main file comes as `fileFormats: null`, and `pageCount` is 0 when nothing
+ * was counted.
+ */
 export interface RawDocumentAttributes {
   commentEndDate?: string | null;
+  docAbstract?: string | null;
   docketId?: string | null;
   documentType?: string | null;
+  fileFormats?: RawFileFormat[] | null;
   frDocNum?: string | null;
   objectId?: string | null;
   openForComment?: boolean | null;
+  pageCount?: number | null;
   postedDate?: string | null;
+  restrictReasonType?: string | null;
   title?: string | null;
   withdrawn?: boolean | null;
 }
@@ -81,13 +97,15 @@ export interface RawCommentAttributes {
   withdrawn?: boolean | null;
 }
 
-/** Raw attachment record (from `included[]` when `?include=attachments`). */
+/**
+ * Raw attachment record (from `included[]` when `?include=attachments`).
+ * `included[]` arrives in no particular order; `docOrder` is the upload order.
+ * A withheld file comes as `fileFormats: null`, usually with `restrictReasonType`.
+ */
 export interface RawAttachmentAttributes {
-  fileFormats?: Array<{
-    format?: string | null;
-    fileUrl?: string | null;
-    size?: number | null;
-  }> | null;
+  docOrder?: number | null;
+  fileFormats?: RawFileFormat[] | null;
+  restrictReasonType?: string | null;
   title?: string | null;
 }
 
@@ -145,16 +163,48 @@ export interface ResolvedDocument {
   objectId: string;
 }
 
-/** Normalized attachment. */
-export interface CommentAttachment {
-  formats: Array<{ format: string; fileUrl: string; size: number | null }>;
+/** One downloadable file. */
+export interface FileFormat {
+  fileUrl: string;
+  format: string;
+  /** Bytes; null when Regulations.gov gives no size. */
+  size: number | null;
+}
+
+/** Normalized attachment of a comment or document. */
+export interface Attachment {
+  /** Downloadable files; empty when Regulations.gov withholds the file. */
+  formats: FileFormat[];
+  /** Why the file is withheld (e.g. "Copyrighted"); null when Regulations.gov gives none. */
+  restrictReasonType: string | null;
   title: string;
+}
+
+/** Normalized single-document detail: the document's own files and its attachments. */
+export interface DocumentDetailResult {
+  abstract: string | null;
+  /** In upload order, withheld ones included. */
+  attachments: Attachment[];
+  docketId: string | null;
+  documentId: string;
+  documentType: string | null;
+  /** The document's main file in each format; empty when it has none. */
+  fileFormats: FileFormat[];
+  frDocNum: string | null;
+  objectId: string | null;
+  /** Null when Regulations.gov reports none or 0 — a file never has zero pages. */
+  pageCount: number | null;
+  postedDate: string | null;
+  /** Why the document's content is withheld (e.g. "Copyrighted"), or null. */
+  restrictReasonType: string | null;
+  title: string | null;
+  withdrawn: boolean | null;
 }
 
 /** Normalized comment detail. */
 export interface CommentDetailResult {
   attachmentOnly: boolean;
-  attachments: CommentAttachment[];
+  attachments: Attachment[];
   bodyText: string | null;
   commentId: string;
   commentOnDocumentId: string | null;

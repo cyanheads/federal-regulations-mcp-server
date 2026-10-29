@@ -282,3 +282,38 @@ describe('runUpstream bounds wall clock', () => {
     expect(value).toBe(15_000);
   });
 });
+
+describe('runUpstream retry count', () => {
+  // Only a leg that asks for fewer attempts gets fewer: every leg that names no
+  // count keeps the framework's three retries, four attempts in all.
+  it.each([
+    { name: 'a leg that names no count keeps four attempts', maxRetries: undefined, attempts: 4 },
+    { name: 'a leg with maxRetries 0 makes one attempt', maxRetries: 0, attempts: 1 },
+  ])('$name', async ({ maxRetries, attempts }) => {
+    const ctx = createMockContext();
+    let made = 0;
+
+    const failure = (await runUpstream(
+      ctx,
+      shortBudget(60_000, ctx.signal),
+      {
+        operation: 'probe',
+        context: reqCtx,
+        attemptMs: 1_000,
+        baseDelayMs: 1,
+        ...(maxRetries !== undefined && { maxRetries }),
+      },
+      () => {
+        made++;
+        return Promise.reject(new McpError(JsonRpcErrorCode.ServiceUnavailable, 'HTTP 503'));
+      },
+    ).catch((error: unknown) => error)) as McpError;
+
+    expect(made).toBe(attempts);
+    expect(failure.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+    expect(failure.data?.reason).toBe('upstream_unavailable');
+    expect(failure.message).toBe(
+      `HTTP 503 (failed after ${attempts} attempt${attempts > 1 ? 's' : ''})`,
+    );
+  });
+});

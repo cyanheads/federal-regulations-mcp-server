@@ -973,3 +973,403 @@ describe('search mode pages by section and collapses versions', () => {
     expect(past.message).toContain('page 100');
   });
 });
+
+describe('versions mode lists the dates a part or section changed (#67)', () => {
+  type VersionsRow = {
+    identifier: string;
+    date: string;
+    issue_date: string;
+    part: string;
+    [key: string]: unknown;
+  };
+
+  /** A row as eCFR writes it; `name` pads the section number with a run of spaces. */
+  function row(
+    identifier: string,
+    date: string,
+    issueDate: string,
+    overrides: Partial<VersionsRow> = {},
+  ): VersionsRow {
+    return {
+      date,
+      amendment_date: date,
+      issue_date: issueDate,
+      identifier,
+      name: `§ ${identifier}   Heading of ${identifier}.`,
+      part: identifier.split('.')[0] ?? identifier,
+      removed: false,
+      subpart: 'A',
+      substantive: true,
+      title: '40',
+      type: 'section',
+      ...overrides,
+    };
+  }
+
+  /** 40 CFR 141.61's seven versions, verbatim as eCFR listed them on 2026-10-29. */
+  const SECTION_141_61 = [
+    ['2016-12-28', '2017-01-01', true],
+    ['2024-04-26', '2024-04-26', true],
+    ['2024-04-26', '2024-06-03', false],
+    ['2024-06-11', '2024-06-11', true],
+    ['2024-06-25', '2024-06-25', true],
+    ['2025-09-10', '2025-09-10', true],
+    ['2025-09-10', '2025-12-30', false],
+  ].map(([date, issued, substantive]) =>
+    row('141.61', String(date), String(issued), {
+      name: '§ 141.61   Maximum contaminant levels for organic contaminants.',
+      subpart: 'G',
+      substantive: Boolean(substantive),
+    }),
+  );
+
+  /** A cut of part 141 in document order: an appendix between sections, a removed section, 141.61. */
+  const PART_141 = [
+    row('Appendix A to Subpart C of Part 141', '2016-12-28', '2017-01-01', {
+      name: 'Appendix A to Subpart C of Part 141 - Alternative Testing Methods Approved for Analyses Under the Safe Drinking Water Act',
+      part: '141',
+      subpart: 'C',
+      type: 'appendix',
+    }),
+    row('141.35', '2016-12-28', '2017-01-01', { subpart: 'D' }),
+    row('141.35', '2017-01-19', '2017-01-26', { subpart: 'D' }),
+    row('141.43', '2016-12-28', '2017-01-01', { subpart: 'E' }),
+    row('141.43', '2020-09-01', '2020-09-01', { subpart: 'E' }),
+    row('141.43', '2020-10-01', '2020-10-01', { subpart: 'E', removed: true }),
+    ...SECTION_141_61,
+  ];
+
+  /** 2,345 generated versions of part 52, five per section — enough to cross two upstream pages. */
+  const PART_52 = Array.from({ length: 2_345 }, (_, i) =>
+    row(`52.${Math.floor(i / 5) + 1}`, `2018-0${(i % 5) + 1}-15`, `2018-0${(i % 5) + 1}-15`),
+  );
+
+  /** Title 40 in document order: part 52 before part 141. */
+  const TITLE_40 = [...PART_52, ...PART_141];
+
+  const VERSIONS_PATH = '/api/versioner/v1/versions/title-40.json';
+
+  /**
+   * Serve the versions endpoint as eCFR does: part and section matched without
+   * regard to case, `issue_date[gte]` honored, fixed 1,000-row pages, `per_page`
+   * refused with 400, a `§` in the section answered 404, `result_count` a
+   * string, the latest dates absent from an empty set.
+   */
+  function serveVersions(): void {
+    http.route({
+      match: (request) => {
+        const url = new URL(request.url);
+        return url.hostname === 'www.ecfr.gov' && url.pathname === VERSIONS_PATH;
+      },
+      respond: (request) => {
+        const params = new URL(request.url).searchParams;
+        if (params.has('per_page')) {
+          return Response.json(
+            { error: 'Found unpermitted parameter: :per_page' },
+            { status: 400 },
+          );
+        }
+        const section = params.get('section')?.toLowerCase() ?? null;
+        if (section?.includes('§')) {
+          return Response.json({ error: 'Not Found' }, { status: 404 });
+        }
+        const part = params.get('part')?.toLowerCase() ?? null;
+        const since = params.get('issue_date[gte]');
+        const matched = TITLE_40.filter(
+          (r) =>
+            (part === null || r.part.toLowerCase() === part) &&
+            (section === null || r.identifier.toLowerCase() === section) &&
+            (since === null || r.issue_date >= since),
+        );
+        const page = Number(params.get('page') ?? '1');
+        const newest = matched
+          .map((r) => r.date)
+          .sort()
+          .at(-1);
+        return Response.json({
+          content_versions: matched.slice((page - 1) * 1_000, page * 1_000),
+          meta: {
+            title: '40',
+            result_count: String(matched.length),
+            ...(newest && { latest_amendment_date: newest }),
+          },
+        });
+      },
+    });
+  }
+
+  /** The versions requests eCFR received, as their query parameters. */
+  function versionRequests(): URLSearchParams[] {
+    return http.calls
+      .map((c) => new URL(c.request.url))
+      .filter((u) => u.pathname === VERSIONS_PATH)
+      .map((u) => u.searchParams);
+  }
+
+  type Version = Record<string, unknown> & { identifier: string; date: string; part: string };
+  type VersionsOut = Structured & { versions?: Version[]; latestAmendmentDate?: string | null };
+
+  async function versions(input: Record<string, unknown>) {
+    const result = await runToolContract(browseCfrTool, { mode: 'versions', title: 40, ...input });
+    return { out: structured(result) as VersionsOut, text: text(result) };
+  }
+
+  /** Walk every page of a listing at `perPage`, recording how many upstream reads each page took. */
+  async function walkVersions(input: Record<string, unknown>, perPage: number) {
+    const pages: { out: VersionsOut; reads: number }[] = [];
+    for (let page = 1; page <= 200; page++) {
+      const before = versionRequests().length;
+      const { out } = await versions({ ...input, page, per_page: perPage });
+      pages.push({ out, reads: versionRequests().length - before });
+      if (!out.truncated) break;
+    }
+    return pages;
+  }
+
+  beforeEach(() => {
+    serveVersions();
+  });
+
+  it("lists 40 CFR 141.61's seven versions oldest first, with the latest amendment date", async () => {
+    const { out, text: body } = await versions({ part: '141', section: '141.61' });
+
+    expect(out.mode).toBe('versions');
+    expect(out.versions?.map((v) => [v.date, v.issueDate, v.substantive])).toEqual(
+      SECTION_141_61.map((r) => [r.date, r.issue_date, r.substantive]),
+    );
+    expect(out.latestAmendmentDate).toBe('2025-09-10');
+    expect(out.totalCount).toBe(7);
+    expect(out.notice).toBeUndefined();
+    expect(out.versions?.[0]).toEqual({
+      type: 'section',
+      identifier: '141.61',
+      heading: '§ 141.61 Maximum contaminant levels for organic contaminants.',
+      part: '141',
+      subpart: 'G',
+      cfrCite: '40 CFR 141.61',
+      date: '2016-12-28',
+      issueDate: '2017-01-01',
+      substantive: true,
+      removed: false,
+    });
+    // Every field reaches the text surface too.
+    expect(body).toContain('latest amendment: 2025-09-10');
+    expect(body).toContain('`40 CFR 141.61`');
+    expect(markdownText(body)).toContain(
+      '§ 141.61 Maximum contaminant levels for organic contaminants.',
+    );
+    expect(body).toContain('section `141.61`, part 141, subpart G, issued 2025-12-30');
+    expect(body).toContain('not substantive (editorial re-issue)');
+    expect(versionRequests()).toHaveLength(1);
+  });
+
+  it.each([
+    ['61', 'no section in part 141 is numbered without its part, so it was joined to it'],
+    ['§ 141.61', 'removed the leading "§"'],
+    ['141.61(c)', 'dropped the paragraph designator "(c)"'],
+    ['40 CFR 141.61', 'removed the leading "40 CFR"'],
+  ])('reads section %j as 141.61, with a notice naming the rewrite', async (section, step) => {
+    const { out, text: body } = await versions({ part: '141', section });
+
+    expect(out.versions).toHaveLength(7);
+    // The full wording is tabled once, at describeRewrite's own seam.
+    expect(out.notice).toContain(`Section "${section}" was read as 141.61: ${step}`);
+    expect(markdownText(body)).toContain(`Section "${section}" was read as 141.61`);
+    // A marker the versioner 404s on is never sent.
+    expect(versionRequests().every((p) => !p.get('section')?.includes('§'))).toBe(true);
+    expect(versionRequests().at(-1)?.get('section')).toBe('141.61');
+  });
+
+  it('refuses a section citing another title before any request', async () => {
+    const error = failure(
+      await runToolContract(browseCfrTool, {
+        mode: 'versions',
+        title: 40,
+        part: '141',
+        section: '21 CFR 141.61',
+      }),
+    );
+
+    expect(error.data).toMatchObject({ reason: 'conflicting_title' });
+    expect(error.message).toBe('Section "21 CFR 141.61" cites title 21, but title is 40.');
+    expect(versionRequests()).toHaveLength(0);
+  });
+
+  it.each([
+    [{ title: undefined, part: '141' }, 'title_required_for_part'],
+    [{ title: undefined }, 'versions_scope_required'],
+    [{}, 'versions_scope_required'],
+    [{ section: '141.61' }, 'versions_scope_required'],
+    [{ section: '141.61', changed_since: '2025-01-01' }, 'versions_scope_required'],
+  ])('refuses scope %j as %s before any request', async (scope, reason) => {
+    const result = await runToolContract(browseCfrTool, { mode: 'versions', title: 40, ...scope });
+    const error = failure(result);
+
+    expect(error.data).toMatchObject({ reason });
+    expect(text(result)).toMatch(/^Recovery: .+$/m);
+    expect(versionRequests()).toHaveLength(0);
+  });
+
+  it('counts a whole part and names the next page', async () => {
+    const { out } = await versions({ part: '141' });
+
+    expect(out.totalCount).toBe(PART_141.length);
+    expect(out.versions?.[0]).toMatchObject({
+      type: 'appendix',
+      identifier: 'Appendix A to Subpart C of Part 141',
+      cfrCite: 'Appendix A to Subpart C of Part 141, Title 40',
+    });
+    expect(out.truncated).toBeUndefined();
+
+    const narrow = await versions({ part: '141', per_page: 5 });
+    expect(narrow.out.truncated).toBe(true);
+    expect(narrow.out.notice).toBe(
+      'Part 141 of title 40 holds 13 versions; this is page 1 of 3. Request page 2 for the next 5, or raise per_page (max 50).',
+    );
+    expect(narrow.text).toContain('Request page 2 for the next 5');
+  });
+
+  it.each([50, 30])(
+    'walks part 52 at per_page %i across both 1,000-row upstream boundaries, no gap or repeat',
+    async (perPage) => {
+      const pages = await walkVersions({ part: '52' }, perPage);
+      const walked = pages.flatMap((p) => p.out.versions ?? []);
+
+      expect(pages).toHaveLength(Math.ceil(PART_52.length / perPage));
+      expect(pages.every((p) => p.out.totalCount === PART_52.length)).toBe(true);
+      expect(walked.map((v) => `${v.identifier}@${v.date}`)).toEqual(
+        PART_52.map((r) => `${r.identifier}@${r.date}`),
+      );
+      // A page that straddles an upstream boundary reads both pages; no page reads more.
+      const straddling = pages.filter((_, i) => {
+        const first = i * perPage;
+        const last = first + perPage - 1;
+        return Math.floor(first / 1_000) !== Math.floor(Math.min(last, PART_52.length - 1) / 1_000);
+      });
+      expect(straddling.length).toBe(perPage === 30 ? 2 : 0);
+      expect(pages.map((p) => p.reads)).toEqual(pages.map((p) => (straddling.includes(p) ? 2 : 1)));
+      expect(versionRequests().every((p) => !p.has('per_page'))).toBe(true);
+    },
+  );
+
+  it('answers a page past the end with no rows and a notice naming the last page', async () => {
+    const { out, text: body } = await versions({
+      part: '141',
+      section: '141.61',
+      page: 3,
+      per_page: 5,
+    });
+
+    expect(out.versions).toEqual([]);
+    expect(out.totalCount).toBe(7);
+    expect(out.notice).toBe(
+      "Page 3 is past the end of 40 CFR 141.61's versions: its 7 versions end on page 2 at per_page 5. Request page 2 or earlier.",
+    );
+    expect(body).toContain('Request page 2 or earlier');
+  });
+
+  it('keeps versions issued on or after changed_since', async () => {
+    const { out } = await versions({ part: '141', changed_since: '2025-01-01' });
+
+    expect(out.versions?.map((v) => v.issueDate)).toEqual(['2025-09-10', '2025-12-30']);
+    expect(versionRequests()[0]?.get('issue_date[gte]')).toBe('2025-01-01');
+  });
+
+  it('says nothing was issued since a date that postdates every version', async () => {
+    const { out, text: body } = await versions({ part: '141', changed_since: '2099-01-01' });
+
+    expect(out.versions).toEqual([]);
+    expect(out.latestAmendmentDate).toBeNull();
+    expect(out.totalCount).toBe(0);
+    expect(out.notice).toBe(
+      'No version of part 141 of title 40 was issued on or after 2099-01-01. Omit changed_since to list its whole history; if that is empty too, verify the cite with mode "structure".',
+    );
+    expect(body).toContain('latest amendment: none');
+  });
+
+  it('rejects a changed_since that is no calendar day before any request', async () => {
+    const result = await runToolContract(browseCfrTool, {
+      mode: 'versions',
+      title: 40,
+      part: '141',
+      changed_since: '2025-13-45',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(versionRequests()).toHaveLength(0);
+  });
+
+  it('treats a blank changed_since and section as omitted', async () => {
+    const { out } = await versions({ part: '141', section: ' ', changed_since: '' });
+
+    expect(out.totalCount).toBe(PART_141.length);
+    expect(Object.fromEntries(versionRequests()[0] ?? [])).toEqual({ part: '141', page: '1' });
+  });
+
+  it('lists what changed across a title, each row naming its part', async () => {
+    const { out } = await versions({ changed_since: '2020-01-01', per_page: 50 });
+
+    expect(out.versions?.map((v) => `${v.part}:${v.identifier}@${v.date}`)).toEqual([
+      '141:141.43@2020-09-01',
+      '141:141.43@2020-10-01',
+      ...SECTION_141_61.filter((r) => r.issue_date >= '2020-01-01').map(
+        (r) => `141:141.61@${r.date}`,
+      ),
+    ]);
+    expect(versionRequests()[0]?.has('part')).toBe(false);
+  });
+
+  it('answers a part with no versions as an empty list pointing at structure mode', async () => {
+    const { out } = await versions({ part: '99999' });
+
+    expect(out.versions).toEqual([]);
+    expect(out.latestAmendmentDate).toBeNull();
+    expect(out.notice).toBe(
+      'eCFR lists no versions of part 99999 of title 40: no such part exists there. Verify the cite with mode "structure", which lists a part\'s sections.',
+    );
+  });
+
+  it('names every form tried when a section resolves to nothing', async () => {
+    const { out } = await versions({ part: '141', section: '9999(a)' });
+
+    expect(out.versions).toEqual([]);
+    expect(out.notice).toBe(
+      'eCFR lists no versions of section "9999(a)" in part 141 of title 40 (also tried 9999, 141.9999): no such section exists there. Verify the cite with mode "structure", which lists a part\'s sections.',
+    );
+    expect(versionRequests().map((p) => p.get('section'))).toEqual(['9999(a)', '9999', '141.9999']);
+  });
+
+  it('flags pre-coverage and removed rows on the text surface', async () => {
+    const { out, text: body } = await versions({ part: '141', per_page: 50 });
+    const removed = out.versions?.find((v) => v.removed === true);
+
+    expect(removed).toMatchObject({ identifier: '141.43', date: '2020-10-01' });
+    expect(body).toContain(
+      "removed — reading at this date finds nothing; the previous row's date reads the last text",
+    );
+    const lines = body.split('\n');
+    const early = lines.filter((l) =>
+      l.includes('in force when eCFR coverage begins; read it at 2017-01-01'),
+    );
+    // Four rows predate coverage: the appendix, 141.35, 141.43, and 141.61's first.
+    expect(early).toHaveLength(4);
+    expect(early.every((l) => l.includes('2016-12-28'))).toBe(true);
+    expect(lines.find((l) => l.includes('2017-01-19'))).not.toContain('coverage begins');
+  });
+
+  it('leaves structure and search modes without versions fields', async () => {
+    const structure = structured(
+      await runToolContract(browseCfrTool, {
+        mode: 'structure',
+        title: 40,
+        part: '50',
+        section: '50.1',
+      }),
+    ) as VersionsOut;
+
+    expect(structure.nodes?.length).toBeGreaterThan(0);
+    expect(structure.versions).toBeUndefined();
+    expect(structure.latestAmendmentDate).toBeUndefined();
+    expect(versionRequests()).toHaveLength(0);
+  });
+});

@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "federal-regulations-mcp-server",
   "version": "0.6.0",
-  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules and notices), the eCFR (codified, point-in-time CFR full text, locally mirrored), and Regulations.gov (rulemaking dockets and public comments) via MCP. STDIO or Streamable HTTP.",
+  "description": "Search and trace US federal rules across the Federal Register (proposed/final rules, notices, and presidential documents), the eCFR (codified, point-in-time CFR full text and amendment history, locally mirrored), and Regulations.gov (rulemaking dockets, document files, and public comments) via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "Casey Hand",
     "email": "casey@caseyjhand.com",

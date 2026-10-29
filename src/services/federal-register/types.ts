@@ -57,12 +57,24 @@ export interface RawFrDocument {
   end_page?: number | null;
   full_text_xml_url?: string | null;
   html_url?: string | null;
+  /**
+   * The president in office at publication — set on every document, not only
+   * presidential ones, so it is read only where `type` is "Presidential Document".
+   */
+  president?: { identifier?: string | null; name?: string | null } | null;
+  /** EO, proclamation, or determination number; `""` on some memoranda and notices. */
+  presidential_document_number?: string | null;
   publication_date?: string;
   raw_text_url?: string | null;
   regulation_id_numbers?: string[] | null;
   regulations_dot_gov_info?: RawRegulationsDotGovInfo | null;
+  /** The EO 12866 flag; null where no determination is recorded. */
+  significant?: boolean | null;
+  signing_date?: string | null;
   /** First printed page; 0 where the FR records no pages. */
   start_page?: number | null;
+  /** Presidential-document subtype name ("Executive Order"); null on other documents. */
+  subtype?: string | null;
   title?: string;
   type?: string;
 }
@@ -93,8 +105,27 @@ export interface FrPrintedPages {
   startPage: number | null;
 }
 
+/** A presidential document's own identifiers, each null where the FR records none. */
+export interface FrPresidential {
+  /** FR presidential_document_number: an EO, proclamation, or determination ("2026-22") number. */
+  number: string | null;
+  /** FR `president`, `identifier` read as `slug` — the value the `president` filter takes. */
+  president: { name: string; slug: string } | null;
+  signingDate: string | null;
+  /** FR subtype name: "Executive Order", "Proclamation", … */
+  type: string | null;
+}
+
+/** Significance and presidential-document facts every document view carries. */
+export interface FrDocumentClass {
+  /** Null unless the document is a presidential document. */
+  presidential: FrPresidential | null;
+  /** FR `significant` (EO 12866); null where no determination is recorded. */
+  significant: boolean | null;
+}
+
 /** Normalized search-result row. */
-export interface FrSearchResult extends RegulationsGovHandles, FrPrintedPages {
+export interface FrSearchResult extends RegulationsGovHandles, FrPrintedPages, FrDocumentClass {
   abstract: string | null;
   agencies: FrAgency[];
   cfrReferences: CfrReference[];
@@ -140,6 +171,7 @@ export interface FrCitationResponse {
  */
 export interface FrDocumentDetail
   extends FrPrintedPages,
+    FrDocumentClass,
     Omit<RegulationsGovHandles, 'regulationsGovDocketId'> {
   abstract: string | null;
   action: string | null;
@@ -197,6 +229,19 @@ export interface OpenCommentsResponse {
 /** Result orders the Federal Register documents endpoint accepts. */
 export type FrSearchOrder = 'relevance' | 'newest' | 'oldest';
 
+/** Presidential-document subtypes the `presidential_document_type` condition accepts. */
+export const PRESIDENTIAL_DOCUMENT_TYPES = [
+  'determination',
+  'executive_order',
+  'memorandum',
+  'notice',
+  'other',
+  'presidential_order',
+  'proclamation',
+] as const;
+
+export type PresidentialDocumentType = (typeof PRESIDENTIAL_DOCUMENT_TYPES)[number];
+
 /** The document filters every Federal Register query shares, all ANDed. */
 export interface FrFilters {
   agencies?: string[] | undefined;
@@ -206,9 +251,21 @@ export interface FrFilters {
   cfrTitle?: number | undefined;
   /** A docket number as the Federal Register prints it (`docket_ids`). */
   docketId?: string | undefined;
+  /** Effective-date window bounds (YYYY-MM-DD), inclusive. */
+  effectiveAfter?: string | undefined;
+  effectiveBefore?: string | undefined;
+  executiveOrderNumber?: number | undefined;
+  /** A president slug ("donald-trump"); the FR rejects one it does not know. */
+  president?: string | undefined;
+  presidentialDocumentTypes?: PresidentialDocumentType[] | undefined;
   query?: string | undefined;
   /** A Regulation Identifier Number. */
   rin?: string | undefined;
+  /** Signing-date window bounds (YYYY-MM-DD), inclusive. */
+  signedAfter?: string | undefined;
+  signedBefore?: string | undefined;
+  /** Only documents flagged significant (true) or flagged not significant (false). */
+  significant?: boolean | undefined;
   types?: string[] | undefined;
 }
 

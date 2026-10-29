@@ -190,6 +190,79 @@ export interface EcfrAppendixResult {
 }
 
 /**
+ * One version of a section or appendix, from the versioner's
+ * `/versions/title-{n}.json` listing. Each row marks a day the node's text
+ * changed: `date` is the day the version took effect, which is the day
+ * `regulations_get_cfr_section` reads it at, and `issueDate` is the eCFR issue
+ * that published it, which can be later.
+ */
+export interface EcfrVersion {
+  cfrCite: string;
+  date: string;
+  /** The node's name as eCFR writes it ("§ 141.61 Maximum contaminant levels…"), plain text. */
+  heading: string;
+  identifier: string;
+  issueDate: string;
+  part: string;
+  /** True on the row that removed the node; reading at its `date` finds nothing. */
+  removed: boolean;
+  /** Subpart identifier ("G"); null when the node sits in none. */
+  subpart: string | null;
+  /** False on an editorial re-issue that eCFR flags as making no substantive change. */
+  substantive: boolean;
+  type: string;
+}
+
+/** What a versions listing is filtered to within its title. */
+export interface EcfrVersionScope {
+  /** Keep versions published by an eCFR issue on or after this day (`issue_date[gte]`). */
+  changedSince?: string | undefined;
+  part?: string | undefined;
+  section?: string | undefined;
+}
+
+/** One window of a versions listing, with the count and latest date of the whole filtered set. */
+export interface EcfrVersionPage {
+  /** `meta.latest_amendment_date` — the newest `date` across the whole filtered set; null when it is empty. */
+  latestAmendmentDate: string | null;
+  totalCount: number;
+  versions: EcfrVersion[];
+}
+
+/**
+ * Raw versions row. Every field but `subpart` is present on every row sampled
+ * (4,790 across five parts and three titles). `amendment_date` repeats `date` on
+ * all of them, so it is not read.
+ */
+export interface RawEcfrVersion {
+  amendment_date: string;
+  date: string;
+  identifier: string;
+  issue_date: string;
+  name: string;
+  part: string;
+  removed: boolean;
+  subpart: string | null;
+  substantive: boolean;
+  title: string;
+  type: string;
+}
+
+/**
+ * Raw versions envelope. `result_count` is a numeric string; the latest dates are
+ * absent when no row matched, and `page` / `per_page` / `total_pages` appear
+ * only once the set runs past one 1,000-row page.
+ */
+export interface RawEcfrVersionsResponse {
+  content_versions?: RawEcfrVersion[];
+  meta?: {
+    latest_amendment_date?: string;
+    latest_issue_date?: string;
+    result_count?: string;
+  } | null;
+}
+
+/**
  * One search hit, from the live eCFR search API or the local mirror.
  *
  * `hierarchyPath` differs by provenance: a live hit pairs the part's label with

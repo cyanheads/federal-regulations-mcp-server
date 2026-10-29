@@ -10,12 +10,12 @@ US federal regulatory law as one workflow server over three official sources: th
 
 | Name | Description | Key Inputs | Source · Auth | Annotations |
 |:-----|:------------|:-----------|:--------------|:------------|
-| `regulations_search_rules` | The 80% entry point. Search the Federal Register for proposed rules, final rules, notices, and presidential documents — filter by agency, document type, date range, and topic, ranked by relevance or date. | `query`, `type`, `agencies`, `published_after`, `published_before`, `order`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
-| `regulations_get_document` | Fetch one Federal Register document by FR number: metadata, agencies, RIN, effective/comment dates, the cross-source handles (docket ID, affected CFR parts) that chain into the comment and codified-text tools, and on request a bounded, resumable window of the plain-text body. | `document_number`, `include_full_text`, `offset`, `max_chars` | Federal Register · keyless | `readOnlyHint`, `idempotentHint` |
-| `regulations_browse_cfr` | List the CFR titles, a title's chapters, or every section and appendix in a part (flattened, paged) to discover what exists before fetching section text, or full-text-search the codified CFR for sections matching a phrase, one row per section. | `mode`, `title`, `part`, `query`, `date`, `page`, `per_page` | eCFR · keyless | `readOnlyHint`, `openWorldHint` |
+| `regulations_search_rules` | The 80% entry point. Search the Federal Register for proposed rules, final rules, notices, and presidential documents — filter by agency, document type, date range, topic, CFR part, printed docket number, RIN, EO 12866 significance, effective date, and for presidential documents the executive order number, subtype, president, and signing date, ranked by relevance or date; or resolve a page cite to its document. | `query`, `type`, `agencies`, `published_after`, `published_before`, `cfr_title`, `cfr_part`, `docket_id`, `rin`, `citation`, `citation_date`, `significant`, `effective_after`, `effective_before`, `executive_order_number`, `presidential_document_type`, `president`, `signed_after`, `signed_before`, `order`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
+| `regulations_get_document` | Fetch one Federal Register document by FR number: metadata, agencies, RIN, effective/comment dates, EO 12866 significance and presidential-document identifiers, the cross-source handles (docket ID, affected CFR parts) that chain into the comment and codified-text tools, and on request a bounded, resumable window of the plain-text body. | `document_number`, `include_full_text`, `offset`, `max_chars` | Federal Register · keyless | `readOnlyHint`, `idempotentHint` |
+| `regulations_browse_cfr` | List the CFR titles, a title's chapters, or every section and appendix in a part (flattened, paged) to discover what exists before fetching section text, full-text-search the codified CFR for sections matching a phrase, one row per section, or list the dates a part's or one section's text changed (`versions`). | `mode`, `title`, `part`, `section`, `query`, `date`, `changed_since`, `page`, `per_page` | eCFR · keyless | `readOnlyHint`, `openWorldHint` |
 | `regulations_get_cfr_section` | Read the codified text at a CFR location via eCFR — a section, a whole part, or an appendix — current or as of a past date, as one bounded, resumable window of text. "What does 40 CFR 50.1 say today / as of 2019-01-01?" | `title`, `part`, `section`, `appendix`, `date`, `offset`, `max_chars` | eCFR · keyless | `readOnlyHint`, `idempotentHint` |
-| `regulations_get_docket` | Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-2025-0194`): docket metadata plus the documents filed in it (NPRM, final rule, supporting materials). | `docket_id`, `document_types`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `idempotentHint` |
-| `regulations_find_comments` | Fetch public comments on a Federal Register document or a docket from Regulations.gov, resolving comment bodies and flagging when the substance lives in an attachment. The unique corpus — what citizens and organizations actually submitted. | `docket_id`, `document_object_id`, `fr_document_number`, `comment_id`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `openWorldHint` |
+| `regulations_get_docket` | Pull a rulemaking docket from Regulations.gov by docket ID (e.g. `EPA-HQ-OAR-2025-0194`): docket metadata plus the documents filed in it (NPRM, final rule, supporting materials), searchable by text; or read one document by ID for its file download URLs and attachments. | `docket_id`, `document_id`, `search_term`, `document_types`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `idempotentHint` |
+| `regulations_find_comments` | Fetch public comments on a Federal Register document or a docket from Regulations.gov, resolving comment bodies and flagging when the substance lives in an attachment. The unique corpus — what citizens and organizations actually submitted. | `docket_id`, `document_object_id`, `fr_document_number`, `comment_id`, `search_term`, `posted_after`, `posted_before`, `per_page`, `page` | Regulations.gov · **key required** | `readOnlyHint`, `openWorldHint` |
 | `regulations_list_open_comments` | Tracking tool: documents currently open for public comment — proposed rules and comment-requesting final rules by default, notices on request — soonest closing first, filterable by agency and topic. "What can I still weigh in on?" Federal Register's open-comment window is the spine; each row carries the Regulations.gov IDs, comment count, and comment URL the FR embeds. | `query`, `type`, `agencies`, `closing_before`, `per_page`, `page` | Federal Register · keyless | `readOnlyHint`, `openWorldHint` |
 
 7 tools. Tools 1–4 and 7 work with **no key** (keyless core); tools 5–6 require `REGULATIONS_GOV_API_KEY` and fail with an actionable `auth_required` contract error when it is absent. Tool 7 runs keyless on the Federal Register, comment counts included — they are embedded in the Federal Register documents.
@@ -99,7 +99,7 @@ Each definition's `errors[]` is its advertised failure surface: a caller switche
 
 **Every reason declared on this surface is raised, and it is attached wherever the failure is first known.** Two places qualify, covering different failures:
 
-- **The handler**, via `ctx.fail(reason, …)` — for anything decided from the inputs, or from a value a service returned: `conflicting_target`, `location_required`, `target_required`, `multiple_targets`, `query_required`, `title_required_for_part`, the `auth_required` its `hasKey()` gate raises, `date_out_of_range` on the read tool, the `not_found` a service reports by returning `null` (`getSectionText`, `getAppendixText`, `resolveFrDocument`), the `not_found` for a `find_comments` ID shaped like no Regulations.gov ID, and `filter_requires_list_mode` / `date_range_inverted` on the list filters.
+- **The handler**, via `ctx.fail(reason, …)` — for anything decided from the inputs, or from a value a service returned: `conflicting_target`, `conflicting_title`, `location_required`, `target_required`, `multiple_targets`, `query_required`, `title_required_for_part`, `versions_scope_required`, `type_conflict`, the `auth_required` its `hasKey()` gate raises, `date_out_of_range` on the read tool, the `not_found` a service reports by returning `null` (`getSectionText`, `getAppendixText`, `resolveFrDocument`), the `not_found` for a `find_comments` ID shaped like no Regulations.gov ID, and `filter_requires_list_mode` / `date_range_inverted` on the list filters.
 - **The service**, by putting `reason` in the thrown error's `data` — for anything decided from an upstream response, which no handler sees. The handler factory fills the calling definition's declared `recovery` for that reason, so one service throw carries each tool's own hint, and adds nothing where the caller declares none. This is how `rate_limited`, the `auth_required` a rejected key produces, the Regulations.gov `not_found` (404, and the 400 that reports an unparseable ID), the search `date_out_of_range`, `title_not_found`, the Federal Register `not_found`, and `upstream_unavailable` reach the wire.
 
 **`auth_required` is the one reason both places raise, because the failure has two shapes.** The `hasKey()` gate names a key that was never configured; a key that *is* configured and rejected by Regulations.gov is the same problem one step further on, and the declared recovery — set a working key — is the answer to both. Only the gate used to say so: a rejected key came back as a bare `Forbidden` with nothing to switch on, for exactly the case the recovery was written for. api.data.gov answers a key it will not accept with 403 (`API_KEY_INVALID`, and `API_KEY_MISSING` for a request carrying none) and reserves 401 for the same class, so the service raises the reason on either status, as `Unauthorized` — the code both tools declare `auth_required` against, not the `Forbidden` a 403 maps to. That is the same trade `withUpstreamReason` makes for a `Timeout`: a contract naming a code the wire contradicts is the defect, and the status it lost survives in the message, which is also the only thing separating the two shapes. The upstream body is deliberately *not* captured on this branch — a rejected-credential response is the one place an upstream tends to echo what it was sent.
@@ -128,10 +128,10 @@ The wrapper classifies by **position, not by message**. Reaching its catch means
 
 | Failure | Code on the wire | Why it stays undeclared |
 |:--------|:-----------------|:------------------------|
-| Input rejected by the Zod schema — a title outside 1–50, a malformed FR document number, a date that is not ISO 8601 | `InvalidParams` | Rejected at the schema boundary before any handler runs, and the validation error already names the field. |
+| Input rejected by the Zod schema — a title outside 1–50, a malformed FR document number, a date that is not ISO 8601, a `per_page` or `max_chars` below its floor or fractional | `InvalidParams` | Rejected at the schema boundary before any handler runs, and the validation error already names the field. A `per_page` or `max_chars` above its ceiling is not among them while clamping is on: it is served at the ceiling with a notice (Design Decisions). |
 | A response body that is neither valid JSON nor a recognizable HTML error page | `ValidationError` | A parse failure, not an unreachable upstream — a baseline code, free to bubble. |
-| Caller cancellation via `ctx.signal` | `InternalError` on the Federal Register and eCFR legs, `Timeout` on the Regulations.gov leg | The caller ended the request; there is nothing to recover. The code differs because the abort is named by whoever catches it — `fetchWithTimeout` for the first two, the framework's classifier for the raw `AbortError` `fetchUpstream` re-throws. Neither is what a *deadline* answers, which is the distinction `runUpstream` keeps: an expiry the caller did not ask for is an upstream that failed to respond, and leaves as `upstream_unavailable`. |
-| A 404 from an eCFR endpoint that always exists (`titles.json`, `ancestry`) | `NotFound`, or absorbed | A 404 is translated only where it can mean "no such record" — the versioner `full` and `structure` routes, and the Regulations.gov single-resource routes. `ancestry` is a nicety whose failure is swallowed into a bare `Title N` path. |
+| Caller cancellation via `ctx.signal` | `RequestCancelled` (-32011) on every leg | The caller ended the request; there is nothing to recover. The framework's handler factories settle any throw raised after the request's signal fired as `RequestCancelled`, whatever the leg threw. That is not what a *deadline* answers, which is the distinction `runUpstream` keeps: an expiry the caller did not ask for is an upstream that failed to respond, and leaves as `upstream_unavailable`. |
+| A 404 from an eCFR endpoint that always exists (`titles.json`, `ancestry`) | `NotFound`, or absorbed | A 404 is translated only where it can mean "no such record" — the versioner `full` and `structure` routes, and the Regulations.gov single-resource routes. `ancestry` decorates a read whose text is already in hand, so any failure of it — a 404 included, since the read just proved the location exists — keeps the read: `hierarchyPath` falls back to the cited levels (`Title 40 › Part 141 › § 141.61`) and `notice` says the rest are missing. One attempt, no retry, 8 s (or the budget's remainder). A caller cancellation propagates. |
 | A 4xx rejecting a request this server built, not one the caller described — an eCFR search rejection naming a field other than `date`, a Regulations.gov 400 whose body is not `Invalid ID:`, any other 4xx on a route with no lookup semantics | `InvalidParams` / `InvalidRequest` | The upstream is faulting a query the handler assembled, so there is no input the caller can change; the rejection text it sent is the useful part and rides the message. A reason here would advertise a recovery that does not exist. |
 
 `tests/tools/error-contracts.test.ts` holds the invariant: it drives the real services against a fetch harness and asserts on `structuredContent.error.data.reason` and the `Recovery:` line, so a reason that stops reaching the wire fails a test instead of going quiet. Each row is a wire assertion, not a branch assertion — a test that reached into the handler would pass while the answer stayed blank, which is the shape every defect above took.
@@ -201,6 +201,8 @@ A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:pa
 | `REGULATIONS_GOV_BASE_URL` | No | Override the Regulations.gov API base. Default `https://api.regulations.gov/v4`. |
 | `ECFR_MIRROR_PATH` | No | Filesystem path for the eCFR SQLite mirror DB. Default a data dir under the project (e.g. `./data/ecfr-mirror.sqlite`). |
 | `ECFR_MIRROR_REFRESH_CRON` | No | Cron expression for an in-process mirror refresh (HTTP only). Unset — the default — registers no job. |
+| `ECFR_MIRROR_TITLES` | No | Comma-separated CFR titles to mirror (e.g. `21,40`). Unset mirrors all 50. |
+| `REGULATIONS_CLAMP_LIMITS` | No | `z.stringbool()`, default `true`. Serve a `per_page` or `max_chars` above its ceiling at the ceiling, with a notice. `false` advertises the ceiling as a schema maximum and rejects a larger value instead. |
 
 `server-config.ts` lazy-parses these with a Zod schema via `parseEnvConfig`, mapping schema paths → env var names so a config error names the variable. `REGULATIONS_GOV_API_KEY` is `z.string().optional()` — its absence is a valid (keyless-core) deployment, enforced per-tool at call time, not at startup.
 
@@ -213,6 +215,18 @@ Adding `REGULATIONS_GOV_API_KEY` (and any other env var) requires the matching e
 ### The paging contract
 
 `regulations_search_rules`, `regulations_get_docket`, and `regulations_find_comments` list mode page the same way, through `pageSpan()` in `src/mcp-server/tools/definitions/paging.ts`, in the shape `regulations_list_open_comments` already used. `total` is `totalCount`, or `documentCount` on `get_docket`; the ceiling is the last page the upstream serves.
+
+Every `per_page` below, and `max_chars` on the two text-window reads, passes through `src/mcp-server/tools/definitions/size-limit.ts` (the field schema, the clamp, its notice, and its counter; `tests/tools/size-limit.test.ts` is its seam). `totalPages`, `nextPage`, `cap`, `truncated`, the past-end notice, and the `fullTextNextOffset` / `bodyTextNextOffset` windows all follow the applied size, not the requested one.
+
+| Size | Floor | Ceiling | Default |
+|---|---|---|---|
+| `search_rules` `per_page` | 2 | 100 | 20 |
+| `list_open_comments` `per_page` | 1 | 100 | 20 |
+| `browse_cfr` `per_page` | 1 | 50 | 20 |
+| `get_docket` / `find_comments` `per_page` | 5 | 250 | 25 |
+| `get_document` / `get_cfr_section` `max_chars` | 1 | 200,000 | 64,000 (applied in the handler, not a schema default) |
+
+Above its ceiling a size is served at the ceiling and the response's `notice` leads with `Requested per_page 101; applied per_page 100, the largest this tool serves.` (raw numbers, no separators, so they paste back; `max_chars` reads the same). Any other notice on the call — past-end, truncation, empty result, cite rewrite, hierarchy fallback — follows it in the same string. A clamp writes a `ctx.log` info line (`Clamped per_page` / `Clamped max_chars`, with `tool`, `requested`, `applied`) and adds 1 to the counter `regulations.size.clamps` (unit `{clamps}`, attribute `mcp.tool.name`). It applies only where the size is used: `browse_cfr` in search mode, a part's listing, and versions mode, not the unpaged structure listings; `get_docket` and `find_comments` in list mode, not detail. A floor, a fraction, or a non-number still rejects (`Send per_page as a whole number.`).
 
 | Signal | Rule |
 |---|---|
@@ -249,10 +263,18 @@ docket_id: z.string().optional()                        // FR conditions[docket_
 rin: z.string().optional()                              // FR conditions[regulation_id_number]
 citation: z.union([z.literal(''), frCitation()]).optional()        // "89 FR 49102" — volume FR page ("F.R.", either case)
 citation_date: z.union([z.literal(''), isoDate()]).optional()      // the date the source note prints beside the cite
+significant: z.boolean().optional()                     // FR conditions[significant]=1 | 0, never another value (FR reads only 1 as true; 0 matches only documents flagged not significant); no determination on any presidential document and most notices, so they match neither
+effective_after: z.union([z.literal(''), isoDate()]).optional()    // FR conditions[effective_date][gte]
+effective_before: z.union([z.literal(''), isoDate()]).optional()   // FR conditions[effective_date][lte]
+executive_order_number: z.number().int().min(1).optional()         // FR conditions[executive_order_numbers][] — bare digits only
+presidential_document_type: z.array(z.enum(['determination', 'executive_order', 'memorandum', 'notice', 'other', 'presidential_order', 'proclamation'])).optional()  // one conditions[presidential_document_type][] per value; `notice` is a presidential notice, not type NOTICE
+president: z.string().optional()                        // FR conditions[president]=<slug>; open string so a new administration's slug works without a release
+signed_after: z.union([z.literal(''), isoDate()]).optional()       // FR conditions[signing_date][gte]; signing precedes publication by days to weeks
+signed_before: z.union([z.literal(''), isoDate()]).optional()      // FR conditions[signing_date][lte]
 order: z.enum(['relevance', 'newest', 'oldest']).optional()
   .describe('Result order. Defaults to relevance with a query, newest without one. relevance without a query falls back to newest first; oldest lists the earliest publications first. Ignored with citation, whose matches come in page order.'),
-per_page: z.number().int().min(2).max(100).optional().default(20)
-  .describe('Results per page (2–100, default 20). The Federal Register API treats exactly 1 as its default page size instead of returning one result.'),
+per_page: perPageInput(PER_PAGE, (bounds) => `Results per page (${bounds}). The Federal Register API treats exactly 1 as its default page size instead of returning one result.`),
+                                                        // bounds: "at least 2, default 20, capped at 100 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "2–100, default 20"
 page: z.number().int().min(1).max(50).optional().default(1)
   .describe('Page number (1–50, default 1). The Federal Register serves 50 pages, so a query reaches 50 × per_page matches (5,000 at per_page 100); totalPages and nextPage in the response say how far this one goes. To reach past that, narrow with published_after/published_before rather than paging deeper.'),
 ```
@@ -281,6 +303,13 @@ page: z.number().int().min(1).max(50).optional().default(1)
     commentsCloseOn: string | null,   // last day of the period this document printed, inclusive, Eastern time
     commentPeriodOpen: boolean | null,  // commentsCloseOn >= today's Eastern date; null without a close date
     effectiveOn: string | null,
+    significant: boolean | null,      // FR significant (EO 12866); null when no determination is recorded
+    presidential: {                   // null unless type is "Presidential Document"
+      type: string | null,            // FR subtype name: "Executive Order", "Proclamation", …
+      number: string | null,          // FR presidential_document_number (an EO, a proclamation, or a determination such as "2026-22"); "" → null; an EO number passes back as executive_order_number
+      signingDate: string | null,     // FR signing_date
+      president: { name: string; slug: string } | null,  // FR president { name, identifier }; null unless both present; the slug passes back as the president filter
+    } | null,
     htmlUrl: string,
   }>,
   // enrichment (the paging contract above):
@@ -289,11 +318,11 @@ page: z.number().int().min(1).max(50).optional().default(1)
   truncated?: boolean,                // totalCount > 50 × per_page — some matches are on no page; date-window to narrow
   shown?: number,                     // results returned this page (with truncated)
   cap?: number,                       // 50 × per_page, the reachable count (with truncated)
-  notice?: string,                    // empty result, page past the end, or truncation guidance
+  notice?: string,                    // per_page above its ceiling, empty result, page past the end, or truncation guidance
 }
 ```
 
-`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close with `(open)` / `(closed)`), each row followed by a sub-row with the citation and pages, printed dockets, Regulations.gov IDs, comment count and URL, CFR parts, RINs, abstract, and URL; the enrichment trailer follows it. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
+`format()` renders a markdown table (FR number · type · title · agencies · publication date · comment-close with `(open)` / `(closed)`), each row followed by a sub-row with the citation and pages, printed dockets, Regulations.gov IDs, comment count and URL, CFR parts, RINs, then — each only when recorded — `presidential: Executive Order 14192, signed 2025-01-31, Donald Trump (donald-trump)` (type null renders "Presidential document") and `significant (EO 12866)` / `not significant (EO 12866)`, then the abstract and URL; the enrichment trailer follows it. The agency cell lists every agency as `Name (slug)` — the slug omitted when null — joined on `; `, so a `content[]`-only client can read the slug it must pass back. Every output field appears in the rendered text (format-parity).
 
 **Order.** `order` resolves before the request: an explicit value is sent as given; omitted, it is `relevance` when `query` is set and `newest` otherwise, and the resolved value is always sent. Measured live: on "PFAS drinking water" (type RULE, 38 matches) the PFAS National Primary Drinking Water Regulation (2024-07773) ranks 1st under `relevance`, 13th under `newest`, 26th under `oldest`; `relevance` without `conditions[term]` returns 200 in newest order; an unrecognized `order` returns 200 and is silently ignored, so the enum is the only guard.
 
@@ -301,15 +330,18 @@ page: z.number().int().min(1).max(50).optional().default(1)
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
-| `invalid_filter` | `ValidationError` | FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) — most often an agency name or acronym where a slug belongs | Correct the parameter the message names; the hint is per field — for `agencies`, the kebab-case slug format and where to read one (`agencies[].slug` on any result); for dates, a real `YYYY-MM-DD` day. |
-| `date_range_inverted` | `ValidationError` | `published_after` later than `published_before` | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
+| `invalid_filter` | `ValidationError` | FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) — most often an agency name or acronym where a slug belongs | Correct the parameter the message names; the hint is per field — for `agencies`, the kebab-case slug format and where to read one (`agencies[].slug` on any result); for `president`, a lowercase slug (`william-j-clinton`, `george-w-bush`, `barack-obama`, `donald-trump`, `joe-biden`); for dates, a real `YYYY-MM-DD` day. |
+| `type_conflict` | `ValidationError` | A presidential filter (`executive_order_number`, `presidential_document_type`, `president`, `signed_after` / `signed_before`) with a `type` that leaves out `PRESDOCU`; `significant` with `type` of `PRESDOCU` alone; or `significant` with any presidential filter | Add `PRESDOCU` to `type` (or omit `type`) for the presidential filters; drop `significant` when searching presidential documents. |
+| `date_range_inverted` | `ValidationError` | `published_after` later than `published_before`, `signed_after` later than `signed_before`, or `effective_after` later than `effective_before` | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
 | `title_required_for_part` | `ValidationError` | `cfr_part` with no `cfr_title` | Add the title the part belongs to (e.g. cfr_title 40 with cfr_part 141), or drop cfr_part to search every title. |
 | `citation_incomplete` | `ValidationError` | `citation` or `citation_date` alone, or the pair with `published_after`/`published_before` | Pass the pair together and drop the date window, which a cite replaces. |
 | `citation_out_of_range` | `ValidationError` | Volume below 59 (the API starts in 1994), or a `citation_date` year other than volume + 1935 | Pair the cite with the date its source note prints; pre-1994 cites cannot be resolved. |
 
-`title_required_for_part`, `citation_incomplete`, and `citation_out_of_range` are thrown before any request, like `date_range_inverted`. The FR's own answer to a part with no title — `{"cfr":"CFR title must be between 1 and 50"}` — names the wrong parameter, so the reason and recovery follow `regulations_browse_cfr`'s, in this tool's parameter names.
+`title_required_for_part`, `citation_incomplete`, `citation_out_of_range`, and `type_conflict` are thrown before any request, like `date_range_inverted`. The FR's own answer to a part with no title — `{"cfr":"CFR title must be between 1 and 50"}` — names the wrong parameter, so the reason and recovery follow `regulations_browse_cfr`'s, in this tool's parameter names.
 
-**CFR, docket, and RIN filters** pass through to FR conditions and AND with everything else. `docket_id` matches the docket numbers the FR prints (`docket_ids`, wrapped or bare), not the Regulations.gov docket: `IRS-2026-0925` finds nothing while its printed `REG-101355-26` finds the document, and no FR condition reaches the Regulations.gov ID. A fragment matches every docket or RIN containing it (`FAA-2026` → 589), hence the "complete ID" guidance. A part with a letter (`1203a`) is a FR 400 that `invalid_filter` names as `cfr_part`. *Decision:* flat `cfr_title` / `cfr_part` rather than a nested `cfr` object — they mirror `browse_cfr`'s `title` / `part`, a title alone is a filter the FR honors, and an optional nested object is a form-client hazard.
+**CFR, docket, and RIN filters** pass through to FR conditions and AND with everything else. `docket_id` matches the docket numbers the FR prints (`docket_ids`, wrapped or bare), not the Regulations.gov docket: `IRS-2026-0925` finds nothing while its printed `REG-101355-26` finds the document, and no FR condition reaches the Regulations.gov ID. A fragment matches every docket or RIN containing it (`FAA-2026` → 589), hence the "complete ID" guidance. A part with a letter (`1203a`) is a FR 400 that `invalid_filter` names as `cfr_part`. The significance, effective-date, and presidential filters AND in the same way, the citation pair's day request included; `citation_incomplete` still rejects only `published_after` / `published_before` beside a cite.
+
+**Presidential and significance filters.** `executive_order_number` sends bare digits: `EO 14192` and `014192` answer 0 with HTTP 200. An unknown `presidential_document_type` or `president` is an FR 400, which `invalid_filter` names as the parameter (`signing_date` and `effective_date` name whichever bound was set), with a per-field hint for `president`. `significant` goes out as `1` or `0` and nothing else. `fields[]` on every FR document request (search, citation day, single document) carries `significant`, `subtype`, `presidential_document_number`, `signing_date`, and `president`; the last is set on every document (the president in office at publication), so it is read only on presidential documents. *Decision:* a nested `presidential` object rather than flat fields, which keeps four null keys and a misleading `president` off every rule row. *Decision:* `number` comes from `presidential_document_number`, which equals `executive_order_number` on every numbered EO and also numbers proclamations and determinations. *Decision:* `president` stays an open string, so a new administration's slug works without a release. *Decision:* `type_conflict` rejects combinations the Federal Register answers with 0, `significant` beside a presidential filter with `type` omitted included (same zero, same reason). *Decision:* the signing window is kept beside the publication window, because documents signed 2025-01-20 through 01-31 include 15 of 68 that published after the 31st. *Decision:* flat `cfr_title` / `cfr_part` rather than a nested `cfr` object — they mirror `browse_cfr`'s `title` / `part`, a title alone is a filter the FR honors, and an optional nested object is a form-client hazard.
 
 **Citation resolution.** A CFR source note prints each cite with its date ("89 FR 49102, June 11, 2024"), and the FR API has no citation condition (`conditions[citation]` is "not a valid field") while full-text search does not match a cite. `searchCitation` lists the cited day in one `conditions[publication_date][is]` request (the heaviest day from 1994 to 2026-09-24 holds 344 documents) and keeps the documents whose `start_page ≤ page ≤ end_page`, ordered by start page and paged locally. Source-note cites usually land mid-document (`89 FR 32744` is inside 2024-07773, pp. 32532–32757), and about one page in ten is shared, so every document on the page comes back. A `start_page` of 0 — most of volume 59 — never matches. With `citation` set, the empty notice explains the miss instead of the generic one: the day's page span (and whether the page falls between documents), a day whose documents carry no page ranges, or a day with no documents. *Decision:* the date is required. It is always printed beside the cite, and it makes resolution one deterministic request; a date-less cite would need a year bisection or the GovInfo link redirect, which silently picks one document on a shared page.
 
@@ -337,8 +369,8 @@ include_full_text: z.boolean().optional()
   .describe('When true, inline one window of the document body as plain text (see offset and max_chars). Omitted, the body URLs alone come back unless offset or max_chars is passed.'),
 offset: z.number().int().min(0).optional()
   .describe('Character offset into the plain-text body where the window starts (default 0). Pass the fullTextNextOffset from the previous call to read on. Implies include_full_text.'),
-max_chars: z.number().int().min(1).max(200_000).optional()
-  .describe('Most body characters to return in this window (1–200,000, default 64,000). Implies include_full_text.'),
+max_chars: maxCharsInput(MAX_CHARS_LIMIT, (bounds) => `Most body characters to return in this window (${bounds}). Implies include_full_text.`),
+                                      // bounds: "at least 1, default 64,000, capped at 200,000 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "1–200,000, default 64,000"
 ```
 
 `include_full_text` has no schema default so the handler can tell an explicit `false` from an omitted flag: `offset` or `max_chars` alone implies the window, and either one beside an explicit `false` fails as `full_text_disabled` rather than silently dropping one of the two instructions.
@@ -359,6 +391,8 @@ max_chars: z.number().int().min(1).max(200_000).optional()
   effectiveOn: string | null,
   commentsCloseOn: string | null,     // last day of the period, inclusive, Eastern time
   commentPeriodOpen: boolean | null,  // as on search_rules
+  significant: boolean | null,        // as on search_rules
+  presidential: { type, number, signingDate, president } | null,  // as on search_rules; null unless a presidential document
   agencies: Array<{ name: string; slug: string | null }>,
   regulationIdNumbers: string[],      // RIN(s)
   cfrReferences: Array<{ title: number; part: string }>,  // → regulations_get_cfr_section
@@ -378,12 +412,12 @@ max_chars: z.number().int().min(1).max(200_000).optional()
   fullTextLength?: number,            // characters in the whole body
   fullTextNextOffset?: number,        // present only while body text remains — pass as offset
 }
-// enrichment: notice — set when offset is at or past the end of the body
+// enrichment: notice — set when max_chars was above its ceiling, or when offset is at or past the end of the body
 ```
 
 **The body is a character window, not the whole text.** A major final rule's plain text runs past a million characters (2024-07773 is ~1.2 M; 2024-25382 ~5.7 M), which overruns a client context in one call and rides both `structuredContent` and `content[]`. Offsets index the unwrapped plain text; a window never splits a surrogate pair, so consecutive windows concatenate back to the exact body. `fullText` is plain text: the raw-text endpoint's `<pre>` envelope is stripped, links reduce to their text, email addresses the published body carries as Cloudflare `[email protected]` placeholders are decoded from their `data-cfemail` value (served on a `<span>` inside the link or on the `<a>` itself), and character references decode in one pass, so an escaped one (`&amp;lt;`) stays literal and one naming no character (`&#xD800;`) is left as written. GPO locator codes in the text (`<bullet>`, `<SUP>`, `<INF>`) are text, not markup, and are left in place.
 
-`format()` renders structured markdown sections: header (FR number, type, agencies as `Name (slug)`, citation and pages, dates, comment close with `(open)` / `(closed)`), abstract, **"Cross-source handles"** block listing the Regulations.gov docket ID, the printed docket numbers, the Regulations.gov document ID, comment count and comment URL, and CFR parts with the exact follow-up tool names, then the body URLs and, when requested, a **"Full text"** heading naming the character span and total length, a `resume with offset=N` line while text remains, and the window itself. Surfacing the handles with their target tool names is what primes the agent to chain.
+`format()` renders structured markdown sections: header (FR number, type, agencies as `Name (slug)`, citation and pages, dates, comment close with `(open)` / `(closed)`, then each only when non-null `**Presidential document:** Executive Order 14192, signed 2025-01-31, Donald Trump (donald-trump)` and `**Significance:** significant (EO 12866)` / `not significant (EO 12866)`, ahead of **Action:**), abstract, **"Cross-source handles"** block listing the Regulations.gov docket ID, the printed docket numbers, the Regulations.gov document ID, comment count and comment URL, and CFR parts with the exact follow-up tool names, then the body URLs and, when requested, a **"Full text"** heading naming the character span and total length, a `resume with offset=N` line while text remains, and the window itself. Surfacing the handles with their target tool names is what primes the agent to chain.
 
 **Errors:**
 | Reason | Code | When | Recovery |
@@ -410,26 +444,30 @@ A lowercase letter prefix is accepted and uppercased before the request, since b
 
 ### 3. `regulations_browse_cfr`
 
-Two modes over the eCFR. `structure` lists the 50 titles, a title's top-level divisions (chapters or subtitles), or — with a title and part — every section and appendix in the part, flattened and paged, to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path, one row per section, paged. Both feed `regulations_get_cfr_section`.
+Three modes over the eCFR. `structure` lists the 50 titles, a title's top-level divisions (chapters or subtitles), or — with a title and part — every section and appendix in the part, flattened and paged, to discover what exists when the exact cite is unknown. `search` runs a full-text query across the codified CFR and returns matching sections with their hierarchy path, one row per section, paged. `versions` lists the dates a part's or one section's text changed, or what changed across a title since a date. All three feed `regulations_get_cfr_section`; a version row's `date` reads that version.
 
-**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `search` → the mirror's FTS5 index when it holds every title the request covers at that title's latest issue, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings` and its `hierarchyPath` takes the part's name from the same map; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its scope filters are `hierarchy[title]` and `hierarchy[part]` (a `conditions[…]` parameter is rejected outright; `hierarchy[part]` with no `hierarchy[title]` is refused with `{"title":["must be specified if specifying hierarchy"]}`, and part matching is exact and case-sensitive — `1203a` hits where `1203A` and `058` silently return zero). It indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Even dated it answers one hit per version: each amendment and cross-reference change is its own hit (`meta.description` reads "Changes to sections matching …"), every one with `ends_on: null` — `lead service line` in title 40 answers 151 hits covering 95 distinct sections and appendices. No parameter restricts it to one hit per section (probed live: `current`, `current_only`, `latest`, `version`, `collapse`, `distinct`, `group_by`, and `change_types[]` are unpermitted; `order` and `paginate_by` change nothing; `/counts/hierarchy` stops at subject groups). Paging is 1-based `page` over `per_page`; `total_count` stops at 10,000 and a page reaching past the 10,000th hit answers 400 `can only paginate through 10,000 results`, while a page past the last answers 200 with no results. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
+**API:** `structure` → eCFR `/versioner/v1/titles.json` (the 50 titles) and `/versioner/v1/structure/{date}/title-{n}.json` (one title's tree). `versions` → `/versioner/v1/versions/title-{n}.json` (below). `search` → the mirror's FTS5 index when it holds every title the request covers at that title's latest issue, otherwise eCFR `/search/v1/results`. Both confirmed live; the search API returns `type`, `hierarchy`, two parallel heading maps, `full_text_excerpt`, `score`, and per-version `starts_on`/`ends_on`. The heading maps are not interchangeable — `hierarchy_headings` holds each level's structural label (`Part 51`, `§ 51.190`) and `headings` holds its name (`Ambient air quality monitoring requirements.`), so the hit's `heading` comes off `headings` and its `hierarchyPath` takes the part's name from the same map; and a `type: "Appendix"` hit carries no `hierarchy.section` at all, identifying itself through `hierarchy.appendix`. Its scope filters are `hierarchy[title]` and `hierarchy[part]` (a `conditions[…]` parameter is rejected outright; `hierarchy[part]` with no `hierarchy[title]` is refused with `{"title":["must be specified if specifying hierarchy"]}`, and part matching is exact and case-sensitive — `1203a` hits where `1203A` and `058` silently return zero). It indexes every *version* of every section — so a query must carry a `date` to select the versions in effect that day, or it matches superseded text alongside current text. Even dated it answers one hit per version: each amendment and cross-reference change is its own hit (`meta.description` reads "Changes to sections matching …"), every one with `ends_on: null` — `lead service line` in title 40 answers 151 hits covering 95 distinct sections and appendices. No parameter restricts it to one hit per section (probed live: `current`, `current_only`, `latest`, `version`, `collapse`, `distinct`, `group_by`, and `change_types[]` are unpermitted; `order` and `paginate_by` change nothing; `/counts/hierarchy` stops at subject groups). Paging is 1-based `page` over `per_page`; `total_count` stops at 10,000 and a page reaching past the 10,000th hit answers 400 `can only paginate through 10,000 results`, while a page past the last answers 200 with no results. Coverage starts 2017-01-03 and ends at `meta.date` on the titles document, which is what an undated "current" search pins to.
 
 **Input schema:**
 ```ts
-mode: z.enum(['structure', 'search'])
-  .describe('"structure": list titles, a title\'s top-level divisions, or a part\'s sections and appendices, to find a cite. "search": full-text search the codified CFR for sections matching a phrase.'),
+mode: z.enum(['structure', 'search', 'versions'])
+  .describe('"structure": list titles, a title\'s top-level divisions, or a part\'s sections and appendices, to find a cite. "search": full-text search the codified CFR for sections matching a phrase. "versions": list the dates a part\'s or section\'s text changed (title plus part or changed_since).'),
 title: z.number().int().min(1).max(50).optional()
-  .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles; provide it alone to list the title\'s top-level divisions (chapters, or subtitles) — not the parts beneath them — or with part to list that part. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.'),
+  .describe('CFR title number (1–50). Structure mode: omit to list all 50 titles; provide it alone to list the title\'s top-level divisions (chapters, or subtitles) — not the parts beneath them — or with part to list that part. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs. Versions mode: required, with part or changed_since.'),
 part: z.string().optional()
-  .describe('CFR part within the title, in both modes — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly once a leading "Part" or "Pt." is dropped, so pass the identifier as eCFR writes it — "58" ("Part 58" also reads as 58), not "058".'),
+  .describe('CFR part within the title, in every mode — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part; versions mode lists the part\'s versions, appendices included. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly once a leading "Part" or "Pt." is dropped, so pass the identifier as eCFR writes it — "58" ("Part 58" also reads as 58), not "058".'),
+section: z.string().optional()
+  .describe('Versions mode: list one section\'s versions rather than its part\'s ("141.61"). Requires part. "61", "§ 141.61", "141.61(c)", and "40 CFR 141.61" resolve to the section, with a notice. Ignored in other modes.'),
 query: z.union([z.literal(''), z.string().min(2)]).optional()
-  .describe('Full-text search phrase (search mode, required in that mode). Ignored in structure mode.'),
+  .describe('Full-text search phrase (search mode, required in that mode). Ignored in structure and versions modes.'),
 date: z.union([z.literal(''), isoDate()]).optional()   // a real calendar day
-  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode honors it for historical hierarchy and rejects a date past the title\'s up-to-date date; search matches only the text in effect that day and always runs against the live API, since the mirror holds current text alone.'),
+  .describe('Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode honors it for historical hierarchy and rejects a date past the title\'s up-to-date date; search matches only the text in effect that day and always runs against the live API, since the mirror holds current text alone. Ignored in versions mode, where each row carries its own date.'),
+changed_since: z.union([z.literal(''), isoDate()]).optional()      // sent as issue_date[gte]
+  .describe('Versions mode: keep only versions published by an eCFR issue dated on or after this day (YYYY-MM-DD). With title alone, lists what changed across the title. Ignored in other modes.'),
 page: z.number().int().min(1).optional().default(1)
-  .describe('1-based page of search results, or of a part\'s listing in structure mode (default 1); ignored by a structure listing above a part. Live eCFR search pages through its first 10,000 hits only, so a page starting past them is refused.'),
-per_page: z.number().int().min(1).max(50).optional().default(20)
-  .describe('Rows per page — search results, or nodes of a part\'s listing in structure mode (1–50, default 20).'),
+  .describe('1-based page of search results, of a part\'s listing in structure mode, or of versions (default 1); ignored by a structure listing above a part. Live eCFR search pages through its first 10,000 hits only, so a page starting past them is refused.'),
+per_page: perPageInput(PER_PAGE, (bounds) => `Rows per page — search results, nodes of a part's listing in structure mode, or versions (${bounds}).`),
+                                                        // bounds: "at least 1, default 20, capped at 50 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "1–50, default 20"
 ```
 
 **Output (structure mode):**
@@ -450,7 +488,7 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
     subpart: string | null,           // part listing: the enclosing subpart's label ("Subpart A—General")
     subjectGroup: string | null,      // part listing: the enclosing subject group's heading
   }>,
-  // enrichment on a part listing: page, totalCount, shown, truncated, notice
+  // enrichment on a part listing: page, totalCount, shown, truncated, notice (per_page above its ceiling leads it)
 }
 ```
 
@@ -486,7 +524,34 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 }
 ```
 
-`format()`: structure mode → a markdown list of nodes with their cites, a part listing grouped under subpart › subject group lines; search mode → a list of hits (cite · heading · excerpt) under a `source` + `sourceScope` provenance line. Paging and count context rides the enrichment trailer.
+**Output (versions mode):**
+```ts
+{
+  mode: 'versions',
+  versions: Array<{                   // this page, in eCFR's order: document order by identifier, oldest first within each
+    type: string,                     // "section" | "appendix"; treat an unknown type as passthrough
+    identifier: string,               // "141.61"; on an appendix row, the identifier regulations_get_cfr_section takes as `appendix`, verbatim
+    heading: string,                  // eCFR `name`, plain text ("§ 141.61 Maximum contaminant levels for organic contaminants.")
+    part: string,
+    subpart: string | null,           // an identifier ("G"), not the structure-mode label; null when in none
+    cfrCite: string,                  // → regulations_get_cfr_section, as structure mode cites the same node
+    date: string,                     // the day this version took effect: pass as get_cfr_section `date` to read it
+    issueDate: string,                // the eCFR issue that published it, which can postdate `date`; changed_since filters on it
+    substantive: boolean,             // false on an editorial re-issue
+    removed: boolean,                 // true on the row that removed the section or appendix
+  }>,
+  latestAmendmentDate: string | null, // newest `date` across every listed version, not just this page; null when none matched
+  // enrichment: totalCount (eCFR's result_count), page, shown, truncated, notice
+}
+```
+
+`format()`: structure mode → a markdown list of nodes with their cites, a part listing grouped under subpart › subject group lines; search mode → a list of hits (cite · heading · excerpt) under a `source` + `sourceScope` provenance line; versions mode → a `**CFR versions** (mode: versions, latest amendment: <date|none>)` header, then one line per row (date · cite · heading · type and identifier, part, subpart, issue date, `substantive` / `not substantive (editorial re-issue)`), with a flag on a row dated before 2017-01-01 (in force when eCFR coverage begins; read it at 2017-01-01) and on a removed row (reading at its date finds nothing; the previous row's date reads the last text). Paging and count context rides the enrichment trailer.
+
+**Versions mode answers "when did this text change", which the source note does not.** A section's source note lists Federal Register cites, and an editorial re-issue is absent from it (40 CFR 141.61's 2025-09-10 version); the versioner's listing is the record of text changes. **API:** `GET /versioner/v1/versions/title-{n}.json` with `part`, `section`, `issue_date[gte]`, and `page`. Scope is refused before any request unless it names `title` plus `part` or `changed_since`, and `section` requires `part`. `section` goes through the read tool's own normalization (`stripCitePrefix`, `sectionCandidates`): `"61"`, `"§ 141.61"`, `"141.61(c)"`, and `"40 CFR 141.61"` all resolve to 141.61, one upstream request per form tried until a form has versions, and the `notice` names the rewrite in the read tool's words. `query` and `date` are ignored.
+
+eCFR serves the listing in fixed 1,000-row pages (`per_page` is unpermitted upstream: 400), so the tool reads the one or two upstream pages its window covers, sequentially inside the shared 45 s budget; `totalCount` is `meta.result_count`, a string. `latest_amendment_date` is absent on an empty set. An unknown part or section answers 200 with zero rows, and a `§` in `section` answers 404, which the tool strips before sending and reads as an empty set. An `amendment_date` filter is a 400 and the row field equals `date`, so it is dropped. A response with no `result_count` is `upstream_unavailable`. Notices: the next page and how to raise `per_page` (`Part 141 of title 40 holds N versions; this is page p of last. Request page p+1 …`), a page past the end naming the last page, and an empty set, which says to omit `changed_since` or to verify the cite with `structure` mode; a section rewrite notice leads whichever applies.
+
+*Decision:* title alone requires `changed_since` — title 40 holds 60,251 versions over 61 upstream pages. *Decision:* `section` requires `part`, since a dotless number is unique only within its part. *Decision:* eCFR's order stands, and `latestAmendmentDate` answers "when did it last change", so no re-sort is needed. *Decision:* an empty set is a notice, not an error. *Decision:* non-substantive rows are kept and flagged. *Decision:* `date` is kept verbatim: a pre-2017 row reads at 2017-01-01 with no fabricated `readDate` field.
 
 **Search pages by section, not by version.** eCFR's index answers one hit per section version, so passing its pages through repeated a section across rows and pages, and `totalCount` counted versions (151 for 95 sections on `lead service line` / title 40). With no parameter that returns one hit per section, the service reads the hit list in relevance order 1,000 hits at a time — one request for a first page on all but the broadest queries, ~1 s and ~190 KB compressed — and keeps each section once, where its best-scoring version ranked. A page is a slice of that collapsed list, read one row past the page so `truncated` is exact; that keeps paging coherent where collapsing inside each upstream page would not (a page shrinking silently, a section reappearing three pages later). `totalCount` counts sections (`countBasis: "sections"`) once the whole list has been read, and is eCFR's own version count (`countBasis: "section_versions"`, disclosed in the notice) until then — no estimate of the distinct count is fabricated. The mirror holds one row per section and pages by offset with an exact count. One upstream limit survives the collapse: eCFR orders equal-scoring hits differently between identical requests deep in a broad query's list — two reads of `shall`'s 10,000 hits held 9,598 and 9,625 distinct sections, with the first 5,000 hits identical — so pages near the window's end can shift between calls, as eCFR's own paging does.
 
@@ -497,10 +562,12 @@ per_page: z.number().int().min(1).max(50).optional().default(20)
 |:-------|:-----|:-----|:---------|
 | `query_required` | `ValidationError` | `mode='search'` with no `query` | Provide a `query` phrase for search mode, or switch to `mode='structure'` to browse. |
 | `title_not_found` | `NotFound` | Structure mode where eCFR publishes no tree for the title at that date (reserved title, or a date before coverage — both confirmed live as a versioner 404), or where the part is absent from the tree it does publish | Omit `part` to list the whole title, or omit both to list every title; a reserved title and a date before ~2017 publish no tree at all. |
-| `title_required_for_part` | `ValidationError` | `part` given with no `title`, either mode | Add the title the part belongs to (e.g. title 40 with part 58), or drop `part`. |
+| `title_required_for_part` | `ValidationError` | `part` given with no `title`, any mode | Add the title the part belongs to (e.g. title 40 with part 58), or drop `part`. |
+| `versions_scope_required` | `ValidationError` | Versions mode with no `title`; with a `title` but neither `part` nor `changed_since`; or with a `section` but no `part` | Pass `title` with `part` (and optionally `section`) for a part's or section's history, or `title` with `changed_since` for what changed across the title. |
+| `conflicting_title` | `ValidationError` | Versions mode with `section` written as a full cite (`"21 CFR 141.61"`) naming a different title than `title` | Set `title` to the title the cite names, or pass the section without its title prefix (`"141.61"`). |
 | `date_out_of_range` | `ValidationError` | Structure mode, `date` past the title's `up_to_date_as_of`; search mode, `date` before 2017-01-03 or past the current index date | Pick a date inside the window the error names, or omit `date` to browse or search the current text. |
 | `page_out_of_window` | `ValidationError` | Live search page that starts past the 10,000 hits eCFR pages through | Request an earlier page (the message names the last reachable one when known), or narrow the search to bring its matches under 10,000. |
-| `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path) | Retry; eCFR may be momentarily down. |
+| `upstream_unavailable` | `ServiceUnavailable` | eCFR 5xx / timeout (live path), or a versions response with no `result_count` | Retry; eCFR may be momentarily down. |
 
 Zero matches is a successful empty result carrying a `notice`, not an error; the notice names the corpus that was searched so the caller can tell "no such regulation" from "wrong corpus."
 
@@ -556,8 +623,8 @@ date: z.union([z.literal(''), isoDate()]).optional()   // a real calendar day
   .describe("Point-in-time date, ISO 8601 (YYYY-MM-DD). Default current. eCFR serves 2017-01-01 through the title's up-to-date date; a date outside that window is rejected, naming the window."),
 offset: z.number().int().min(0).optional()
   .describe('Character offset where the window starts (default 0) — bodyTextNextOffset, or a sections[].offset.'),
-max_chars: z.number().int().min(1).max(200_000).optional()
-  .describe('Most characters in this window (default 64,000).'),
+max_chars: maxCharsInput(MAX_CHARS_LIMIT, (bounds) => `Most text characters to return in this window (${bounds}).`),
+                                      // bounds: "at least 1, default 64,000, capped at 200,000 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "1–200,000, default 64,000"
 ```
 
 **Output:**
@@ -572,7 +639,10 @@ max_chars: z.number().int().min(1).max(200_000).optional()
                                       //   differently); null when a whole part or an appendix was requested
   appendix: string | null,            // null when a section or whole part was requested
   heading: string,                    // "§ 50.1 Definitions."; a whole part's own "PART 141—…"
-  hierarchyPath: string,              // "Title 40 › Chapter I › Subchapter C › Part 50"
+  hierarchyPath: string,              // "Title 40 › Chapter I › Subchapter C › Part 50"; when eCFR's ancestry lookup fails,
+                                      //   only the cited levels ("Title 40 › Part 50", "Title 40 › Part 141 › § 141.61",
+                                      //   "Title 14 › Part 241 › § 25", "Title 40 › Part 50 › Appendix A-1 to Part 50";
+                                      //   without a part, "Title 40 › Appendix A-1 to Part 50") and `notice` says so
   date: string,                       // the issue/point-in-time date the text reflects (ISO 8601)
   source: 'mirror' | 'live',          // provenance; an appendix read is always live
   authority?: string | null,          // whole part only: the part's Authority, label dropped; null when none
@@ -601,7 +671,9 @@ max_chars: z.number().int().min(1).max(200_000).optional()
 }
 ```
 
-Enrichment: `notice` — how a section written another way resolved, and guidance when `offset` is past the end (both composed into one string; `notice` is last-wins).
+Enrichment: `notice` — that `max_chars` was above its ceiling, how a part or section written another way resolved, that `hierarchyPath` holds only the cited levels when eCFR could not supply the rest, and guidance when `offset` is past the end (all composed into one string, in that order; `notice` is last-wins). The resource carries the same fallback flag in its `notice`, appended after the part and section rewrites.
+
+**The hierarchy path decorates a read; it never fails one.** `EcfrService.hierarchyPath` runs after the text is final, so its cost lands on an answer already in hand. On any ancestry failure other than the caller's own cancellation — a 5xx, the deadline, a 404, an unparseable body, an HTML error page, a 200 with no `ancestors` — the path falls back to the levels the cite names and the notice reads: `hierarchyPath lists only the cited levels (title, part, section or appendix): eCFR's hierarchy lookup failed, so the chapter, subchapter, and subpart are missing. Retry the call for the full path.` A caller cancellation during the lookup propagates (`RequestCancelled`). Mirror-served sections behave the same way, since their path is always resolved live. *Decision:* one attempt under an 8 s deadline, clamped to what is left of the request's 45 s budget. The lookup runs after the text is final, sampled healthy calls answer in 0.23–0.42 s, and 8 s clears the versioner's ~5 s slow band; retrying a decoration cost 4 attempts on a 503 and the whole remaining budget on a hang. *Decision:* a 404 takes the same fallback, because ancestry 404s only for a nonexistent location, which the read just disproved.
 
 `format()`: header (cite, heading, hierarchy path, effective date, `source`), a whole part's Authority, Source, and notes, the window's span and resume offset, the section index and appendix handles for a part, then the window's text last and untrimmed so consecutive windows rebuild the body from `content[]` as exactly as from `structuredContent`.
 
@@ -629,35 +701,59 @@ Enrichment: `notice` — how a section written another way resolved, and guidanc
 
 ### 5. `regulations_get_docket`  · **key required**
 
-Pull a rulemaking docket from Regulations.gov by docket ID — the docket's metadata and the documents filed in it (NPRM, final rule, supporting materials). The docket is the folder that holds a rule's whole paper trail; its documents' object IDs feed `regulations_find_comments`.
+Pull a rulemaking docket from Regulations.gov by docket ID — the docket's metadata and the documents filed in it (NPRM, final rule, supporting materials) — or read one document by document ID for its file download URLs and attachments. The docket is the folder that holds a rule's whole paper trail; its documents' object IDs feed `regulations_find_comments`.
 
-**API:** `GET /v4/dockets/{docketId}` (metadata) + `GET /v4/documents?filter[docketId]={id}` (the documents in it). Confirmed live: docket `data.attributes` carries `docketType`, `title`, `agencyId`, `rin`, `objectId`, `program`, `dkAbstract`, `modifyDate`; documents are JSON:API `data[]` with `attributes` (`documentType`, `title`, `postedDate`, `objectId`, `frDocNum`, `commentEndDate`, `withdrawn`).
+**Two modes, selected by which ID is given.** Exactly one of `docket_id` (list mode) and `document_id` (detail mode) selects the mode, counted before any request; a blank (`""`) value of either counts as absent. Both keep the `^[A-Za-z0-9_-]+$` schema pattern (anything else is a `-32602` schema rejection) and are uppercased before the request, so a lowercase ID is served and echoed uppercase.
+
+**API:** list → `GET /v4/dockets/{docketId}` (metadata) + `GET /v4/documents?filter[docketId]={id}` (the documents in it), with `filter[searchTerm]` when `search_term` is set and `sort=-postedDate` dropped in that case, so Regulations.gov's relevance order stands (without a term the list is `-postedDate`). Detail → `GET /v4/documents/{id}?include=attachments`, one request. Confirmed live: docket `data.attributes` carries `docketType`, `title`, `agencyId`, `rin`, `objectId`, `program`, `dkAbstract`, `modifyDate`; documents are JSON:API `data[]` with `attributes` (`documentType`, `title`, `postedDate`, `objectId`, `frDocNum`, `commentEndDate`, `withdrawn`). The list never carries `fileFormats`; the single-document route does, with `docAbstract`, `pageCount`, and `restrictReasonType`.
 
 **Input schema:**
 ```ts
-docket_id: z.string().regex(/^[A-Za-z0-9_-]+$/)
-  .describe('Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. The printed docketIds on those tools are not always Regulations.gov IDs ("REG-101355-26" is the IRS\'s own number for docket IRS-2026-0925).'),
+docket_id: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_-]+$/)]).optional()
+  .describe('List mode: Regulations.gov docket ID (e.g. "EPA-HQ-OAR-2025-0194"). Obtain from regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document. The printed docketIds on those tools are not always Regulations.gov IDs ("REG-101355-26" is the IRS\'s own number for docket IRS-2026-0925). Exactly one of docket_id / document_id.'),
+document_id: z.union([z.literal(''), z.string().regex(/^[A-Za-z0-9_-]+$/)]).optional()
+  .describe('Detail mode: one document by Regulations.gov document ID (e.g. "EPA-HQ-OW-2022-0114-3084") — documentId from a docket listing, or regulationsGovDocumentId from regulations_get_document. Returns its download URLs and attachments. Pass it alone, without docket_id or the list filters.'),
+search_term: z.string().optional()
+  .describe('List mode: keep only the docket\'s documents whose text matches, as Regulations.gov full-text search reads it, ranked by relevance instead of newest first. Combines with document_types.'),   // trimmed; blank or whitespace-only = omitted
 document_types: z.array(z.enum(['Proposed Rule', 'Rule', 'Notice', 'Supporting & Related Material', 'Other'])).optional()
-  .describe('Filter the docket\'s documents to these types. Omit for all. A docket often contains hundreds of "Supporting & Related Material" items — filter to "Proposed Rule"/"Rule" to find the rule documents themselves.'),
-per_page: z.number().int().min(5).max(250).optional().default(25)
-  .describe('Documents per page (5–250, default 25). Regulations.gov requires a minimum page size of 5.'),
+  .describe('List mode: filter the docket\'s documents to these types. Omit for all. A docket often contains hundreds of "Supporting & Related Material" items — filter to "Proposed Rule"/"Rule" to find the rule documents themselves.'),   // an empty array counts as no filter
+per_page: perPageInput(PER_PAGE, (bounds) => `Documents per page (${bounds}). Regulations.gov requires a minimum page size of 5.`),
+                                      // bounds: "at least 5, default 25, capped at 250 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "5–250, default 25"
 page: z.number().int().min(1).max(40).optional().default(1)
-  .describe('Page number (1–40, default 1). Regulations.gov serves 40 pages, so a docket listing reaches 40 × per_page documents (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. Beyond that, narrow with document_types.'),
+  .describe('Page number (1–40, default 1). Regulations.gov serves 40 pages, so a docket listing reaches 40 × per_page documents (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. Beyond that, narrow with search_term or document_types.'),
 ```
 
 **Output:**
 ```ts
 {
-  docketId: string,
-  title: string,
-  docketType: string | null,          // e.g. "Rulemaking"
-  agencyId: string | null,            // e.g. "EPA"
-  rin: string | null,                 // "Not Assigned" when none
-  abstract: string | null,            // dkAbstract
-  modifyDate: string | null,
-  objectId: string | null,            // docket object ID
-  documentCount: number,              // totalElements from the documents query
-  documents: Array<{
+  mode: 'list' | 'detail',            // which mode produced this result
+  // List mode — every field optional in the schema, every list call returns all of them:
+  docketId?: string,
+  title?: string,
+  docketType?: string | null,         // e.g. "Rulemaking"
+  agencyId?: string | null,           // e.g. "EPA"
+  rin?: string | null,                // "Not Assigned" when none
+  abstract?: string | null,           // dkAbstract
+  modifyDate?: string | null,
+  objectId?: string | null,           // docket object ID
+  documentCount?: number,             // documents matching search_term and document_types, before pagination (totalElements from the documents query)
+  // Detail mode:
+  document?: {
+    documentId: string,
+    docketId: string | null,
+    title: string | null,
+    documentType: string | null,
+    postedDate: string | null,
+    frDocNum: string | null,          // → regulations_get_document
+    objectId: string | null,          // → regulations_find_comments(document_object_id)
+    withdrawn: boolean | null,
+    abstract: string | null,          // docAbstract
+    pageCount: number | null,         // null when absent or 0 — a file never has zero pages
+    fileFormats: { format: string; fileUrl: string; size: number | null }[],   // the main file; [] when none
+    attachments: { title: string; formats: { format: string; fileUrl: string; size: number | null }[]; restrictReasonType: string | null }[],  // docOrder; withheld ones kept with formats []
+    restrictReasonType: string | null,  // why the document's content is withheld, e.g. "Copyrighted"
+  },
+  documents?: Array<{                 // list mode
     documentId: string,               // Regulations.gov document ID
     objectId: string,                 // chaining → regulations_find_comments (document_object_id)
     title: string,
@@ -668,23 +764,28 @@ page: z.number().int().min(1).max(40).optional().default(1)
     commentPeriodOpen: boolean | null,  // Regulations.gov's own openForComment, relayed; null when absent
     withdrawn: boolean,
   }>,
-  // enrichment (the paging contract above):
-  totalPages: number,                 // min(ceil(documentCount / per_page), 40)
+  // enrichment (the paging contract above; list mode, so all optional in the schema):
+  totalPages?: number,                // min(ceil(documentCount / per_page), 40)
   nextPage?: number,                  // present while a later page holds documents
   truncated?: boolean,                // documentCount > 40 × per_page — some documents are on no page
   shown?: number,                     // with truncated
   cap?: number,                       // 40 × per_page (with truncated)
-  notice?: string,                    // empty docket, page past the end, or truncation guidance
+  notice?: string,                    // per_page above its ceiling, no documents matched, page past the end, truncation guidance, or a document with no main file
 }
 ```
 
-`format()`: docket header (ID, title, agency, RIN, type), then a table of documents (type · title · posted · comment-close · object ID for comment lookup). Surfaces each document's `objectId` so the agent can pull comments on a specific document. The empty-docket notice suggests dropping `document_types` only when it was set; truncation guidance names the reachable count, then `per_page` (below 250), then `document_types`.
+`format()`: the header line ends `(list mode)` / `(detail mode)`. List mode: docket header (ID, title, agency, RIN, type), then a table of documents (type · title · posted · comment-close · `Document ID (→ document_id)` · object ID for comment lookup). Surfaces each document's `objectId` so the agent can pull comments on a specific document. The empty-docket notice suggests dropping `document_types` only when it was set; truncation guidance names the reachable count, then `per_page` (below 250), then `search_term` or `document_types`. Detail mode: `**Document <ID> — <title>** (detail mode)`, a line of type · posted date · docket · FR number · withdrawn, a line with the object ID (→ find_comments), `pages`, and `restrictReasonType`, the abstract, `## Files` with each format as a link and its byte size (or `_No main file._`), then `## Attachments (<N>)` rendered as `regulations_find_comments` renders comment attachments (`file withheld · restrictReasonType: …` for a withheld one).
+
+**Notices.** Detail, no main file but attachments: the content is in N attachments, plus how many of them have no downloadable file. Detail, no file and no attachment: the document has no downloadable file or attachment, naming the reason when withheld. List, nothing matched under a term: `Docket <ID> returned no documents matching "<term>". Loosen or drop search_term to see the docket's other documents.` (with `document_types`, the wording names both). List, past the end: the docket holds N documents, `of the requested document_types` and `matching "<term>"` when those are set, so the last page is …
 
 **Errors:**
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
-| `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured | Set the REGULATIONS_GOV_API_KEY env var (free key at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
-| `not_found` | `NotFound` | No docket with that ID | Pass the Regulations.gov docket ID — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document — not an entry of the printed docketIds; format is like "EPA-HQ-OAR-2025-0194". |
+| `auth_required` | `Unauthorized` | `REGULATIONS_GOV_API_KEY` not configured, or Regulations.gov rejected the key | Set the REGULATIONS_GOV_API_KEY env var to a working key (free at https://api.data.gov/signup/). The Federal Register and eCFR tools work without it. |
+| `target_required` | `ValidationError` | Neither `docket_id` nor `document_id` given | Provide `docket_id` to list a docket's documents, or `document_id` to read one document's files. |
+| `multiple_targets` | `ValidationError` | Both given | Keep one: `document_id` alone reads that document in detail, `docket_id` alone lists the docket it belongs to. |
+| `filter_requires_list_mode` | `ValidationError` | `search_term` or `document_types` given with `document_id` | Drop the filters to read the document by `document_id`, or replace `document_id` with `docket_id` to list the documents the filters match. |
+| `not_found` | `NotFound` | No docket exists with that `docket_id`, or no document with that `document_id` (a 404, or the 400 `Invalid ID`) | Pass the Regulations.gov docket ID — regulationsGovDocketId on a regulations_search_rules or regulations_list_open_comments row, or docketId from regulations_get_document — not an entry of the printed docketIds; format is like "EPA-HQ-OAR-2025-0194". A document ID adds a sequence number ("EPA-HQ-OAR-2025-0194-0001"): documentId from a docket listing. |
 | `rate_limited` | `RateLimited` | Regulations.gov 429 (1,000 req/hr per key) | Wait and retry — the per-key hourly limit was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
@@ -718,8 +819,8 @@ posted_after: z.union([z.literal(''), isoDate()]).optional()
   .describe('List mode: earliest posted date, inclusive, YYYY-MM-DD.'),
 posted_before: z.union([z.literal(''), isoDate()]).optional()
   .describe('List mode: latest posted date, inclusive, YYYY-MM-DD. The same date as posted_after selects that one day.'),
-per_page: z.number().int().min(5).max(250).optional().default(25)
-  .describe('Comments per page (5–250, default 25). Regulations.gov requires a minimum page size of 5.'),
+per_page: perPageInput(PER_PAGE, (bounds) => `Comments per page (${bounds}). Regulations.gov requires a minimum page size of 5.`),
+                                      // bounds: "at least 5, default 25, capped at 250 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "5–250, default 25"
 page: z.number().int().min(1).max(40).optional().default(1)
   .describe('Page number (1–40, default 1). Regulations.gov serves 40 pages, so a list reaches 40 × per_page comments (10,000 at per_page 250); totalPages and nextPage in the response say how far this one goes. To reach past that, take the set one posted_after/posted_before window at a time.'),
 ```
@@ -771,17 +872,18 @@ Truncation guidance names the reachable count, then `per_page` (below 250), then
   submitterName: string | null,       // firstName + lastName, when public
   organization: string | null,
   bodyText: string | null,            // `comment` field, HTML-stripped. Non-null but stub ("See Attached") when the real content is in attachments; null only when the field was genuinely empty.
-  attachmentOnly: boolean,            // true when attachments exist AND bodyText is a stub or empty — the substance lives in the attachment files
+  attachmentOnly: boolean,            // true when attachments exist (withheld ones count) AND bodyText is a stub or empty — the substance lives in the attachment files
   attachments: Array<{
     title: string;
-    formats: Array<{ format: string; fileUrl: string; size: number | null }>;  // from included[].attributes.fileFormats; present when ?include=attachments
-  }>,
+    formats: Array<{ format: string; fileUrl: string; size: number | null }>;  // from included[].attributes.fileFormats; empty when the file is withheld
+    restrictReasonType: string | null;  // why the file is withheld (e.g. "Copyrighted"); null when Regulations.gov gives no reason
+  }>,                                 // every attachment in upload order (docOrder), withheld ones included
   withdrawn: boolean,
   restrictReason: string | null,      // set when the comment is restricted
 }
 ```
 
-`format()`: list mode → a table (commenter · type · posted · agency · object ID · comment ID), each search hit followed by a `↳ Match:` row carrying its `highlightedContent`, with a note that comment bodies are only available via the detail mode (`comment_id`); detail mode → a header with the posted, received, and postmark dates and `duplicateComments` (a campaign callout only when it is above 1), then the body text (HTML-stripped), or, when `attachmentOnly`, an explicit "the substance of this comment is in N attachment(s)" notice followed by the attachment titles and download URLs. **The attachment-only flag must reach both client surfaces** (it goes in the structured output and the `format()` text), so an agent never mistakes a stub body for substantive inline text.
+`format()`: list mode → a table (commenter · type · posted · agency · object ID · comment ID), each search hit followed by a `↳ Match:` row carrying its `highlightedContent`, with a note that comment bodies are only available via the detail mode (`comment_id`); detail mode → a header with the posted, received, and postmark dates and `duplicateComments` (a campaign callout only when it is above 1), then the body text (HTML-stripped), or, when `attachmentOnly`, an explicit "the substance of this comment is in N attachment(s)" notice followed by the attachment titles and download URLs. A withheld attachment renders as `- **<title>**: file withheld · restrictReasonType: Copyrighted` (`none` when upstream gives no reason); a downloadable one adds `· restrictReasonType: <value>` only when one is set, and the notice gains `M of them have no downloadable file (see restrictReasonType).` when M attachments have no file. **The attachment-only flag must reach both client surfaces** (it goes in the structured output and the `format()` text), so an agent never mistakes a stub body for substantive inline text.
 
 **Errors:**
 | Reason | Code | When | Recovery |
@@ -791,11 +893,15 @@ Truncation guidance names the reachable count, then `per_page` (below 250), then
 | `multiple_targets` | `ValidationError` | More than one of the four targeting parameters given | Keep the single target you meant and drop the rest; to read a comment found in a docket listing, call again with `comment_id` alone. |
 | `filter_requires_list_mode` | `ValidationError` | `search_term`, `posted_after`, or `posted_before` given with `comment_id` | Drop the filters to read the comment by comment_id, or replace comment_id with docket_id, document_object_id, or fr_document_number to list the comments the filters match. |
 | `date_range_inverted` | `ValidationError` | The start of a date range is later than its end | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
-| `not_found` | `NotFound` | The target docket, document, or comment does not exist on Regulations.gov, or no Regulations.gov document carries the FR number | Verify the ID or number; a docket ID goes in docket_id, and an FR document with no regulationsGovDocumentId has no Regulations.gov record — list its docketId with docket_id instead. |
+| `not_found` | `NotFound` | The target docket, document, or comment does not exist on Regulations.gov (a `docket_id` that lists no comments is looked up to tell), or no Regulations.gov document carries the FR number | Verify the ID or number; a docket ID goes in docket_id, and an FR document with no regulationsGovDocumentId has no Regulations.gov record — list its docketId with docket_id instead. |
 | `rate_limited` | `RateLimited` | Regulations.gov 429 | Wait and retry — the per-key hourly limit (1,000/hr) was hit. |
 | `upstream_unavailable` | `ServiceUnavailable` | Regulations.gov 5xx / timeout | Retry after a brief wait. |
 
-**A document target resolves before the list runs, and an unmatched one is an error, never an empty success.** Regulations.gov answers `filter[commentOnId]=<anything>` with zero comments as a normal success, so a wrong handle used to read as "this document drew no comments." `document_object_id` takes a 16-hex object ID as-is and resolves anything else through `GET /documents/{id}` (404 → `not_found`). A `docket_id`, `document_object_id`, or `comment_id` with a character outside `[A-Za-z0-9_-]` names no record and is `not_found` without a request: sent anyway, `..` in a URL path reaches the API root, an encoded `/` draws a 403 that reads as a rejected key, and whitespace in a filter draws a 500. `fr_document_number` resolves through the exact `filter[frDocNum]` match, uppercased first because the filter is case-sensitive, and zero hits is `not_found`. *Decision:* the earlier `filter[searchTerm]` lookup with a first-hit fallback is gone — a text search ranks documents that merely quote the number (Executive Order 14192 resolved to an EPA supporting document reproducing it). A resolved document with no comments of its own — a final rule, a hearing notice — still lists 0 total, and the empty-result notice names the resolved document and its docket as the `docket_id` to widen with. A `docket_id` that lists nothing is most often a docket number the Federal Register prints (`REG-101355-26` for docket `IRS-2026-0925`), which Regulations.gov answers with an empty success, so that notice points at `regulationsGovDocketId` / `get_document`'s `docketId` before the comment-period hint.
+**A document target resolves before the list runs, and an unmatched one is an error, never an empty success.** Regulations.gov answers `filter[commentOnId]=<anything>` with zero comments as a normal success, so a wrong handle used to read as "this document drew no comments." `document_object_id` takes a 16-hex object ID as-is and resolves anything else through `GET /documents/{id}` (404 → `not_found`). A `docket_id`, `document_object_id`, or `comment_id` with a character outside `[A-Za-z0-9_-]` names no record and is `not_found` without a request: sent anyway, `..` in a URL path reaches the API root, an encoded `/` draws a 403 that reads as a rejected key, and whitespace in a filter draws a 500. `fr_document_number` resolves through the exact `filter[frDocNum]` match, uppercased first because the filter is case-sensitive, and zero hits is `not_found`. *Decision:* the earlier `filter[searchTerm]` lookup with a first-hit fallback is gone — a text search ranks documents that merely quote the number (Executive Order 14192 resolved to an EPA supporting document reproducing it). A resolved document with no comments of its own — a final rule, a hearing notice — still lists 0 total, and the empty-result notice names the resolved document and its docket as the `docket_id` to widen with. A `docket_id` that lists nothing is most often a docket number the Federal Register prints (`REG-101355-26` for docket `IRS-2026-0925`), which Regulations.gov answers with an empty success, so an empty docket list makes one `GET /dockets/{id}` lookup (a non-empty list, or a page past the end of one, makes none). A docket Regulations.gov does not hold is `not_found` — `Regulations.gov has no docket <ID>, so there are no comments to list.`, with a recovery pointing at `regulationsGovDocketId` / `get_document`'s `docketId` rather than a printed `docketIds` entry. An existing docket answers `totalCount` 0: unfiltered, the notice says the docket exists but holds no posted comments and to check that its comment period has opened; under a filter, only that the filter may be loosened, since an empty list under a filter says nothing about the unfiltered docket. An empty `document_object_id` or FR-number list is unchanged: no existence check, and the notice still points at the docket. *Decision:* the existence check runs only on an empty docket list, so the common path pays no extra request.
+
+**Withheld attachments are kept, in upload order.** `attachments` lists every attachment by Regulations.gov `docOrder` (one without it goes last), including those with no downloadable file. Dropping them had listed 4 of the 8 attachments on `EPA-HQ-OW-2022-0114-1759`, in arbitrary order with the "Comment" itself last; now all 8 come back, "Comment" first, the four copyrighted appendices kept with empty `formats` and their `restrictReasonType`. *Decision:* kept rather than dropped, so a stub body whose only attachments are withheld still reads `attachmentOnly: true` and the caller knows where the substance went.
+
+**IDs are case-insensitive.** `docket_id`, `comment_id`, and a document ID passed as `document_object_id` are uppercased before any request and echoed uppercase (`target` reads `docket EPA-HQ-OW-2022-0114` for `epa-hq-ow-2022-0114`), as is `get_docket`'s `docket_id`. A lowercase comment or document ID used to answer `not_found`. A 16-hex object ID is still sent lowercase, and a value with a character outside `A-Z a-z 0-9 _ -` still answers `not_found` with no request, quoting the value as given.
 
 **Filters are validated before any request.** An empty `search_term` / `posted_after` / `posted_before` counts as absent, as does a whitespace-only `search_term` (Regulations.gov answers one with the unfiltered set); a `search_term` is sent trimmed. A window whose start falls after its end is `date_range_inverted` (equal dates are a one-day window), and any filter beside `comment_id` is `filter_requires_list_mode` rather than ignored.
 
@@ -825,8 +931,8 @@ agencies: z.array(z.string()).optional()
   .describe('Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency") — lowercase kebab-case, not a name or acronym. Every row lists its agencies with their slugs; read agencies[].slug off a row here or in regulations_search_rules. One unrecognized slug fails the whole request.'),
 closing_before: z.union([z.literal(''), isoDate()]).optional()
   .describe('Only documents whose comment period closes on or before this date, ISO 8601 (YYYY-MM-DD), a real calendar day. Use to find deadlines you need to act on soon.'),
-per_page: z.number().int().min(1).max(100).optional().default(20)
-  .describe('Documents per page (1–100, default 20).'),
+per_page: perPageInput(PER_PAGE, (bounds) => `Documents per page (${bounds}).`),
+                                      // bounds: "at least 1, default 20, capped at 100 with a notice"; with REGULATIONS_CLAMP_LIMITS=false, "1–100, default 20"
 page: z.number().int().min(1).max(10_000).optional().default(1)
   .describe('Page number, default 1. Pages run over the whole open window in closing-date order; totalPages and nextPage in the response say how far it goes.'),
 ```
@@ -904,6 +1010,13 @@ The cross-source chains are the reason this is one server. Each row is one tool 
 | 1 | Pull the docket and its documents | `regulations_get_docket(docket_id)` | → document `objectId` |
 | 2 | List comments on the primary document | `regulations_find_comments(document_object_id)` | → `commentId`; fetch detail to inspect body and attachments |
 | 3 | Read a specific comment (incl. attachments) | `regulations_find_comments(comment_id)` | (attachment URLs when attachment-only) |
+| 4 | Find a supporting document by text, or open one's files | `regulations_get_docket(docket_id, search_term)`, then `regulations_get_docket(document_id)` | → download URLs and attachments |
+
+### "When did this CFR text change?" (keyless)
+| # | Call | Tool |
+|:--|:-----|:-----|
+| 1 | List the dates a section's text changed | `regulations_browse_cfr(mode='versions', title, part, section)` |
+| 2 | Read the text as of a version's `date` | `regulations_get_cfr_section(title, part, section, date)` |
 
 ### Cross-server (composes-with)
 - The statute a rule implements → `congressgov` (RIN/agency → authorizing bill).
@@ -952,7 +1065,9 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 **Search order defaults on `query`.** Always sending `newest` ranked the defining rule for a topical query behind recent incidental mentions; `relevance` is the default with a query and `newest` without, and the resolved value is sent explicitly so behavior does not ride an undocumented upstream default.
 
-**Page-size floors follow each upstream's observed behavior.** Regulations.gov live probing returned `400 Page size parameter must be a positive number of 5 or greater` for `page[size]=1`, so the keyed tools' `per_page` floor is 5. Federal Register live probing found a different quirk: exactly `per_page=1` is silently treated as the default 20, while 2, 3, 4, 5, 20, 25, and 100 return the requested count, so `search_rules`, which passes `per_page` through, enforces 2–100. `list_open_comments` pages locally and takes 1–100.
+**Over-ceiling sizes are clamped, not rejected.** A page size or text window is an output ceiling; a caller asking for more than the server serves gets the most it serves and a notice naming both sizes, instead of a failed call and a retry. The advertised schema keeps the floor and drops the maximum (`multipleOf(1)` enforces whole numbers, since `.int()` advertises the safe-integer ceiling as `maximum`). `REGULATIONS_CLAMP_LIMITS=false` restores the strict schema maximum, so a value one past the ceiling fails `invalid_arguments`. `page` bounds stay rejections: they are upstream navigation limits, and a page past the end already answers with a notice. The mechanics are in the paging contract above.
+
+**Page-size floors follow each upstream's observed behavior.** Regulations.gov live probing returned `400 Page size parameter must be a positive number of 5 or greater` for `page[size]=1`, so the keyed tools' `per_page` floor is 5. Federal Register live probing found a different quirk: exactly `per_page=1` is silently treated as the default 20, while 2, 3, 4, 5, 20, 25, and 100 return the requested count, so `search_rules`, which passes `per_page` through, enforces a floor of 2 (ceiling 100). `list_open_comments` pages locally and takes 1–100.
 
 **The open-comment window is fetched whole and sorted by close date.** The FR has no comment-date order, and a sort over one page of newest-published documents is not "soonest first"; the whole window is one request at per_page 2,000 on every date measured, so the local sort is exact and paging is by the tool, not the FR's 50-page ceiling. `truncated` means only the FR's 10,000-item limit, never the key state.
 
@@ -965,7 +1080,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 ## Known Limitations
 
 - **Federal Register caps navigation at 50 pages.** With `per_page=100`, this allows up to 5,000 records per query; at the default 20, 1,000. The `count` field is itself capped at 10,000 (ElasticSearch default window), so for queries with more than 10,000 matches the true total is unknown, and the truncation notice says so. `search_rules` sets `truncated` on every page of a set larger than 50 × `per_page` and steers the agent to date-windowing to narrow results below the navigable ceiling. `list_open_comments` fetches its window at per_page 2,000 instead and reaches the full 10,000.
-- **Regulations.gov serves 40 pages per query** — 10,000 records at 250 per page, 1,000 at the default 25. For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` flags `truncated` and points at `posted_after`/`posted_before` windows, which take the set one reachable slice at a time; `get_docket` points at `document_types`. The server does not crawl the windows itself.
+- **Regulations.gov serves 40 pages per query** — 10,000 records at 250 per page, 1,000 at the default 25. For a rule that drew hundreds of thousands of comments (the EPA endangerment-finding docket is a live example), `find_comments` flags `truncated` and points at `posted_after`/`posted_before` windows, which take the set one reachable slice at a time; `get_docket` points at `search_term` or `document_types`. The server does not crawl the windows itself.
 - **Comment bodies can be attachment-only.** Detail responses carry stub text such as "See Attached" or an empty body when attachments hold the substance. `find_comments(comment_id)` flags `attachmentOnly` and returns attachment download URLs; list responses expose neither the body nor attachment presence. The server does not fetch or parse attachment binaries; callers retrieve the files separately.
 - **eCFR historical coverage starts ~2017.** Point-in-time reads before 2017-01-01 are rejected as `date_out_of_range`; the server can't synthesize CFR text that eCFR doesn't retain.
 - **Regulations.gov coverage is agency-dependent.** Not every FR document has a Regulations.gov docket, and not every docket accepts comments. `commentCount`/`docketId` are null when absent — the server reports the gap rather than fabricating a docket.
@@ -976,8 +1091,8 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 ## API Reference
 
 ### Federal Register (keyless) — `GET https://www.federalregister.gov/api/v1/documents.json`
-- **Filters** (`conditions[...]`): `term` (full text), `type[]` (PRORULE/RULE/NOTICE/PRESDOCU), `agencies[]` (agency slug), `publication_date[gte|lte]`, `comment_date[gte|lte]` (open-comment window).
-- **Field selection:** `fields[]` — request only what's needed. Key fields: `document_number`, `title`, `type`, `abstract`, `publication_date`, `agencies` (objects with `name`, `raw_name`, `slug`; an entry carried by `raw_name` alone has no slug — e.g. "Office of the Secretary"), `docket_ids`, `regulation_id_numbers`, `cfr_references`, `comments_close_on`, `effective_on`, `html_url`, `regulations_dot_gov_info`, `body_html_url`/`full_text_xml_url`/`raw_text_url` (single-doc).
+- **Filters** (`conditions[...]`): `term` (full text), `type[]` (PRORULE/RULE/NOTICE/PRESDOCU), `agencies[]` (agency slug), `publication_date[gte|lte|is]` (`is` serves citation resolution), `comment_date[gte|lte]` (open-comment window), `cfr[title]`, `cfr[part]`, `docket_id`, `regulation_id_number`, `executive_order_numbers[]` (bare digits only; `EO 14192` and `014192` answer 0 with HTTP 200), `presidential_document_type[]` (an unknown value is a 400), `president` (an unknown slug is a 400), `signing_date[gte|lte]`, `significant` (`1` / `0`; the Federal Register reads only `1` as true, and `0` matches only documents flagged not significant), `effective_date[gte|lte]`.
+- **Field selection:** `fields[]` — request only what's needed. Key fields: `document_number`, `title`, `type`, `abstract`, `publication_date`, `agencies` (objects with `name`, `raw_name`, `slug`; an entry carried by `raw_name` alone has no slug — e.g. "Office of the Secretary"), `docket_ids`, `regulation_id_numbers`, `cfr_references`, `comments_close_on`, `effective_on`, `significant`, `subtype`, `presidential_document_number`, `signing_date`, `president` (set on every document — the president in office at publication — so read only on presidential documents), `html_url`, `regulations_dot_gov_info`, `body_html_url`/`full_text_xml_url`/`raw_text_url` (single-doc).
 - **Pagination:** `per_page` is honored from 2 to 2,000; exactly `per_page=1`, and any value above 2,000, is silently treated as the default 20. `page` supports 1–50. Responses include `count`, `total_pages`, and `next_page_url`. `count` is capped at 10,000 (ElasticSearch window); `total_pages` is always capped at 50 regardless of actual result count. Maximum navigable records = 50 × per_page at per_page ≤ 100; at per_page 2,000 the 10,000-item limit binds first, and a page reaching past item 10,000 answers `400 Pagination limit exceeded`. A page past the reported `total_pages` but within 50 returns no rows (page 10 of a 5-page result); page 51 and beyond silently re-serve page 1, so `search_rules` keeps `page` at 1–50 — date-window instead. `next_page_url` carries a `search_after_cursor` parameter, but plain `page=N` URLs page correctly without it: five 2,000-row pages of a 10,000-item window return 10,000 distinct documents, so the open-comment window builds page URLs directly.
 - **Single document:** `GET /documents/{document_number}.json`. Returns both `regulations_dot_gov_info` (single-docket convenience block) AND a `dockets[]` array when multiple dockets are present; handler should prefer `regulations_dot_gov_info.docket_id` and `regulations_dot_gov_info.document_id` for the primary cross-source handles.
 - **Agencies reference:** `GET /agencies.json` (473 agencies, ~695 KB, each with `name`/`slug`/`short_name`/`id`) — not used; results carry each agency's slug, and the 400 on an unknown slug is authoritative.
@@ -987,13 +1102,14 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 ### eCFR (keyless) — `https://www.ecfr.gov/api`
 - **Titles:** `GET /versioner/v1/titles.json` → the 50 titles with `latest_amended_on`, `latest_issue_date`, `up_to_date_as_of`, `reserved`.
 - **Structure:** `GET /versioner/v1/structure/{date}/title-{n}.json` → the title's whole tree down to every section and appendix (`identifier`, `label`, `label_description`, `type`, `reserved`, `generated_id` on subject groups, `children`, `descendant_range`); labels carry inline markup (`<em>`, `<sub>`, `<span>`) and entities (`&amp;`, `&lt;`).
-- **Ancestry:** `GET /versioner/v1/ancestry/{date}/title-{n}.json?part={p}&section={s}` → the full hierarchy path for a cite (used to build `hierarchyPath`).
+- **Ancestry:** `GET /versioner/v1/ancestry/{date}/title-{n}.json?part={p}&section={s}` → the full hierarchy path for a cite (used to build `hierarchyPath`; a failure falls back to the cited levels, see `regulations_get_cfr_section`).
+- **Versions:** `GET /versioner/v1/versions/title-{n}.json?part={p}&section={s}&issue_date[gte]={d}&page={n}` → `{content_versions[], meta}`. Rows carry `date`, `amendment_date` (equal to `date`), `issue_date`, `identifier`, `name`, `part`, `subpart`, `type`, `substantive`, `removed`; `meta` carries `result_count` (a string), `latest_amendment_date`, `latest_issue_date`, and past 1,000 rows `page` / `per_page` / `total_pages`. Pages are a fixed 1,000 rows; `per_page` and an `amendment_date` filter are unpermitted (400).
 - **Full text:** `GET /versioner/v1/full/{date}/title-{n}.xml?part={p}&section={s}` → section/part XML (`<DIV8 TYPE="SECTION">` with `<HEAD>`/`<P>`; carries `hierarchy_metadata` citation). `{date}` is the point-in-time date (YYYY-MM-DD).
 - **Search:** `GET /search/v1/results?query={q}&date={d}&per_page={n}&page={p}` → one hit per matching section version (`hierarchy`, `hierarchy_headings`, `headings`, `full_text_excerpt`, `score`, `starts_on`, `ends_on`); `meta` has `total_count` (capped at 10,000), `total_pages`, `current_page`. A page reaching past the 10,000th hit answers 400. Keyless full-text search — the live fallback for `browse_cfr` search before the mirror is ready.
 
 ### Regulations.gov v4 (key required) — `https://api.regulations.gov/v4`, header `X-Api-Key: {key}`
 - **JSON:API shape:** every record is `{ type, id, attributes: {...} }`; lists are `data[]`, `meta` carries `totalElements`, `hasNextPage`, and `aggregations` (facet counts by `documentType`/`agencyId`).
-- **Documents:** `GET /documents?filter[searchTerm]={q}&filter[docketId]={id}&filter[documentType]={t}&page[size]={n}&page[number]={p}&sort=-postedDate`; `filter[frDocNum]={number}` is an exact, case-sensitive match on the FR number (`E9-25990` hits, `e9-25990` does not); `GET /documents/{documentId}` returns one document (404 when missing). Attributes: `docketId`, `documentType`, `title`, `postedDate`, `commentEndDate`, `objectId`, `frDocNum`, `withdrawn`, `openForComment`.
+- **Documents:** `GET /documents?filter[searchTerm]={q}&filter[docketId]={id}&filter[documentType]={t}&page[size]={n}&page[number]={p}&sort=-postedDate`; `filter[frDocNum]={number}` is an exact, case-sensitive match on the FR number (`E9-25990` hits, `e9-25990` does not); `GET /documents/{documentId}` returns one document (404 when missing), and `?include=attachments` adds its attachments. Attributes: `docketId`, `documentType`, `title`, `postedDate`, `commentEndDate`, `objectId`, `frDocNum`, `withdrawn`, `openForComment`; the single-document route also carries `fileFormats`, `docAbstract`, `pageCount`, and `restrictReasonType` (the list never carries `fileFormats`). `sort` overrides `filter[searchTerm]` relevance order, so a text search drops `sort`.
 - **Dockets:** `GET /dockets/{docketId}`. Attributes: `docketType`, `title`, `agencyId`, `rin`, `objectId`, `program`, `dkAbstract`, `modifyDate`.
 - **Comments:** list `GET /comments?filter[commentOnId]={documentObjectId}` or `filter[docketId]={id}`, `sort=-postedDate`, optionally `filter[searchTerm]` (hits carry `highlightedContent`) and `filter[postedDate][ge]` / `[le]` (`yyyy-MM-dd`). Detail `GET /comments/{commentId}?include=attachments`. **Critical shape (confirmed live):** `attributes.comment` is always `''` (empty string) at list level — the body is never populated in list responses. In detail responses, `comment` contains HTML body text (substantive for citizen comments) or a stub string like "See Attached" / "See attached" for attachment-primary submissions. `attributes.fileFormats` is always `null` at both list and detail level — attachments live in `relationships.attachments.data[]` (ID list) and `included[]` (full records with `attributes.fileFormats[].fileUrl`), only present when `?include=attachments` is specified on the detail call.
 - **Constraints:** `page[size]` **minimum 5**, maximum 250; **max 40 pages per query** (10,000 records at 250; `page[number]=41` is a 400, "Page number parameter is greater than allowed. Maximum value is 40.") — beyond that, iterate with a posted-date filter window. `meta.totalPages` is `min(ceil(totalElements / page[size]), 40)`, and a page past it within 40 returns `data: []`. Rate limit **1,000 req/hr per key**; 429 carries `Retry-After`. Invalid key → **HTTP 403**, `{ error: { code: "API_KEY_INVALID", message } }`.
@@ -1005,7 +1121,9 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 | FR `document_number` | FR search/document | `regulations_get_document`, `regulations_find_comments(fr_document_number)` |
 | `docket_id` | FR `docket_ids` / `regulations_dot_gov_info.docket_id` | `regulations_get_docket`, `regulations_find_comments(docket_id)` |
 | Regulations.gov document `objectId` | `get_docket` documents[] | `regulations_find_comments(document_object_id)` |
-| Regulations.gov document ID | `get_document` `regulationsGovDocumentId` / `get_docket` documents[] | `regulations_find_comments(document_object_id)` (resolved to the object ID) |
+| Regulations.gov document ID | `get_document` `regulationsGovDocumentId` / `get_docket` documents[] | `regulations_find_comments(document_object_id)` (resolved to the object ID), `regulations_get_docket(document_id)` (files + attachments) |
+| Executive order number | `presidential.number` on a presidential document | `regulations_search_rules(executive_order_number)` |
+| `versions[].date` | `regulations_browse_cfr` versions mode | `regulations_get_cfr_section(date)` |
 | `cfr_references` (title + part) | FR document | `regulations_get_cfr_section`, `regulations_browse_cfr` |
 | `commentId` | `find_comments` list | `regulations_find_comments(comment_id)` (detail + attachments) |
 

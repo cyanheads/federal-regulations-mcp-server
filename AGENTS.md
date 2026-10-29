@@ -237,7 +237,9 @@ src/
     regulations-gov/                    # Regulations.gov v4 client (X-Api-Key) — dockets, comments
   mcp-server/
     tools/definitions/                  # 7 regulations_* tools (search-rules, get-document, browse-cfr,
-                                        #   get-cfr-section, get-docket, find-comments, list-open-comments)
+                                        #   get-cfr-section, get-docket, find-comments, list-open-comments);
+                                        #   size-limit.ts is the shared per_page / max_chars field, clamp, and notice;
+                                        #   presidential-schema.ts the presidential output object shared by search-rules and get-document
     resources/definitions/              # 2 resources (document, cfr-section)
 scripts/
   ecfr-mirror-init.ts                   # out-of-band mirror lifecycle (init / refresh / verify)

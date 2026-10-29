@@ -34,6 +34,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { REQUEST_BUDGET_MS } from '@/services/request-budget.js';
 import { readResourceError } from '../helpers/read-resource.js';
 
+/**
+ * Set before any import: building a tool reads the server config, since its size
+ * inputs advertise a schema that depends on it, and the parsed config is cached.
+ */
+vi.hoisted(() => vi.stubEnv('REGULATIONS_GOV_API_KEY', 'test-key'));
+
 /** The mirror is not the subject here — every read takes the live eCFR path. */
 vi.mock('@/services/ecfr-mirror/ecfr-mirror.js', () => ({
   mirrorReady: () => Promise.resolve(false),
@@ -125,7 +131,6 @@ function surfaces(result: Awaited<ReturnType<typeof runToolContract>>): {
 }
 
 beforeAll(() => {
-  vi.stubEnv('REGULATIONS_GOV_API_KEY', 'test-key');
   const stub = {} as AppConfig & StorageService;
   initEcfrService(stub, stub);
   initFederalRegisterService(stub, stub);
@@ -154,6 +159,11 @@ describe('upstream_unavailable reaches the caller', () => {
       name: 'regulations_browse_cfr',
       tool: browseCfrTool,
       input: { mode: 'structure' as const, title: 40 },
+    },
+    {
+      name: 'regulations_browse_cfr (versions)',
+      tool: browseCfrTool,
+      input: { mode: 'versions' as const, title: 40, part: '141' },
     },
     {
       name: 'regulations_get_cfr_section',
@@ -446,6 +456,11 @@ describe('a request budget reaches the caller', () => {
       input: { mode: 'structure' as const, title: 40 },
     },
     {
+      name: 'regulations_browse_cfr (versions)',
+      tool: browseCfrTool,
+      input: { mode: 'versions' as const, title: 40, part: '141' },
+    },
+    {
       name: 'regulations_get_cfr_section',
       tool: getCfrSectionTool,
       input: { title: 40, part: '50', section: '50.1' },
@@ -462,6 +477,52 @@ describe('a request budget reaches the caller', () => {
       input: { docket_id: 'EPA-HQ-OAR-2025-0194' },
     },
   ];
+
+  it('spends one budget across both upstream pages a straddling versions page reads', async () => {
+    // Rows 990–1019 sit on two of eCFR's fixed 1,000-row pages. The first answers
+    // slowly, inside one 20 s attempt; the second never does, and has only what
+    // the first left.
+    serveEverything((request) => {
+      const page = new URL(request.url).searchParams.get('page');
+      if (page === '1') {
+        const rows = Array.from({ length: 1_000 }, (_, i) => ({
+          date: '2018-01-15',
+          amendment_date: '2018-01-15',
+          issue_date: '2018-01-15',
+          identifier: `52.${i + 1}`,
+          name: `§ 52.${i + 1}   Heading.`,
+          part: '52',
+          removed: false,
+          subpart: null,
+          substantive: true,
+          title: '40',
+          type: 'section',
+        }));
+        return answersAfter(request, 15_000, {
+          content_versions: rows,
+          meta: { result_count: '1500', latest_amendment_date: '2018-01-15' },
+        });
+      }
+      return neverAnswers(request);
+    });
+    const { result, elapsedMs } = await withoutWaiting(() =>
+      runToolContract(browseCfrTool, {
+        mode: 'versions',
+        title: 40,
+        part: '52',
+        page: 34,
+        per_page: 30,
+      }),
+    );
+    const { error } = surfaces(result);
+    const pages = http.calls.map((c) => new URL(c.request.url).searchParams.get('page'));
+
+    expect(error.data?.reason).toBe('upstream_unavailable');
+    expect(elapsedMs).toBeLessThanOrEqual(REQUEST_BUDGET_MS);
+    expect(pages[0]).toBe('1');
+    expect(pages.slice(1).every((p) => p === '2')).toBe(true);
+    expect(pages.length).toBeGreaterThan(1);
+  });
 
   for (const { name, tool, input } of everyTool) {
     it(`${name} answers inside the budget when the upstream never responds`, async () => {
@@ -656,6 +717,70 @@ describe('not_found reaches the caller', () => {
     expect(text).toMatch(/^Recovery: .+$/m);
     expect(http.calls).toHaveLength(1);
   });
+
+  describe('regulations_find_comments checks a docket that lists no comments', () => {
+    /**
+     * The live shapes: `filter[docketId]` answers any docket ID with HTTP 200,
+     * zero comments for one Regulations.gov does not hold, and `/dockets/{id}`
+     * answers 404 for a docket that does not exist.
+     */
+    function serveDocketComments(totalElements: number, docketExists: boolean): void {
+      serveEverything((request) => {
+        const { pathname } = new URL(request.url);
+        if (pathname === '/v4/comments') {
+          return Response.json({ data: [], meta: { totalElements } });
+        }
+        if (pathname.startsWith('/v4/dockets/')) {
+          return docketExists
+            ? Response.json({ data: { id: pathname.slice(12), type: 'dockets', attributes: {} } })
+            : Response.json(
+                {
+                  errors: [
+                    {
+                      status: '404',
+                      title: 'The docket with the specified ID could not be found.',
+                    },
+                  ],
+                },
+                { status: 404 },
+              );
+        }
+        return new Response('unexpected', { status: 500 });
+      });
+    }
+
+    const paths = () => http.calls.map((c) => new URL(c.request.url).pathname);
+
+    it('answers not_found naming a docket Regulations.gov does not hold, after one docket lookup', async () => {
+      serveDocketComments(0, false);
+      const { error, text } = surfaces(
+        await runToolContract(findCommentsTool, { docket_id: 'reg-101355-26' }),
+      );
+
+      expect(error.code).toBe(-32001);
+      expect(error.data?.reason).toBe('not_found');
+      expect(error.message).toContain('REG-101355-26');
+      expect(text).toMatch(/^Recovery: .*regulationsGovDocketId.*docketId/m);
+      expect(paths()).toEqual(['/v4/comments', '/v4/dockets/REG-101355-26']);
+    });
+
+    it('keeps an existing docket with no comments a success, after one docket lookup', async () => {
+      serveDocketComments(0, true);
+      const result = await runToolContract(findCommentsTool, { docket_id: 'WHD_FRDOC_0001' });
+
+      expect(result.isError).toBeFalsy();
+      expect((result.structuredContent as { totalCount?: number }).totalCount).toBe(0);
+      expect(paths()).toEqual(['/v4/comments', '/v4/dockets/WHD_FRDOC_0001']);
+    });
+
+    it('sends no docket lookup for a docket that lists comments', async () => {
+      serveDocketComments(1629, true);
+      const result = await runToolContract(findCommentsTool, { docket_id: 'EPA-HQ-OW-2022-0114' });
+
+      expect(result.isError).toBeFalsy();
+      expect(paths()).toEqual(['/v4/comments']);
+    });
+  });
 });
 
 describe('conflicting_title reaches the caller', () => {
@@ -673,6 +798,23 @@ describe('conflicting_title reaches the caller', () => {
     expect(error.data?.reason).toBe('conflicting_title');
     expect(error.message).toContain('21');
     expect(error.message).toContain('40');
+    expect(text).toMatch(/Recovery: Set title to the title the cite names/);
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('refuses the same cite in browse versions mode, before any request', async () => {
+    serveEverything(() => new Response('unexpected', { status: 500 }));
+    const { error, text } = surfaces(
+      await runToolContract(browseCfrTool, {
+        mode: 'versions',
+        title: 40,
+        part: '141',
+        section: '21 CFR 141.61',
+      }),
+    );
+
+    expect(error.code).toBe(-32007);
+    expect(error.data?.reason).toBe('conflicting_title');
     expect(text).toMatch(/Recovery: Set title to the title the cite names/);
     expect(http.calls).toHaveLength(0);
   });
@@ -721,6 +863,72 @@ describe('regulations_find_comments filter validation never reaches Regulations.
     expect(error.data?.reason).toBe('filter_requires_list_mode');
     expect(text).toMatch(/^Recovery: Drop the filters/m);
     expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe('regulations_get_docket target rules never reach Regulations.gov', () => {
+  const cases = [
+    { reason: 'target_required', input: {}, recovery: /^Recovery: Provide docket_id/m },
+    {
+      reason: 'multiple_targets',
+      input: { docket_id: 'EPA-HQ-OW-2022-0114', document_id: 'EPA-HQ-OW-2022-0114-3084' },
+      recovery: /^Recovery: Keep one/m,
+    },
+    {
+      reason: 'filter_requires_list_mode',
+      input: { document_id: 'EPA-HQ-OW-2022-0114-3084', search_term: 'economic analysis' },
+      recovery: /^Recovery: Drop the filters/m,
+    },
+  ];
+
+  for (const { reason, input, recovery } of cases) {
+    it(`answers ${JSON.stringify(input)} with ${reason}`, async () => {
+      serveEverything(() => Response.json({ data: {} }));
+      const { error, text } = surfaces(await runToolContract(getDocketTool, input));
+
+      expect(error.code).toBe(-32007);
+      expect(error.data?.reason).toBe(reason);
+      expect(text).toMatch(recovery);
+      expect(http.calls).toHaveLength(0);
+    });
+  }
+});
+
+describe('regulations_get_docket document detail', () => {
+  it('names a document ID that does not exist, after one lookup', async () => {
+    // Live: GET /v4/documents/EPA-HQ-OW-2022-0114-9999999 is a 404 with this body.
+    serveEverything(() =>
+      Response.json(
+        {
+          errors: [
+            { status: '404', title: 'The document with the specified ID could not be found.' },
+          ],
+        },
+        { status: 404 },
+      ),
+    );
+    const { error, text } = surfaces(
+      await runToolContract(getDocketTool, { document_id: 'epa-hq-ow-2022-0114-9999999' }),
+    );
+
+    expect(error.code).toBe(-32001);
+    expect(error.data?.reason).toBe('not_found');
+    expect(error.message).toContain('EPA-HQ-OW-2022-0114-9999999');
+    expect(text).toMatch(/^Recovery: .*document ID/m);
+    expect(http.calls.map((c) => new URL(c.request.url).pathname)).toEqual([
+      '/v4/documents/EPA-HQ-OW-2022-0114-9999999',
+    ]);
+  });
+
+  it('answers a 5xx with upstream_unavailable and its hint', async () => {
+    serveEverything(unavailable);
+    const { error, text } = surfaces(
+      await runToolContract(getDocketTool, { document_id: 'EPA-HQ-OW-2022-0114-3084' }),
+    );
+
+    expect(error.code).toBe(-32000);
+    expect(error.data?.reason).toBe('upstream_unavailable');
+    expect(text).toMatch(/^Recovery: .+$/m);
   });
 });
 
@@ -909,13 +1117,60 @@ describe('invalid_filter reaches the caller', () => {
     ['regulation_id_number', 'rin', { rin: '2040-AG18' }],
     ['docket_id', 'docket_id', { docket_id: 'EPA-HQ-OW-2022-0114' }],
     ['cfr', 'cfr_title', { cfr_title: 40 }],
-  ])('maps a rejected %s to the %s parameter', async (field, parameter, input) => {
-    serveEverything(() => rejected({ [field]: 'invalid value' }));
-    const { error } = surfaces(await runToolContract(searchRulesTool, input));
+    ['executive_order_numbers', 'executive_order_number', { executive_order_number: 14192 }],
+    [
+      'presidential_document_type',
+      'presidential_document_type',
+      { presidential_document_type: ['executive_order'] },
+    ],
+    ['president', 'president', { president: 'donald-trump' }],
+    ['signing_date', 'signed_before', { signed_before: '2025-01-31' }],
+    ['significant', 'significant', { type: ['RULE'], significant: true }],
+    ['effective_date', 'effective_after', { effective_after: '2026-11-01' }],
+  ])(
+    'maps a rejected %s to the %s parameter',
+    async (field, parameter, input: Record<string, unknown>) => {
+      serveEverything(() => rejected({ [field]: 'invalid value' }));
+      const { error } = surfaces(await runToolContract(searchRulesTool, input));
 
+      expect(error.data?.reason).toBe('invalid_filter');
+      expect(error.data?.parameters).toEqual([parameter]);
+      expect(error.message).toContain(`\`${parameter}\`: invalid value`);
+    },
+  );
+
+  it('answers an unknown president slug with the slugs the filter takes', async () => {
+    // Probed live: an unknown identifier answers exactly this 400.
+    serveEverything(() =>
+      rejected({ president: "'joseph-r-biden' is not a valid president identifier" }),
+    );
+    const { error, text } = surfaces(
+      await runToolContract(searchRulesTool, { president: 'joseph-r-biden' }),
+    );
+
+    expect(error.code).toBe(-32007);
     expect(error.data?.reason).toBe('invalid_filter');
-    expect(error.data?.parameters).toEqual([parameter]);
-    expect(error.message).toContain(`\`${parameter}\`: invalid value`);
+    expect(error.message).toContain(
+      "`president`: 'joseph-r-biden' is not a valid president identifier",
+    );
+    expect(text).toMatch(/^Recovery: .*joe-biden.*presidential\.president\.slug.*$/m);
+    expect(new URL(http.calls[0]!.request.url).searchParams.get('conditions[president]')).toBe(
+      'joseph-r-biden',
+    );
+    expect(http.calls).toHaveLength(1);
+  });
+
+  it('names both signing bounds and the date hint when both were set', async () => {
+    serveEverything(() => rejected({ signing_date: 'Signing Date is not a valid date.' }));
+    const { error } = surfaces(
+      await runToolContract(searchRulesTool, {
+        signed_after: '2025-01-20',
+        signed_before: '2025-01-31',
+      }),
+    );
+
+    expect(error.data?.parameters).toEqual(['signed_after', 'signed_before']);
+    expect(String((error.data?.recovery as { hint?: string })?.hint)).toMatch(/YYYY-MM-DD/);
   });
 
   it('reads the array form of a field report too', async () => {
@@ -956,6 +1211,8 @@ describe('a calendar-invalid date never reaches the Federal Register', () => {
   const cases = [
     { tool: searchRulesTool, input: { published_after: '2025-13-45' } },
     { tool: searchRulesTool, input: { published_before: '2025-02-30' } },
+    { tool: searchRulesTool, input: { signed_after: '2025-02-30' } },
+    { tool: searchRulesTool, input: { effective_before: '2026-02-30' } },
     { tool: listOpenCommentsTool, input: { closing_before: '2026-02-30' } },
   ];
 
@@ -987,6 +1244,11 @@ describe('auth_required reaches the caller', () => {
       name: 'regulations_find_comments (detail mode)',
       tool: findCommentsTool,
       input: { comment_id: 'EPA-HQ-OAR-2025-0194-31102' },
+    },
+    {
+      name: 'regulations_get_docket (detail mode)',
+      tool: getDocketTool,
+      input: { document_id: 'EPA-HQ-OW-2022-0114-3084' },
     },
   ];
 

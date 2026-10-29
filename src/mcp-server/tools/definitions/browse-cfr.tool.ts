@@ -8,31 +8,44 @@
  * cold deploy all route to the live eCFR search API. Keyless. Feeds
  * regulations_get_cfr_section.
  *
- * `title` and `part` scope both modes; a part with no title is refused rather
+ * `title` and `part` scope every mode; a part with no title is refused rather
  * than dropped, since part numbers repeat across titles and eCFR rejects the
  * filter outright. A live search hit's path names the part it sits in, which a
  * mirror hit cannot do — the index stores no level names.
  *
- * `page` / `per_page` page two lists: search results, and a part's flattened
- * section listing in structure mode. Live search results are one row per
- * section — eCFR's index answers one hit per section version, and the service
- * collapses the repeats — so `countBasis` says whether `totalCount` counts
- * sections or versions. Every notice a response carries is composed into one
- * string, since `notice` is last-wins.
+ * Versions mode lists the dates a part's or section's text changed, from the
+ * versioner's versions endpoint, in eCFR's order (document order, oldest first
+ * within each identifier); each row's `date` reads that version through
+ * regulations_get_cfr_section. Its `section` resolves through the read path's
+ * own candidates, so the cite forms that tool accepts list the same history.
+ *
+ * `page` / `per_page` page three lists: search results, a part's flattened
+ * section listing in structure mode, and versions. Live search results are one
+ * row per section — eCFR's index answers one hit per section version, and the
+ * service collapses the repeats — so `countBasis` says whether `totalCount`
+ * counts sections or versions. Every notice a response carries is composed into
+ * one string, since `notice` is last-wins.
  * @module mcp-server/tools/definitions/browse-cfr.tool
  */
 
 import { type Context, tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { escapeMarkdownInline, markdown } from '@cyanheads/mcp-ts-core/utils';
-import { normalizePart } from '@/services/ecfr/cite.js';
+import { normalizePart, sectionCite } from '@/services/ecfr/cite.js';
 import {
+  ECFR_EARLIEST_DATE,
   ECFR_SEARCH_WINDOW,
   getEcfrService,
   outsideCoverageMessage,
   today,
 } from '@/services/ecfr/ecfr-service.js';
-import type { EcfrSearchPage } from '@/services/ecfr/types.js';
+import {
+  citedTitle,
+  describeRewrite,
+  sectionCandidates,
+  stripCitePrefix,
+} from '@/services/ecfr/read-section.js';
+import type { EcfrSearchPage, EcfrVersionPage } from '@/services/ecfr/types.js';
 import {
   type MirrorScope,
   mirrorReady,
@@ -40,6 +53,7 @@ import {
   mirrorSearch,
 } from '@/services/ecfr-mirror/ecfr-mirror.js';
 import { isoDate } from './date-input.js';
+import { clampSize, joinNotices, perPageInput, type SizeLimit } from './size-limit.js';
 
 /** Restriction clause naming the caller's own title (and part) filter, if any. */
 function filterClause(title: number | undefined, part: string | undefined): string {
@@ -97,12 +111,12 @@ function describeLiveScope(
   return `Live eCFR search — all CFR titles${filterClause(title, part)}, text in effect on ${date}.`;
 }
 
-/** Largest `per_page` the tool accepts — a truncation notice only suggests raising it below this. */
-const MAX_PER_PAGE = 50;
+/** per_page bounds — a truncation notice only suggests raising it below the max. */
+const PER_PAGE: SizeLimit = { name: 'per_page', min: 1, max: 50, default: 20 };
 
 /** The "or raise per_page" clause, offered only while a larger page exists. */
 function raisePerPage(perPage: number): string {
-  return perPage < MAX_PER_PAGE ? `, or raise per_page (max ${MAX_PER_PAGE})` : '';
+  return perPage < PER_PAGE.max ? `, or raise per_page (max ${PER_PAGE.max})` : '';
 }
 
 const structureNode = z
@@ -176,16 +190,47 @@ const searchHit = z
   })
   .describe('One matching CFR section or appendix.');
 
+const versionRow = z
+  .object({
+    type: z.string().describe('"section" or "appendix". Treat an unknown type as passthrough.'),
+    identifier: z
+      .string()
+      .describe(
+        'Section number ("141.61"); on an appendix row, the identifier regulations_get_cfr_section takes as `appendix`, verbatim.',
+      ),
+    heading: z.string().describe('The section or appendix name, plain text.'),
+    part: z.string().describe('The part it sits in.'),
+    subpart: z.string().nullable().describe('Subpart identifier ("G"), or null when in none.'),
+    cfrCite: z
+      .string()
+      .describe('Cite → regulations_get_cfr_section, as structure mode cites the same node.'),
+    date: z
+      .string()
+      .describe(
+        `Day this version took effect: pass it as regulations_get_cfr_section \`date\` to read it. A row dated before ${ECFR_EARLIEST_DATE} is the text in force when eCFR coverage begins, read at ${ECFR_EARLIEST_DATE}. A removed row's date reads nothing; the previous row's date reads the last text.`,
+      ),
+    issueDate: z
+      .string()
+      .describe(
+        'The eCFR issue that published this version, which can postdate `date`; changed_since filters on it.',
+      ),
+    substantive: z
+      .boolean()
+      .describe('False when eCFR flags the version as an editorial re-issue.'),
+    removed: z.boolean().describe('True on the row that removed the section or appendix.'),
+  })
+  .describe('One version of a section or appendix.');
+
 export const browseCfrTool = tool('regulations_browse_cfr', {
   title: 'regulations_browse_cfr',
   description:
-    'Explore the codified Code of Federal Regulations via eCFR in two modes. "structure" lists all 50 titles; with a title, that title\'s top-level divisions (its chapters, or subtitles); and with a title and part, every section and appendix in the part, flattened and paged, each naming the subpart and subject group it sits under — the way to enumerate a part\'s sections without reading its text. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet, one result per section, paged. Both modes accept title and part to narrow the scope. Both feed regulations_get_cfr_section. Every search result reports which corpus answered it — the synced local mirror or the live eCFR index — and what that corpus covers, in `source` and `sourceScope`.',
+    'Explore the codified Code of Federal Regulations via eCFR in three modes. "structure" lists all 50 titles; with a title, that title\'s top-level divisions (its chapters, or subtitles); and with a title and part, every section and appendix in the part, flattened and paged, each naming the subpart and subject group it sits under — the way to enumerate a part\'s sections without reading its text. "search" runs a full-text query across the codified CFR and returns matching sections with their hierarchy path and a snippet, one result per section, paged. "versions" lists the dates a part\'s or one section\'s text changed, oldest first per section, paged, with the latest amendment date; with changed_since, what changed across a title. Every mode accepts title and part to narrow the scope, and all three feed regulations_get_cfr_section — a version row\'s `date` reads that version. Every search result reports which corpus answered it — the synced local mirror or the live eCFR index — and what that corpus covers, in `source` and `sourceScope`.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     mode: z
-      .enum(['structure', 'search'])
+      .enum(['structure', 'search', 'versions'])
       .describe(
-        '"structure": list titles, a title\'s top-level divisions, or a part\'s sections and appendices, to find a cite. "search": full-text search the codified CFR for sections matching a phrase.',
+        '"structure": list titles, a title\'s top-level divisions, or a part\'s sections and appendices, to find a cite. "search": full-text search the codified CFR for sections matching a phrase. "versions": list the dates a part\'s or section\'s text changed (title plus part or changed_since).',
       ),
     title: z
       .number()
@@ -194,25 +239,37 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .max(50)
       .optional()
       .describe(
-        "CFR title number (1–50). Structure mode: omit to list all 50 titles; provide it alone to list the title's top-level divisions (chapters, or subtitles) — not the parts beneath them — or with part to list that part. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs.",
+        "CFR title number (1–50). Structure mode: omit to list all 50 titles; provide it alone to list the title's top-level divisions (chapters, or subtitles) — not the parts beneath them — or with part to list that part. Search mode: optional filter restricting matches to that title — e.g. 40 for environmental rules, 21 for food and drugs. Versions mode: required, with part or changed_since.",
       ),
     part: z
       .string()
       .optional()
       .describe(
-        'CFR part within the title, in both modes — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly once a leading "Part" or "Pt." is dropped, so pass the identifier as eCFR writes it — "58" ("Part 58" also reads as 58), not "058".',
+        'CFR part within the title, in every mode — structure mode lists every section and appendix in the part, flattened and paged by page/per_page; search mode restricts matches to text inside that part; versions mode lists the part\'s versions, appendices included. Requires title; a part on its own is rejected. Parts can be alphanumeric ("1203a", "16A") and are matched exactly once a leading "Part" or "Pt." is dropped, so pass the identifier as eCFR writes it — "58" ("Part 58" also reads as 58), not "058".',
       ),
     query: z
       .union([z.literal(''), z.string().min(2).describe('Search phrase, at least 2 characters.')])
       .optional()
       .describe(
-        'Full-text search phrase (search mode, required in that mode). Ignored in structure mode.',
+        'Full-text search phrase (search mode, required in that mode). Ignored in structure and versions modes.',
       ),
     date: z
       .union([z.literal(''), isoDate()])
       .optional()
       .describe(
-        "Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode uses it for the historical hierarchy, and rejects a date past the title's up-to-date date. Search mode matches only the section text in effect on that day, so a past date searches the CFR as it read then; eCFR indexes 2017-01-03 onward and rejects a date past its current index date.",
+        "Point-in-time date, ISO 8601 (YYYY-MM-DD). Defaults to current. Structure mode uses it for the historical hierarchy, and rejects a date past the title's up-to-date date. Search mode matches only the section text in effect on that day, so a past date searches the CFR as it read then; eCFR indexes 2017-01-03 onward and rejects a date past its current index date. Ignored in versions mode, where each row carries its own date.",
+      ),
+    section: z
+      .string()
+      .optional()
+      .describe(
+        'Versions mode: list one section\'s versions rather than its part\'s ("141.61"). Requires part. "61", "§ 141.61", "141.61(c)", and "40 CFR 141.61" resolve to the section, with a notice. Ignored in other modes.',
+      ),
+    changed_since: z
+      .union([z.literal(''), isoDate()])
+      .optional()
+      .describe(
+        'Versions mode: keep only versions published by an eCFR issue dated on or after this day (YYYY-MM-DD). With title alone, lists what changed across the title. Ignored in other modes.',
       ),
     page: z
       .number()
@@ -221,21 +278,16 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .optional()
       .default(1)
       .describe(
-        `1-based page of search results, or of a part's listing in structure mode (default 1); ignored by a structure listing above a part, which comes back whole. A truncation notice names the next page. Live eCFR search pages through its first ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')} hits only, so a page starting past them is refused — narrow the query instead of paging deeper.`,
+        `1-based page of search results, of a part's listing in structure mode, or of versions (default 1); ignored by a structure listing above a part, which comes back whole. A truncation notice names the next page. Live eCFR search pages through its first ${ECFR_SEARCH_WINDOW.toLocaleString('en-US')} hits only, so a page starting past them is refused — narrow the query instead of paging deeper.`,
       ),
-    per_page: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_PER_PAGE)
-      .optional()
-      .default(20)
-      .describe(
-        `Rows per page — search results, or nodes of a part's listing in structure mode (1–${MAX_PER_PAGE}, default 20).`,
-      ),
+    per_page: perPageInput(
+      PER_PAGE,
+      (bounds) =>
+        `Rows per page — search results, nodes of a part's listing in structure mode, or versions (${bounds}).`,
+    ),
   }),
   output: z.object({
-    mode: z.enum(['structure', 'search']).describe('Which mode produced this result.'),
+    mode: z.enum(['structure', 'search', 'versions']).describe('Which mode produced this result.'),
     date: z
       .string()
       .optional()
@@ -264,13 +316,26 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       .describe(
         'Matching CFR sections and appendices, this page, one row per section however many of its versions matched (search mode).',
       ),
+    versions: z
+      .array(versionRow)
+      .optional()
+      .describe(
+        'Versions mode: this page of versions in eCFR order — document order by identifier, oldest first within each.',
+      ),
+    latestAmendmentDate: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Versions mode: the newest `date` across every listed version, not just this page; null when none matched.',
+      ),
   }),
   enrichment: {
     totalCount: z
       .number()
       .optional()
       .describe(
-        "Total matches before pagination — search results (see countBasis for what they count), or the nodes in a part's listing.",
+        "Total matches before pagination — search results (see countBasis for what they count), the nodes in a part's listing, or versions.",
       ),
     countBasis: z
       .enum(['sections', 'section_versions'])
@@ -281,14 +346,14 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     page: z
       .number()
       .optional()
-      .describe("The page served — of search results, or of a part's listing."),
+      .describe("The page served — of search results, a part's listing, or versions."),
     truncated: z.boolean().optional().describe('True when another page follows this one.'),
     shown: z.number().optional().describe('Rows returned on this page.'),
     notice: z
       .string()
       .optional()
       .describe(
-        'Guidance: the next page to request, a page past the end, an empty result, or what the count means.',
+        'Guidance: per_page above its ceiling, the next page to request, a page past the end, an empty result, what the count means, or how a section was read.',
       ),
   },
   enrichmentTrailer: {
@@ -315,6 +380,20 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       when: 'A part was given with no title. Part identifiers repeat across titles, and eCFR rejects a part filter that names no title.',
       recovery:
         'Add the title the part belongs to (e.g. title 40 with part 58), or drop part to search or browse the whole title set.',
+    },
+    {
+      reason: 'versions_scope_required',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'Versions mode with no title; with a title but neither part nor changed_since; or with a section but no part.',
+      recovery:
+        "Pass title with part (and optionally section) for a part's or section's history, or title with changed_since for what changed across the title.",
+    },
+    {
+      reason: 'conflicting_title',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'Versions mode with section written as a full cite ("21 CFR 141.61") naming a different title than title.',
+      recovery:
+        'Set title to the title the cite names, or pass the section without its title prefix ("141.61").',
     },
     {
       reason: 'date_out_of_range',
@@ -349,6 +428,101 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     const part = normalizePart(input.part);
     if (part && input.title === undefined) {
       throw ctx.fail('title_required_for_part');
+    }
+
+    if (input.mode === 'versions') {
+      const { title, page } = input;
+      const asked = input.section?.trim() || undefined;
+      const changedSince = input.changed_since || undefined;
+      if (title === undefined) {
+        throw ctx.fail('versions_scope_required', 'Versions mode needs a title.');
+      }
+      // The versioner takes a section without its part, but a dotless number
+      // ("25") names a section only inside one part.
+      if (asked && !part) {
+        throw ctx.fail('versions_scope_required', `Section "${asked}" needs the part it sits in.`);
+      }
+      // A title on its own is its entire history in document order — 60,251
+      // versions across 61 upstream pages for title 40 — so it is listed only
+      // narrowed to what changed since a date.
+      if (!part && !changedSince) {
+        throw ctx.fail(
+          'versions_scope_required',
+          `Title ${title} alone lists every version of every section in it; name a part, or pass changed_since.`,
+        );
+      }
+      const cited = asked ? citedTitle(asked) : undefined;
+      if (cited !== undefined && cited !== title) {
+        throw ctx.fail(
+          'conflicting_title',
+          `Section "${asked}" cites title ${cited}, but title is ${title}.`,
+        );
+      }
+
+      // A section resolves through the read tool's own candidates, one request
+      // each, until a form has versions. A marker the versioner cannot parse
+      // ("§") is stripped before the first; an empty set moves on to the next.
+      const scopeLabel = part ? `part ${part} of title ${title}` : `title ${title}`;
+      let forms: { cite?: string; rewrite?: string; section?: string }[] = [{}];
+      let where = scopeLabel;
+      if (asked && part) {
+        const { prefix, value } = stripCitePrefix(asked, title, part);
+        forms = sectionCandidates(value, part).map((candidate) => ({
+          section: candidate.section,
+          cite: sectionCite(title, part, candidate.section),
+          ...(candidate.section !== asked && {
+            rewrite: describeRewrite(asked, prefix, candidate, part),
+          }),
+        }));
+        const others = forms.slice(1).map((form) => form.section);
+        where = `section "${value}" in ${scopeLabel}${others.length > 0 ? ` (also tried ${others.join(', ')})` : ''}`;
+      }
+      const size = clampSize(input.per_page, PER_PAGE, 'regulations_browse_cfr', ctx);
+      const perPage = size.value;
+      const start = (page - 1) * perPage;
+      const read = (section: string | undefined): Promise<EcfrVersionPage> =>
+        service.listVersions(title, { part, section, changedSince }, start, perPage, ctx);
+      let tried = 0;
+      let listing = await read(forms[0]?.section);
+      while (listing.totalCount === 0 && tried + 1 < forms.length) {
+        tried++;
+        listing = await read(forms[tried]?.section);
+      }
+      const resolved = listing.totalCount > 0 ? forms[tried] : undefined;
+      const { versions, totalCount, latestAmendmentDate } = listing;
+      const output = { mode: 'versions' as const, versions, latestAmendmentDate };
+
+      ctx.enrich({ page });
+      ctx.enrich.total(totalCount);
+      if (!resolved) {
+        ctx.enrich.notice(
+          joinNotices(
+            size.notice,
+            changedSince
+              ? `No version of ${where} was issued on or after ${changedSince}. Omit changed_since to list its whole history; if that is empty too, verify the cite with mode "structure".`
+              : `eCFR lists no versions of ${where}: no such ${asked ? 'section' : 'part'} exists there. Verify the cite with mode "structure", which lists a part's sections.`,
+          ),
+        );
+        return output;
+      }
+
+      const since = changedSince ? ` issued on or after ${changedSince}` : '';
+      const label = resolved.cite ?? scopeLabel;
+      const lastPage = Math.ceil(totalCount / perPage);
+      const notes = [size.notice, resolved.rewrite].filter((note): note is string => Boolean(note));
+      if (versions.length === 0) {
+        notes.push(
+          `Page ${page} is past the end of ${label}'s versions: its ${totalCount} versions${since} end on page ${lastPage} at per_page ${perPage}. Request page ${lastPage} or earlier.`,
+        );
+      } else if (start + versions.length < totalCount) {
+        notes.push(
+          `${label.charAt(0).toUpperCase()}${label.slice(1)} holds ${totalCount} versions${since}; this is page ${page} of ${lastPage}. Request page ${page + 1} for the next ${perPage}${raisePerPage(perPage)}.`,
+        );
+        ctx.enrich.truncated({ shown: versions.length, cap: perPage, guidance: notes.join(' ') });
+        return output;
+      }
+      if (notes.length > 0) ctx.enrich.notice(notes.join(' '));
+      return output;
     }
 
     // Only a part's listing and search results are paged; any other structure
@@ -390,7 +564,9 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
 
       // A part's listing runs to thousands of nodes (40 CFR 63 holds 3,120), so
       // it is paged like search results rather than returned whole.
-      const { page, per_page: perPage } = input;
+      const { page } = input;
+      const size = clampSize(input.per_page, PER_PAGE, 'regulations_browse_cfr', ctx);
+      const perPage = size.value;
       const start = (page - 1) * perPage;
       const shown = nodes.slice(start, start + perPage);
       const lastPage = Math.ceil(nodes.length / perPage);
@@ -398,17 +574,26 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       ctx.enrich.total(nodes.length);
       if (nodes.length === 0) {
         ctx.enrich.notice(
-          `Part ${part} of title ${input.title} lists no sections or appendices as of ${date}; it may be reserved.`,
+          joinNotices(
+            size.notice,
+            `Part ${part} of title ${input.title} lists no sections or appendices as of ${date}; it may be reserved.`,
+          ),
         );
       } else if (shown.length === 0) {
         ctx.enrich.notice(
-          `Page ${page} is past the end of part ${part}'s listing: its ${nodes.length} sections and appendices end on page ${lastPage} at per_page ${perPage}. Request page ${lastPage} or earlier.`,
+          joinNotices(
+            size.notice,
+            `Page ${page} is past the end of part ${part}'s listing: its ${nodes.length} sections and appendices end on page ${lastPage} at per_page ${perPage}. Request page ${lastPage} or earlier.`,
+          ),
         );
       } else if (start + shown.length < nodes.length) {
         ctx.enrich.truncated({
           shown: shown.length,
           cap: perPage,
-          guidance: `Part ${part} holds ${nodes.length} sections and appendices; this is page ${page} of ${lastPage}. Request page ${page + 1} for the next ${perPage}${raisePerPage(perPage)}.`,
+          guidance: joinNotices(
+            size.notice,
+            `Part ${part} holds ${nodes.length} sections and appendices; this is page ${page} of ${lastPage}. Request page ${page + 1} for the next ${perPage}${raisePerPage(perPage)}.`,
+          ),
         });
       }
       return { mode: 'structure' as const, date, nodes: shown };
@@ -428,7 +613,9 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
     const scope = !input.date && (await mirrorReady()) ? await mirrorScope() : null;
     const answering = scope && (await mirrorAnswers(scope, input.title, ctx)) ? scope : null;
 
-    const { page, per_page: perPage } = input;
+    const { page } = input;
+    const size = clampSize(input.per_page, PER_PAGE, 'regulations_browse_cfr', ctx);
+    const perPage = size.value;
     let provenance: { source: 'mirror' | 'live'; sourceScope: string; date: string };
     let response: EcfrSearchPage;
 
@@ -457,7 +644,10 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
 
     if (response.totalCount === 0) {
       ctx.enrich.notice(
-        `No CFR sections matched "${query}". Corpus searched: ${provenance.sourceScope} Broaden the phrase, ${part ? 'drop the part filter, ' : ''}drop the title filter, or try another title before concluding no such rule exists.`,
+        joinNotices(
+          size.notice,
+          `No CFR sections matched "${query}". Corpus searched: ${provenance.sourceScope} Broaden the phrase, ${part ? 'drop the part filter, ' : ''}drop the title filter, or try another title before concluding no such rule exists.`,
+        ),
       );
       return { mode: 'search' as const, ...provenance, results: [] };
     }
@@ -467,12 +657,15 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
       // was not read to its end, which only happens while the page is still full.
       const lastPage = Math.ceil(response.totalCount / perPage);
       ctx.enrich.notice(
-        `Page ${page} is past the last page of results: ${response.totalCount} matches end on page ${lastPage} at per_page ${perPage}. Request page ${lastPage} or earlier.`,
+        joinNotices(
+          size.notice,
+          `Page ${page} is past the last page of results: ${response.totalCount} matches end on page ${lastPage} at per_page ${perPage}. Request page ${lastPage} or earlier.`,
+        ),
       );
       return { mode: 'search' as const, ...provenance, results: [] };
     }
 
-    const notes: string[] = [];
+    const notes: string[] = size.notice ? [size.notice] : [];
     if (response.hasMore) {
       notes.push(
         `This is page ${page}; request page ${page + 1} for the next ${perPage}${raisePerPage(perPage)}.`,
@@ -534,6 +727,27 @@ export const browseCfrTool = tool('regulations_browse_cfr', {
           : '';
         lines.push(
           `- **${escapeMarkdownInline(n.type)}** ${escapeMarkdownInline(n.identifier)}: ${escapeMarkdownInline(n.label)}${desc}${reserved}${cite}${appendix}`,
+        );
+      }
+    }
+
+    if (result.versions) {
+      lines.push(
+        `**CFR versions** (mode: ${result.mode}, latest amendment: ${result.latestAmendmentDate ?? 'none'})`,
+      );
+      lines.push('');
+      for (const v of result.versions) {
+        const flags: string[] = [];
+        if (v.date < ECFR_EARLIEST_DATE) {
+          flags.push(`in force when eCFR coverage begins; read it at ${ECFR_EARLIEST_DATE}`);
+        }
+        if (v.removed)
+          flags.push(
+            "removed — reading at this date finds nothing; the previous row's date reads the last text",
+          );
+        const subpart = v.subpart ? `, subpart ${escapeMarkdownInline(v.subpart)}` : '';
+        lines.push(
+          `- **${escapeMarkdownInline(v.date)}** ${markdown().inlineCode(v.cfrCite).build()} — ${escapeMarkdownInline(v.heading)} (${escapeMarkdownInline(v.type)} ${markdown().inlineCode(v.identifier).build()}, part ${escapeMarkdownInline(v.part)}${subpart}, issued ${escapeMarkdownInline(v.issueDate)}, ${v.substantive ? 'substantive' : 'not substantive (editorial re-issue)'})${flags.map((f) => ` _(${f})_`).join('')}`,
         );
       }
     }

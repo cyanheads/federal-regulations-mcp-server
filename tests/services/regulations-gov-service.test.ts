@@ -1,7 +1,8 @@
 /**
  * @fileoverview Tests for RegulationsGovService — verifies JSON:API unwrapping of
  * dockets/documents/comments, the comment detail attachment-only detection
- * (stub body + attachment → attachmentOnly), the 429 → rate_limited mapping, how
+ * (stub body + attachment → attachmentOnly), attachment order and withheld files,
+ * the docket existence lookup, the 429 → rate_limited mapping, how
  * the two "no such record" statuses (404, and the 400 the API uses for an ID it
  * cannot parse) both reach not_found while every other 400 reaches domain validation,
  * and the no-key internal invariant guard. Raw `fetch` is mocked
@@ -139,6 +140,252 @@ describe('RegulationsGovService', () => {
     expect(result.documentCount).toBe(1);
     expect(result.documents[0]!.objectId).toBe('0900006484111111');
     expect(result.documents[0]!.frDocNum).toBe('2025-14555');
+  });
+
+  describe('docket document search', () => {
+    /** The docket answers; the documents page is what the test reads the URL of. */
+    function serveDocketThenDocuments(): void {
+      fetchSpy
+        .mockResolvedValueOnce(
+          jsonApiResponse({ data: { id: 'EPA-HQ-OW-2022-0114', type: 'dockets', attributes: {} } }),
+        )
+        .mockResolvedValueOnce(jsonApiResponse({ data: [], meta: { totalElements: 549 } }));
+    }
+
+    const documentsParams = () => new URL(String(fetchSpy.mock.calls[1]![0])).searchParams;
+
+    it('lists newest first and sends no search term when none is given', async () => {
+      serveDocketThenDocuments();
+      await newService().getDocket(
+        { docketId: 'EPA-HQ-OW-2022-0114', perPage: 25, page: 1 },
+        createMockContext(),
+      );
+      const params = documentsParams();
+      expect(params.get('sort')).toBe('-postedDate');
+      expect(params.has('filter[searchTerm]')).toBe(false);
+    });
+
+    it('sends a search term and drops the sort, keeping Regulations.gov relevance order', async () => {
+      // Live: "economic analysis" ranks EPA-HQ-OW-2022-0114-3084 5th unsorted, and
+      // out of the first five under -postedDate.
+      serveDocketThenDocuments();
+      const result = await newService().getDocket(
+        {
+          docketId: 'EPA-HQ-OW-2022-0114',
+          searchTerm: 'economic analysis',
+          documentTypes: ['Proposed Rule', 'Rule'],
+          perPage: 25,
+          page: 22,
+        },
+        createMockContext(),
+      );
+      const params = documentsParams();
+      expect(params.get('filter[searchTerm]')).toBe('economic analysis');
+      expect(params.has('sort')).toBe(false);
+      expect(params.getAll('filter[documentType]')).toEqual(['Proposed Rule', 'Rule']);
+      expect(params.get('filter[docketId]')).toBe('EPA-HQ-OW-2022-0114');
+      expect(params.get('page[number]')).toBe('22');
+      expect(result.documentCount).toBe(549);
+    });
+  });
+
+  describe('document detail', () => {
+    /** Serves `answer` for one document path on the Regulations.gov host; anything else rejects. */
+    function serveDocument(documentId: string, answer: () => Response): void {
+      fetchSpy.mockImplementation((input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (
+          url.hostname === 'api.regulations.gov' &&
+          url.pathname === `/v4/documents/${documentId}`
+        ) {
+          return Promise.resolve(answer());
+        }
+        return Promise.reject(new Error(`unmocked fetch ${url.href}`));
+      });
+    }
+
+    /** A detail payload trimmed to the attributes the service reads, as served 2026-10-29. */
+    function detail(attributes: Record<string, unknown>, included: unknown[] = []) {
+      return () =>
+        jsonApiResponse({
+          data: {
+            id: 'X',
+            type: 'documents',
+            attributes: {
+              docketId: 'EPA-HQ-OW-2022-0114',
+              title: '2024 Economic Analysis',
+              documentType: 'Supporting & Related Material',
+              postedDate: '2024-04-26T04:00:00Z',
+              frDocNum: null,
+              objectId: '09000064864c16ca',
+              withdrawn: false,
+              docAbstract: 'USEPA, Office of Water.',
+              restrictReasonType: null,
+              restrictReason: null,
+              ...attributes,
+            },
+          },
+          included,
+        });
+    }
+
+    it('asks for the attachments and relays the main file, pages, and abstract', async () => {
+      serveDocument(
+        'EPA-HQ-OW-2022-0114-3084',
+        detail({
+          pageCount: 422,
+          fileFormats: [
+            {
+              fileUrl: 'https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-3084/content.pdf',
+              format: 'pdf',
+              size: 5_968_902,
+            },
+          ],
+        }),
+      );
+      const doc = await newService().getDocument('EPA-HQ-OW-2022-0114-3084', createMockContext());
+      expect(new URL(String(fetchSpy.mock.calls[0]![0])).searchParams.get('include')).toBe(
+        'attachments',
+      );
+      expect(doc).toEqual({
+        documentId: 'EPA-HQ-OW-2022-0114-3084',
+        docketId: 'EPA-HQ-OW-2022-0114',
+        title: '2024 Economic Analysis',
+        documentType: 'Supporting & Related Material',
+        postedDate: '2024-04-26T04:00:00Z',
+        frDocNum: null,
+        objectId: '09000064864c16ca',
+        withdrawn: false,
+        abstract: 'USEPA, Office of Water.',
+        pageCount: 422,
+        fileFormats: [
+          {
+            format: 'pdf',
+            fileUrl: 'https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-3084/content.pdf',
+            size: 5_968_902,
+          },
+        ],
+        attachments: [],
+        restrictReasonType: null,
+      });
+    });
+
+    it('relays a document with no main file as empty formats and no page count, with its attachments in docOrder', async () => {
+      // Live: FAA-2016-9362-0009 — fileFormats null, pageCount 0, docAbstract null.
+      const att = (docOrder: number, file: string | null, restrictReasonType: string | null) => ({
+        id: `att-${docOrder}`,
+        type: 'attachments',
+        attributes: {
+          docOrder,
+          title: `Attachment ${docOrder}`,
+          restrictReasonType,
+          fileFormats: file ? [{ fileUrl: file, format: 'pdf', size: 231_617 }] : null,
+        },
+      });
+      const url = 'https://downloads.regulations.gov/FAA-2016-9362-0009/attachment_1.pdf';
+      serveDocument(
+        'FAA-2016-9362-0009',
+        detail({ fileFormats: null, pageCount: 0, docAbstract: null }, [
+          att(2, null, 'Copyrighted'),
+          att(1, url, null),
+        ]),
+      );
+      const doc = await newService().getDocument('FAA-2016-9362-0009', createMockContext());
+      expect(doc.fileFormats).toEqual([]);
+      expect(doc.pageCount).toBeNull();
+      expect(doc.abstract).toBeNull();
+      expect(doc.attachments).toEqual([
+        {
+          title: 'Attachment 1',
+          formats: [{ format: 'pdf', fileUrl: url, size: 231_617 }],
+          restrictReasonType: null,
+        },
+        { title: 'Attachment 2', formats: [], restrictReasonType: 'Copyrighted' },
+      ]);
+    });
+
+    it('relays a withheld document’s restriction and the page count it reports without a file', async () => {
+      // Live: EPA-HQ-OW-2022-0114-3091 — no file, pageCount 22, "Copyrighted".
+      serveDocument(
+        'EPA-HQ-OW-2022-0114-3091',
+        detail({ fileFormats: null, pageCount: 22, restrictReasonType: 'Copyrighted' }),
+      );
+      const doc = await newService().getDocument('EPA-HQ-OW-2022-0114-3091', createMockContext());
+      expect(doc).toMatchObject({
+        fileFormats: [],
+        pageCount: 22,
+        restrictReasonType: 'Copyrighted',
+        attachments: [],
+      });
+    });
+
+    it('keeps a main-file format with no URL out of the files', async () => {
+      serveDocument(
+        'EPA-HQ-OW-2022-0114-0027',
+        detail({
+          pageCount: 117,
+          fileFormats: [
+            { format: 'htm', fileUrl: '', size: 883_502 },
+            {
+              format: 'pdf',
+              fileUrl: 'https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-0027/content.pdf',
+            },
+          ],
+        }),
+      );
+      const doc = await newService().getDocument('EPA-HQ-OW-2022-0114-0027', createMockContext());
+      expect(doc.fileFormats).toEqual([
+        {
+          format: 'pdf',
+          fileUrl: 'https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-0027/content.pdf',
+          size: null,
+        },
+      ]);
+    });
+
+    it('answers not_found naming a document ID that does not exist', async () => {
+      // Live: GET /v4/documents/EPA-HQ-OW-2022-0114-9999999 is this 404.
+      serveDocument(
+        'EPA-HQ-OW-2022-0114-9999999',
+        () =>
+          new Response(
+            JSON.stringify({
+              errors: [
+                { status: '404', title: 'The document with the specified ID could not be found.' },
+              ],
+            }),
+            { status: 404 },
+          ),
+      );
+      const err = await newService()
+        .getDocument('EPA-HQ-OW-2022-0114-9999999', createMockContext())
+        .catch((e: unknown) => e);
+      expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
+      expect((err as McpError).data?.reason).toBe('not_found');
+      expect((err as McpError).message).toBe(
+        'Regulations.gov has no document EPA-HQ-OW-2022-0114-9999999.',
+      );
+    });
+
+    it('answers not_found the same way for an ID the endpoint cannot parse', async () => {
+      serveDocument('NOPE_X', () => invalidId('NOPE_X'));
+      const err = await newService()
+        .getDocument('NOPE_X', createMockContext())
+        .catch((e: unknown) => e);
+      expect((err as McpError).data?.reason).toBe('not_found');
+      expect((err as McpError).message).toContain('NOPE_X');
+    });
+
+    it('lets every other failure through rather than reading it as a missing document', async () => {
+      serveDocument(
+        'EPA-HQ-OW-2022-0114-3084',
+        () => new Response('{}', { status: 429, headers: { 'retry-after': '60' } }),
+      );
+      const err = await newService()
+        .getDocument('EPA-HQ-OW-2022-0114-3084', createMockContext())
+        .catch((e: unknown) => e);
+      expect((err as McpError).data?.reason).toBe('rate_limited');
+    });
   });
 
   it('relays each docket document’s openForComment as commentPeriodOpen, null when absent', async () => {
@@ -682,6 +929,173 @@ describe('RegulationsGovService', () => {
         .catch((e: unknown) => e);
       expect((err as McpError).code).toBe(JsonRpcErrorCode.NotFound);
       expect((err as McpError).data?.reason).toBe('not_found');
+    });
+  });
+
+  describe('comment attachments', () => {
+    /** One `included[]` attachment record, as `?include=attachments` serves it. */
+    function attachment(
+      docOrder: number | undefined,
+      title: string,
+      file: string | null,
+      restrictReasonType: string | null = null,
+    ) {
+      return {
+        id: `att-${docOrder ?? title}`,
+        type: 'attachments',
+        attributes: {
+          docOrder,
+          title,
+          restrictReasonType,
+          restrictReason: null,
+          fileFormats: file ? [{ format: 'pdf', fileUrl: file, size: 1000 }] : null,
+        },
+      };
+    }
+
+    function commentWith(included: unknown[], comment = 'Please find comments attached.') {
+      return jsonApiResponse({
+        data: {
+          id: 'EPA-HQ-OW-2022-0114-1759',
+          type: 'comments',
+          attributes: { title: 'Comment submitted by AWWA', comment },
+        },
+        included,
+      });
+    }
+
+    const file = (n: number) =>
+      `https://downloads.regulations.gov/EPA-HQ-OW-2022-0114-1759/attachment_${n}.pdf`;
+
+    it('relays every attachment in docOrder, keeping withheld ones with their restriction', async () => {
+      // Live 2026-10-29: included[] arrives docOrder 2–8 then 1, and four appendices
+      // carry fileFormats null with restrictReasonType "Copyrighted".
+      fetchSpy.mockResolvedValueOnce(
+        commentWith([
+          attachment(2, 'Appendix A', file(2)),
+          attachment(3, 'Appendix B', null, 'Copyrighted'),
+          attachment(4, 'Appendix C', file(4)),
+          attachment(5, 'Appendix D', file(5)),
+          attachment(6, 'Appendix E Part 1', null, 'Copyrighted'),
+          attachment(7, 'Appendix E Part 2', null, 'Copyrighted'),
+          attachment(8, 'Appendix E Part 3', null, 'Copyrighted'),
+          attachment(1, 'Comment', file(1)),
+        ]),
+      );
+      const detail = await newService().getComment('EPA-HQ-OW-2022-0114-1759', createMockContext());
+      expect(detail.attachments.map((a) => a.title)).toEqual([
+        'Comment',
+        'Appendix A',
+        'Appendix B',
+        'Appendix C',
+        'Appendix D',
+        'Appendix E Part 1',
+        'Appendix E Part 2',
+        'Appendix E Part 3',
+      ]);
+      expect(detail.attachments[0]).toEqual({
+        title: 'Comment',
+        formats: [{ format: 'pdf', fileUrl: file(1), size: 1000 }],
+        restrictReasonType: null,
+      });
+      expect(detail.attachments[2]).toEqual({
+        title: 'Appendix B',
+        formats: [],
+        restrictReasonType: 'Copyrighted',
+      });
+      expect(detail.attachments.filter((a) => a.formats.length === 0)).toHaveLength(4);
+    });
+
+    it('keeps a file-less attachment with no restriction, and orders one with no docOrder last', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        commentWith([
+          attachment(undefined, 'Unnumbered', file(9)),
+          attachment(2, 'No file, no reason', null),
+          {
+            id: 'att-blank',
+            type: 'attachments',
+            // A format entry with no URL is no file either.
+            attributes: { docOrder: 1, title: 'Blank URL', fileFormats: [{ format: 'pdf' }] },
+          },
+        ]),
+      );
+      const detail = await newService().getComment('EPA-HQ-OW-2022-0114-1759', createMockContext());
+      expect(detail.attachments).toEqual([
+        { title: 'Blank URL', formats: [], restrictReasonType: null },
+        { title: 'No file, no reason', formats: [], restrictReasonType: null },
+        {
+          title: 'Unnumbered',
+          formats: [{ format: 'pdf', fileUrl: file(9), size: 1000 }],
+          restrictReasonType: null,
+        },
+      ]);
+    });
+
+    it('flags attachmentOnly on a stub body whose only attachments are withheld', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        commentWith([attachment(1, 'Appendix B', null, 'Copyrighted')], 'See attached'),
+      );
+      const detail = await newService().getComment('EPA-HQ-OW-2022-0114-1759', createMockContext());
+      expect(detail.attachments).toHaveLength(1);
+      expect(detail.attachmentOnly).toBe(true);
+    });
+  });
+
+  describe('docket existence', () => {
+    /** Serves `answer` for one docket path on the Regulations.gov host; anything else rejects. */
+    function serveDocket(docketId: string, answer: () => Response): void {
+      fetchSpy.mockImplementation((input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.hostname === 'api.regulations.gov' && url.pathname === `/v4/dockets/${docketId}`) {
+          return Promise.resolve(answer());
+        }
+        return Promise.reject(new Error(`unmocked fetch ${url.href}`));
+      });
+    }
+
+    it('reports a docket the single-docket endpoint serves as existing', async () => {
+      // Live: WHD_FRDOC_0001 exists and lists zero comments.
+      serveDocket('WHD_FRDOC_0001', () =>
+        jsonApiResponse({ data: { id: 'WHD_FRDOC_0001', type: 'dockets', attributes: {} } }),
+      );
+      expect(await newService().docketExists('WHD_FRDOC_0001', createMockContext())).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a 404 docket as missing', async () => {
+      // Live: GET /v4/dockets/REG-101355-26 answers this 404.
+      serveDocket(
+        'REG-101355-26',
+        () =>
+          new Response(
+            JSON.stringify({
+              errors: [
+                { status: '404', title: 'The docket with the specified ID could not be found.' },
+              ],
+            }),
+            { status: 404 },
+          ),
+      );
+      expect(await newService().docketExists('REG-101355-26', createMockContext())).toBe(false);
+    });
+
+    it('reports an ID the endpoint cannot parse as missing', async () => {
+      serveDocket('Epa-HQ-OW-2022-0114', () => invalidId('Epa-HQ-OW-2022-0114'));
+      expect(await newService().docketExists('Epa-HQ-OW-2022-0114', createMockContext())).toBe(
+        false,
+      );
+    });
+
+    it('lets every other failure through rather than reading it as a missing docket', async () => {
+      serveDocket(
+        'EPA-HQ-OW-2022-0114',
+        () => new Response('{}', { status: 429, headers: { 'retry-after': '60' } }),
+      );
+      const err = await newService()
+        .docketExists('EPA-HQ-OW-2022-0114', createMockContext())
+        .catch((e: unknown) => e);
+      expect((err as McpError).code).toBe(JsonRpcErrorCode.RateLimited);
+      expect((err as McpError).data?.reason).toBe('rate_limited');
     });
   });
 

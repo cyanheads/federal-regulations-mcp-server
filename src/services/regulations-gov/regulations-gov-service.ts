@@ -39,11 +39,13 @@ import {
   runUpstream,
 } from '@/services/upstream-failure.js';
 import type {
-  CommentAttachment,
+  Attachment,
   CommentDetailResult,
   CommentListResult,
   CommentSummary,
   DocketResult,
+  DocumentDetailResult,
+  FileFormat,
   JsonApiList,
   JsonApiResource,
   JsonApiSingle,
@@ -51,6 +53,7 @@ import type {
   RawCommentAttributes,
   RawDocketAttributes,
   RawDocumentAttributes,
+  RawFileFormat,
   RegDocument,
   ResolvedDocument,
 } from './types.js';
@@ -64,12 +67,17 @@ const BASE_DELAY_MS = 1500;
  */
 const TIMEOUT_MS = 15_000;
 
-/** Parameters for a docket fetch. */
+/**
+ * Parameters for a docket fetch. A `searchTerm` narrows the documents by
+ * Regulations.gov full-text search and leaves them in its relevance order;
+ * without one they list newest first.
+ */
 export interface DocketParams {
   docketId: string;
   documentTypes?: string[] | undefined;
   page: number;
   perPage: number;
+  searchTerm?: string | undefined;
 }
 
 /**
@@ -115,8 +123,10 @@ export class RegulationsGovService {
       'filter[docketId]': params.docketId,
       'page[size]': String(params.perPage),
       'page[number]': String(params.page),
-      sort: '-postedDate',
     });
+    // A sort overrides relevance: under -postedDate the best match can fall off page 1.
+    if (params.searchTerm) docSearch.set('filter[searchTerm]', params.searchTerm);
+    else docSearch.set('sort', '-postedDate');
     for (const type of params.documentTypes ?? []) {
       docSearch.append('filter[documentType]', type);
     }
@@ -143,6 +153,28 @@ export class RegulationsGovService {
       documentCount: docsRaw.meta?.totalElements ?? documents.length,
       documents,
     };
+  }
+
+  /**
+   * Whether Regulations.gov holds a docket with this ID. `filter[docketId]`
+   * answers an ID it does not know with zero results rather than an error, so an
+   * empty docket listing is ambiguous until the single-docket endpoint settles
+   * it: both of its "no such record" answers (404, and the 400 for an ID it
+   * cannot parse) mean missing, and every other failure propagates.
+   */
+  async docketExists(docketId: string, ctx: Context): Promise<boolean> {
+    const url = `${this.baseUrl}/dockets/${encodeURIComponent(docketId)}`;
+    try {
+      await this.fetchJson<JsonApiSingle<RawDocketAttributes>>(
+        url,
+        ctx,
+        'RegulationsGovService.docketExists',
+      );
+      return true;
+    } catch (err) {
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) return false;
+      throw err;
+    }
   }
 
   /** List comments on a document (by object ID) or a docket (by docket ID). */
@@ -243,6 +275,34 @@ export class RegulationsGovService {
     const resolved = raw.data ? toResolvedDocument(raw.data) : null;
     if (!resolved) throw missing();
     return resolved;
+  }
+
+  /**
+   * Fetch one document's detail by document ID — its main file in each format
+   * and its attachments, which the `/documents` list never carries. A document
+   * that does not exist leaves as `not_found` naming the ID.
+   */
+  async getDocument(documentId: string, ctx: Context): Promise<DocumentDetailResult> {
+    const url = `${this.baseUrl}/documents/${encodeURIComponent(documentId)}?include=attachments`;
+    let raw: JsonApiSingle<RawDocumentAttributes>;
+    try {
+      raw = await this.fetchJson<JsonApiSingle<RawDocumentAttributes>>(
+        url,
+        ctx,
+        'RegulationsGovService.getDocument',
+      );
+    } catch (err) {
+      // The shared 404 text names a docket example; this lookup has one ID to name.
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+        throw notFound(
+          `Regulations.gov has no document ${documentId}.`,
+          { documentId, reason: 'not_found' },
+          { cause: err },
+        );
+      }
+      throw err;
+    }
+    return normalizeDocumentDetail(documentId, raw);
   }
 
   /**
@@ -453,26 +513,62 @@ function normalizeCommentSummary(c: JsonApiResource<RawCommentAttributes>): Comm
   };
 }
 
-/** Collect attachments from a JSON:API `included[]` block. */
+/**
+ * Collect attachments from a JSON:API `included[]` block, in upload order
+ * (`docOrder`; one without it goes last). An attachment whose file is withheld
+ * is kept with no formats and the reason Regulations.gov gives, so a caller can
+ * tell it exists.
+ */
 function collectAttachments(
   included: Array<JsonApiResource<RawAttachmentAttributes>> | undefined,
-): CommentAttachment[] {
+): Attachment[] {
+  // No docOrder sorts last; ∞ − ∞ is NaN, so `|| 0` keeps such ties in arrival order.
+  const uploadOrder = (r: JsonApiResource<RawAttachmentAttributes>) =>
+    r.attributes?.docOrder ?? Number.POSITIVE_INFINITY;
   return (included ?? [])
     .filter((r) => r.type === 'attachments')
-    .map((r) => {
-      const formats = (r.attributes?.fileFormats ?? [])
-        .filter(
-          (f): f is { format: string; fileUrl: string; size: number | null } =>
-            typeof f?.fileUrl === 'string' && f.fileUrl.length > 0,
-        )
-        .map((f) => ({
-          format: f.format ?? 'unknown',
-          fileUrl: f.fileUrl,
-          size: typeof f.size === 'number' ? f.size : null,
-        }));
-      return { title: r.attributes?.title ?? '(untitled attachment)', formats };
-    })
-    .filter((a) => a.formats.length > 0);
+    .sort((a, b) => uploadOrder(a) - uploadOrder(b) || 0)
+    .map((r) => ({
+      title: r.attributes?.title ?? '(untitled attachment)',
+      formats: collectFormats(r.attributes?.fileFormats),
+      restrictReasonType: r.attributes?.restrictReasonType ?? null,
+    }));
+}
+
+/** The downloadable files of a document or attachment; a format entry with no URL is no file. */
+function collectFormats(fileFormats: RawFileFormat[] | null | undefined): FileFormat[] {
+  return (fileFormats ?? [])
+    .filter(
+      (f): f is RawFileFormat & { fileUrl: string } =>
+        typeof f?.fileUrl === 'string' && f.fileUrl.length > 0,
+    )
+    .map((f) => ({
+      format: f.format ?? 'unknown',
+      fileUrl: f.fileUrl,
+      size: typeof f.size === 'number' ? f.size : null,
+    }));
+}
+
+function normalizeDocumentDetail(
+  documentId: string,
+  raw: JsonApiSingle<RawDocumentAttributes>,
+): DocumentDetailResult {
+  const a = raw.data?.attributes ?? {};
+  return {
+    documentId,
+    docketId: a.docketId ?? null,
+    title: a.title ?? null,
+    documentType: a.documentType ?? null,
+    postedDate: a.postedDate ?? null,
+    frDocNum: a.frDocNum ?? null,
+    objectId: a.objectId ?? null,
+    withdrawn: a.withdrawn ?? null,
+    abstract: a.docAbstract ?? null,
+    pageCount: typeof a.pageCount === 'number' && a.pageCount > 0 ? a.pageCount : null,
+    fileFormats: collectFormats(a.fileFormats),
+    attachments: collectAttachments(raw.included),
+    restrictReasonType: a.restrictReasonType ?? null,
+  };
 }
 
 /**

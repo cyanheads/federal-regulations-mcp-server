@@ -184,6 +184,11 @@ export interface UpstreamSpec {
   context: RequestContext;
   /** Retry classification, where the leg's default differs from the framework's. */
   isTransient?: ((error: unknown) => boolean) | undefined;
+  /**
+   * Retries after the first attempt, where the leg wants fewer than the
+   * framework's three — a decorative read whose caller already holds its answer.
+   */
+  maxRetries?: number | undefined;
   /** Service method raising the request, e.g. `EcfrService.getSectionText`. */
   operation: string;
 }
@@ -226,6 +231,7 @@ export function runUpstream<T>(
       baseDelayMs: spec.baseDelayMs,
       signal: budget.signal,
       ...(spec.isTransient && { isTransient: spec.isTransient }),
+      ...(spec.maxRetries !== undefined && { maxRetries: spec.maxRetries }),
     },
   );
   return withUpstreamReason(asSpentBudget(attempts, ctx, budget, spec.operation));

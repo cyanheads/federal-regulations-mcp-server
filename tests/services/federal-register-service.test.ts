@@ -471,6 +471,224 @@ describe('FederalRegisterService', () => {
     );
   });
 
+  describe('a request with no filter set', () => {
+    /** Every parameter but `fields[]`, in the order sent. */
+    function withoutFields(url: string): string[] {
+      return [...new URL(url).searchParams]
+        .filter(([k]) => k !== 'fields[]')
+        .map(([k, v]) => `${k}=${v}`);
+    }
+
+    it('sends only the date, paging, and order parameters on a search and a citation day', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
+      await service.search({ order: 'newest', perPage: 20, page: 1 }, createMockContext());
+      await service.searchCitation(
+        { publicationDate: '2024-06-11', frPage: 1 },
+        createMockContext(),
+      );
+      const [search, citation] = fetchMock.mock.calls.map(([url]) => withoutFields(url as string));
+      expect(search).toEqual(['per_page=20', 'page=1', 'order=newest']);
+      expect(citation).toEqual([
+        'conditions[publication_date][is]=2024-06-11',
+        'per_page=2000',
+        'order=oldest',
+      ]);
+    });
+
+    it('requests the significance and presidential-document fields on every document view', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
+      const ctx = createMockContext();
+      await service.search({ order: 'newest', perPage: 20, page: 1 }, ctx);
+      await service.searchCitation({ publicationDate: '2024-06-11', frPage: 1 }, ctx);
+      await service.getDocument('2025-02345', undefined, ctx);
+      const added = [
+        'significant',
+        'subtype',
+        'presidential_document_number',
+        'signing_date',
+        'president',
+      ];
+      for (const [url] of fetchMock.mock.calls) {
+        const fields = new URL(url as string).searchParams.getAll('fields[]');
+        expect(fields).toEqual(expect.arrayContaining(added));
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('presidential, significance, and effective-date filters', () => {
+    /** 2025-02345 (EO 14192) as the Federal Register served it on 2026-10-29. */
+    const eo14192 = {
+      document_number: '2025-02345',
+      title: 'Unleashing Prosperity Through Deregulation',
+      type: 'Presidential Document',
+      subtype: 'Executive Order',
+      executive_order_number: '14192',
+      presidential_document_number: '14192',
+      signing_date: '2025-01-31',
+      president: { identifier: 'donald-trump', name: 'Donald Trump' },
+      significant: null,
+      effective_on: null,
+      publication_date: '2025-02-06',
+      html_url: 'https://www.federalregister.gov/d/2025-02345',
+    };
+    /** 2026-19071, a final rule: `president` is set on it too, as on every document. */
+    const significantRule = {
+      document_number: '2026-19071',
+      title: 'A Final Rule',
+      type: 'Rule',
+      significant: true,
+      president: { identifier: 'donald-trump', name: 'Donald Trump' },
+      subtype: null,
+      signing_date: null,
+      presidential_document_number: null,
+      effective_on: '2026-11-16',
+      publication_date: '2026-10-01',
+      html_url: 'https://www.federalregister.gov/d/2026-19071',
+    };
+    const eoPresidential = {
+      type: 'Executive Order',
+      number: '14192',
+      signingDate: '2025-01-31',
+      president: { name: 'Donald Trump', slug: 'donald-trump' },
+    };
+
+    it('sends each filter as its Federal Register condition', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ count: 0, results: [] }));
+      await service.search(
+        {
+          executiveOrderNumber: 14192,
+          presidentialDocumentTypes: ['executive_order', 'proclamation'],
+          president: 'donald-trump',
+          signedAfter: '2025-01-20',
+          signedBefore: '2025-01-31',
+          significant: true,
+          effectiveAfter: '2026-11-01',
+          effectiveBefore: '2026-11-30',
+          order: 'newest',
+          perPage: 20,
+          page: 1,
+        },
+        createMockContext(),
+      );
+      const sent = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+      expect(sent.getAll('conditions[executive_order_numbers][]')).toEqual(['14192']);
+      expect(sent.getAll('conditions[presidential_document_type][]')).toEqual([
+        'executive_order',
+        'proclamation',
+      ]);
+      expect(sent.getAll('conditions[president]')).toEqual(['donald-trump']);
+      expect(sent.getAll('conditions[signing_date][gte]')).toEqual(['2025-01-20']);
+      expect(sent.getAll('conditions[signing_date][lte]')).toEqual(['2025-01-31']);
+      expect(sent.getAll('conditions[significant]')).toEqual(['1']);
+      expect(sent.getAll('conditions[effective_date][gte]')).toEqual(['2026-11-01']);
+      expect(sent.getAll('conditions[effective_date][lte]')).toEqual(['2026-11-30']);
+    });
+
+    it('sends significant only as 1 or 0, the one form the Federal Register reads as true being 1', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ count: 0, results: [] })));
+      for (const significant of [true, false, undefined]) {
+        await service.search(
+          { significant, order: 'newest', perPage: 20, page: 1 },
+          createMockContext(),
+        );
+      }
+      expect(
+        fetchMock.mock.calls.map(([url]) =>
+          new URL(url as string).searchParams.getAll('conditions[significant]'),
+        ),
+      ).toEqual([['1'], ['0'], []]);
+    });
+
+    it('ANDs them into a citation day request', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          count: 1,
+          results: [{ ...eo14192, citation: '90 FR 9065', start_page: 9065, end_page: 9067 }],
+        }),
+      );
+      const day = await service.searchCitation(
+        {
+          publicationDate: '2025-02-06',
+          frPage: 9065,
+          executiveOrderNumber: 14192,
+          signedAfter: '2025-01-31',
+          effectiveBefore: '2025-12-31',
+        },
+        createMockContext(),
+      );
+      const sent = new URL(fetchMock.mock.calls[0]![0] as string).searchParams;
+      expect(sent.get('conditions[publication_date][is]')).toBe('2025-02-06');
+      expect(sent.getAll('conditions[executive_order_numbers][]')).toEqual(['14192']);
+      expect(sent.get('conditions[signing_date][gte]')).toBe('2025-01-31');
+      expect(sent.get('conditions[effective_date][lte]')).toBe('2025-12-31');
+      expect(day.results.map((r) => [r.documentNumber, r.presidential])).toEqual([
+        ['2025-02345', eoPresidential],
+      ]);
+    });
+
+    it('reads a presidential document and a rule on a search and a single document', async () => {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ count: 2, results: [eo14192, significantRule] }))
+        .mockResolvedValueOnce(jsonResponse(eo14192))
+        .mockResolvedValueOnce(jsonResponse(significantRule));
+      const ctx = createMockContext();
+      const { results } = await service.search({ order: 'newest', perPage: 20, page: 1 }, ctx);
+      const eo = await service.getDocument('2025-02345', undefined, ctx);
+      const rule = await service.getDocument('2026-19071', undefined, ctx);
+
+      for (const doc of [results[0]!, eo]) {
+        expect(doc).toMatchObject({ significant: null, presidential: eoPresidential });
+      }
+      // The rule's president is whoever was in office, not its author.
+      for (const doc of [results[1]!, rule]) {
+        expect(doc).toMatchObject({ significant: true, presidential: null });
+      }
+    });
+
+    it.each([
+      ['a blank number', { presidential_document_number: '' }, { number: null }],
+      ['a whitespace number', { presidential_document_number: '  ' }, { number: null }],
+      [
+        'a determination number',
+        { subtype: 'Determination', presidential_document_number: '2026-22' },
+        { type: 'Determination', number: '2026-22' },
+      ],
+      [
+        'no subtype or signing date (1994–2006)',
+        { subtype: null, signing_date: null },
+        { type: null, signingDate: null },
+      ],
+      ['no president', { president: null }, { president: null }],
+      [
+        'a president with no identifier',
+        { president: { name: 'Donald Trump' } },
+        { president: null },
+      ],
+    ])('reads %s as recorded, never invented', async (_label, raw, expected) => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ ...eo14192, ...raw }));
+      const doc = await service.getDocument('2025-02345', undefined, createMockContext());
+      expect(doc.presidential).toEqual({ ...eoPresidential, ...expected });
+    });
+
+    it('reads significant false as false and an absent flag as null', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          count: 2,
+          results: [
+            { ...significantRule, significant: false },
+            { ...significantRule, document_number: '2026-19072', significant: undefined },
+          ],
+        }),
+      );
+      const { results } = await service.search(
+        { order: 'newest', perPage: 20, page: 1 },
+        createMockContext(),
+      );
+      expect(results.map((r) => r.significant)).toEqual([false, null]);
+    });
+  });
+
   describe('CFR, docket, and RIN filters', () => {
     it('sends each filter as its Federal Register condition', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ count: 0, results: [] }));

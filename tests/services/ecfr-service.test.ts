@@ -27,7 +27,8 @@ vi.mock('@cyanheads/mcp-ts-core/utils', async (importOriginal) => {
   return { ...actual, fetchWithTimeout: fetchMock };
 });
 
-const { EcfrService } = await import('@/services/ecfr/ecfr-service.js');
+const { EcfrService, ECFR_VERSIONS_PAGE_ROWS } = await import('@/services/ecfr/ecfr-service.js');
+const { REQUEST_BUDGET_MS, requestBudget } = await import('@/services/request-budget.js');
 
 /** A verbatim cut of a real versioner response, from `tests/fixtures/`. */
 function fixture(name: string): string {
@@ -469,7 +470,7 @@ describe('EcfrService', () => {
     expect(requested.get('appendix')).toBe('Appendix A-1 to Part 50');
     // The identifier is already a full phrase naming its own level, so prefixing
     // the type would read "Appendix Appendix A-1 to Part 50".
-    expect(path).toBe('Title 40 › Part 50 › Appendix A-1 to Part 50');
+    expect(path).toEqual({ path: 'Title 40 › Part 50 › Appendix A-1 to Part 50' });
   });
 
   it('names a subject group by its heading, not the identifier eCFR mints', async () => {
@@ -489,7 +490,12 @@ describe('EcfrService', () => {
       }),
     );
     const ctx = createMockContext();
-    const path = await service.hierarchyPath(14, { part: '241', section: '25' }, '2026-08-06', ctx);
+    const { path } = await service.hierarchyPath(
+      14,
+      { part: '241', section: '25' },
+      '2026-08-06',
+      ctx,
+    );
 
     expect(path).toBe('Title 14 › Part 241 › Traffic Reporting Requirements › § 25');
     expect(path).not.toContain('ECFR5092393aaea23ae');
@@ -1144,6 +1150,234 @@ describe('EcfrService', () => {
   });
 });
 
+/**
+ * The ancestry read runs after the text is in hand, so it decorates an answer
+ * that is already final: one attempt under a short deadline, and any failure
+ * other than the caller's own cancellation keeps the read with the levels the
+ * cite already names, plus a notice saying the rest are missing. The fetch below
+ * `fetchWithTimeout` is the only thing faked — the attempt deadline, the retry
+ * loop, the request budget, and the classification all run for real.
+ */
+describe('EcfrService.hierarchyPath when ancestry fails (#71)', () => {
+  const NOTICE =
+    "hierarchyPath lists only the cited levels (title, part, section or appendix): eCFR's hierarchy lookup failed, so the chapter, subchapter, and subpart are missing. Retry the call for the full path.";
+  const SECTION_141_61 = { part: '141', section: '141.61' };
+  const CITED_141_61 = 'Title 40 › Part 141 › § 141.61';
+
+  /** A peer that accepts the request and never answers, until something aborts it. */
+  function neverAnswers(signal: AbortSignal): Promise<never> {
+    return new Promise((_, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  }
+
+  /** `fetchWithTimeout` hanging on every call: `(url, deadlineMs, ctx, { signal })`. */
+  function hangEveryCall(): void {
+    fetchMock.mockImplementation((_url: string, _ms: number, _ctx: unknown, init: RequestInit) =>
+      neverAnswers(init.signal as AbortSignal),
+    );
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset().mockRejectedValue(new Error('unmocked fetch'));
+    service = new EcfrService({} as AppConfig, {} as StorageService);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const failures: { name: string; respond: () => Promise<Response> }[] = [
+    {
+      name: 'a 503',
+      respond: () =>
+        Promise.reject(
+          new McpError(JsonRpcErrorCode.ServiceUnavailable, 'Fetch failed. Status: 503', {
+            status: 503,
+          }),
+        ),
+    },
+    {
+      name: 'a 500',
+      respond: () =>
+        Promise.reject(
+          new McpError(JsonRpcErrorCode.InternalError, 'Fetch failed. Status: 500', {
+            status: 500,
+          }),
+        ),
+    },
+    {
+      // eCFR 404s ancestry only for a location that does not exist, which the
+      // read just proved does — so it is an inconsistency, not an answer.
+      name: 'a 404',
+      respond: () =>
+        Promise.reject(
+          new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404', { status: 404 }),
+        ),
+    },
+    {
+      name: 'an unparseable body',
+      respond: () => Promise.resolve(new Response('{"ancestors": [', { status: 200 })),
+    },
+    {
+      name: 'an HTML error page',
+      respond: () => Promise.resolve(new Response('<!DOCTYPE html><html><body>Down</body></html>')),
+    },
+    {
+      name: 'a connect failure',
+      respond: () =>
+        Promise.reject(new Error('Unable to connect. Is the computer able to access the url?')),
+    },
+    { name: 'a 200 with no ancestors', respond: () => Promise.resolve(jsonResponse({})) },
+    {
+      name: 'a 200 with an empty ancestors list',
+      respond: () => Promise.resolve(jsonResponse({ ancestors: [] })),
+    },
+  ];
+
+  it.each(failures)(
+    'keeps the read on $name: the cited levels and a notice, after one request',
+    async ({ respond }) => {
+      fetchMock.mockImplementation(respond);
+      const ctx = createMockContext();
+
+      const path = await service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx);
+
+      expect(path).toEqual({ path: CITED_141_61, notice: NOTICE });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { name: 'a whole part', title: 40, target: { part: '141' }, cited: 'Title 40 › Part 141' },
+    {
+      name: 'an appendix in its part',
+      title: 40,
+      target: { part: '50', appendix: 'Appendix A-1 to Part 50' },
+      cited: 'Title 40 › Part 50 › Appendix A-1 to Part 50',
+    },
+    {
+      name: 'an appendix read without its part',
+      title: 40,
+      target: { appendix: 'Appendix A-1 to Part 50' },
+      cited: 'Title 40 › Appendix A-1 to Part 50',
+    },
+    {
+      name: 'a dotless section',
+      title: 14,
+      target: { part: '241', section: '25' },
+      cited: 'Title 14 › Part 241 › § 25',
+    },
+  ])('falls back on $name to $cited', async ({ title, target, cited }) => {
+    fetchMock.mockRejectedValue(
+      new McpError(JsonRpcErrorCode.ServiceUnavailable, 'Fetch failed. Status: 503', {
+        status: 503,
+      }),
+    );
+    const ctx = createMockContext();
+
+    expect(await service.hierarchyPath(title, target, '2026-10-26', ctx)).toEqual({
+      path: cited,
+      notice: NOTICE,
+    });
+  });
+
+  it('resolves a healthy path with no notice, in one request', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ancestors: [
+          { type: 'title', identifier: '40' },
+          { type: 'chapter', identifier: 'I' },
+          { type: 'subchapter', identifier: 'D' },
+          { type: 'part', identifier: '141' },
+          { type: 'subpart', identifier: 'G' },
+          { type: 'section', identifier: '141.61' },
+        ],
+      }),
+    );
+    const ctx = createMockContext();
+
+    expect(await service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx)).toEqual({
+      path: 'Title 40 › Chapter I › Subchapter D › Part 141 › Subpart G › § 141.61',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up on a hung ancestry request at its own 8-second deadline, after one attempt', async () => {
+    vi.useFakeTimers();
+    hangEveryCall();
+    const ctx = createMockContext();
+    const startedAt = Date.now();
+    let settledAt: number | undefined;
+
+    const pending = service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx).finally(() => {
+      settledAt = Date.now();
+    });
+    await vi.advanceTimersByTimeAsync(REQUEST_BUDGET_MS + 5_000);
+
+    expect(await pending).toEqual({ path: CITED_141_61, notice: NOTICE });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1]).toBe(8_000);
+    expect(settledAt! - startedAt).toBe(8_000);
+  });
+
+  it('shortens the deadline to what the request budget has left', async () => {
+    // The titles and text reads draw the same clock down first; ancestry gets
+    // the shorter of its own deadline and the remainder, never a fresh 8 seconds.
+    vi.useFakeTimers();
+    hangEveryCall();
+    const ctx = createMockContext();
+    requestBudget(ctx);
+    await vi.advanceTimersByTimeAsync(REQUEST_BUDGET_MS - 1_500);
+    const startedAt = Date.now();
+    let settledAt: number | undefined;
+
+    const pending = service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx).finally(() => {
+      settledAt = Date.now();
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await pending).toEqual({ path: CITED_141_61, notice: NOTICE });
+    expect(fetchMock.mock.calls[0]![1]).toBe(1_500);
+    expect(settledAt! - startedAt).toBe(1_500);
+  });
+
+  it('propagates a caller cancellation that lands during the ancestry request', async () => {
+    const controller = new AbortController();
+    const ctx = createMockContext({ signal: controller.signal });
+    fetchMock.mockImplementation((_url: string, _ms: number, _ctx: unknown, init: RequestInit) => {
+      const inFlight = neverAnswers(init.signal as AbortSignal);
+      controller.abort(new DOMException('client left', 'AbortError'));
+      return inFlight;
+    });
+
+    const error = await service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+    expect((error as DOMException).message).toBe('client left');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws a labeling failure instead of degrading it to the cited levels', async () => {
+    // Only the request is guarded; turning ancestors into labels is this
+    // server's own code, and a defect there has to surface.
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ancestors: [{ type: 7, identifier: '40' }] }));
+    const ctx = createMockContext();
+
+    await expect(
+      service.hierarchyPath(40, SECTION_141_61, '2026-10-26', ctx),
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
 describe('EcfrService structure document cache (#44)', () => {
   /** Structure requests made so far, as `title-N@date`. */
   const structureReads = () =>
@@ -1325,5 +1559,244 @@ describe('EcfrService title issue dates (#55)', () => {
     const ctx = createMockContext();
     for (const title of [11, 14, 35]) await service.isLatestIssue(title, '2026-09-15', ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('EcfrService versions listing (#67)', () => {
+  /** A versions row in eCFR's shape: `name` pads the number with spaces, `title` is a string. */
+  function versionRow(identifier: string, date: string, overrides: Record<string, unknown> = {}) {
+    return {
+      date,
+      amendment_date: date,
+      issue_date: date,
+      identifier,
+      name: `§ ${identifier}   Heading of ${identifier}.`,
+      part: identifier.split('.')[0] ?? identifier,
+      removed: false,
+      subpart: 'A' as string | null,
+      substantive: true,
+      title: '40',
+      type: 'section',
+      ...overrides,
+    };
+  }
+
+  /** 2,345 rows in document order, five versions per section, oldest first within each. */
+  const CORPUS = Array.from({ length: 2_345 }, (_, i) =>
+    versionRow(`52.${Math.floor(i / 5) + 1}`, `2018-0${(i % 5) + 1}-15`),
+  );
+
+  /**
+   * Serve `/versioner/v1/versions/title-40.json` the way eCFR does: fixed
+   * 1,000-row pages selected by `page`, `per_page` refused as an unpermitted
+   * parameter, a `§` in the section answered 404, `result_count` a string on
+   * every page (a page past the end included), the latest dates absent from an
+   * empty set, and the page fields present only past one page.
+   */
+  function serveVersions(rows: ReturnType<typeof versionRow>[] = CORPUS) {
+    fetchMock.mockImplementation((url: string) => {
+      const parsed = new URL(url);
+      if (parsed.pathname !== '/api/versioner/v1/versions/title-40.json') {
+        return Promise.reject(new Error(`unmocked fetch ${url}`));
+      }
+      const params = parsed.searchParams;
+      if (params.has('per_page')) {
+        return Promise.reject(
+          new McpError(JsonRpcErrorCode.InvalidParams, 'Fetch failed. Status: 400', {
+            status: 400,
+            body: '{"error":"Found unpermitted parameter: :per_page"}',
+          }),
+        );
+      }
+      if (params.get('section')?.includes('§')) {
+        return Promise.reject(
+          new McpError(JsonRpcErrorCode.NotFound, 'Fetch failed. Status: 404', { status: 404 }),
+        );
+      }
+      const part = params.get('part');
+      const section = params.get('section');
+      const since = params.get('issue_date[gte]');
+      const matched = rows.filter(
+        (r) =>
+          (part === null || r.part === part) &&
+          (section === null || r.identifier === section) &&
+          (since === null || String(r.issue_date) >= since),
+      );
+      const page = Number(params.get('page') ?? '1');
+      const latest = (key: 'date' | 'issue_date') =>
+        matched
+          .map((r) => String(r[key]))
+          .sort()
+          .at(-1);
+      return Promise.resolve(
+        jsonResponse({
+          content_versions: matched.slice((page - 1) * 1_000, page * 1_000),
+          meta: {
+            title: '40',
+            result_count: String(matched.length),
+            ...(matched.length > 0 && {
+              latest_amendment_date: latest('date'),
+              latest_issue_date: latest('issue_date'),
+            }),
+            ...(matched.length > 1_000 && {
+              page: String(page),
+              per_page: '1000',
+              total_pages: String(Math.ceil(matched.length / 1_000)),
+            }),
+          },
+        }),
+      );
+    });
+  }
+
+  /** The upstream pages read so far, in order. */
+  const pagesRead = () =>
+    fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('page'));
+
+  let service: InstanceType<typeof EcfrService>;
+  beforeEach(() => {
+    fetchMock.mockReset().mockRejectedValue(new Error('unmocked fetch'));
+    service = new EcfrService({} as AppConfig, {} as StorageService);
+  });
+
+  it('pages upstream at a fixed 1,000 rows', () => {
+    expect(ECFR_VERSIONS_PAGE_ROWS).toBe(1_000);
+  });
+
+  it('reads one upstream page for a window inside it', async () => {
+    serveVersions();
+    const out = await service.listVersions(40, { part: '52' }, 50, 50, createMockContext());
+
+    expect(out.versions.map((v) => v.identifier)).toEqual(
+      CORPUS.slice(50, 100).map((r) => r.identifier),
+    );
+    expect(out.totalCount).toBe(2_345);
+    expect(out.latestAmendmentDate).toBe('2018-05-15');
+    expect(pagesRead()).toEqual(['1']);
+  });
+
+  it.each([
+    [990, 30, ['1', '2']],
+    [1_980, 30, ['2', '3']],
+    [2_000, 50, ['3']],
+  ])('reads rows from %i (%i of them) off upstream pages %j', async (start, count, pages) => {
+    serveVersions();
+    const out = await service.listVersions(40, { part: '52' }, start, count, createMockContext());
+
+    expect(out.versions.map((v) => `${v.identifier}@${v.date}`)).toEqual(
+      CORPUS.slice(start, start + count).map((r) => `${r.identifier}@${r.date}`),
+    );
+    expect(pagesRead()).toEqual(pages);
+  });
+
+  it('skips the next upstream page once a short page has ended the list', async () => {
+    serveVersions(CORPUS.slice(0, 500));
+    const out = await service.listVersions(40, { part: '52' }, 990, 30, createMockContext());
+
+    expect(out.versions).toEqual([]);
+    expect(out.totalCount).toBe(500);
+    expect(pagesRead()).toEqual(['1']);
+  });
+
+  it('counts the whole set from a page past its end', async () => {
+    serveVersions();
+    const out = await service.listVersions(40, { part: '52' }, 5_000, 20, createMockContext());
+
+    expect(out).toMatchObject({ versions: [], totalCount: 2_345 });
+    expect(pagesRead()).toEqual(['6']);
+  });
+
+  it('sends part, section, and changed_since as eCFR names them, and never per_page', async () => {
+    serveVersions();
+    await service.listVersions(
+      40,
+      { part: '52', section: '52.3', changedSince: '2018-03-01' },
+      0,
+      20,
+      createMockContext(),
+    );
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+
+    expect(url.pathname).toBe('/api/versioner/v1/versions/title-40.json');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      part: '52',
+      section: '52.3',
+      'issue_date[gte]': '2018-03-01',
+      page: '1',
+    });
+  });
+
+  it('reads a 404 for a form the versioner cannot parse as an empty set', async () => {
+    serveVersions();
+    const out = await service.listVersions(
+      40,
+      { part: '52', section: '§ 52.3' },
+      0,
+      20,
+      createMockContext(),
+    );
+
+    expect(out).toEqual({ versions: [], totalCount: 0, latestAmendmentDate: null });
+  });
+
+  it('fails as upstream_unavailable when eCFR reports no result count', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ content_versions: [] }));
+    const err = await service
+      .listVersions(40, { part: '52' }, 0, 20, createMockContext())
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+    expect((err as McpError).data?.reason).toBe('upstream_unavailable');
+  });
+
+  it('normalizes a row into a heading, a cite that reads it, and its flags', async () => {
+    serveVersions([
+      versionRow('141.61', '2024-04-26', {
+        name: '§ 141.61   Maximum contaminant levels for organic contaminants.',
+        issue_date: '2024-06-03',
+        subpart: 'G',
+        substantive: false,
+      }),
+      versionRow('Appendix A to Subpart C of Part 141', '2016-12-28', {
+        name: 'Appendix A to Subpart C of Part 141—Alternative Testing Methods',
+        part: '141',
+        subpart: 'C',
+        type: 'appendix',
+      }),
+      versionRow('141.43', '2020-10-01', { subpart: null, removed: true }),
+      versionRow('25', '2019-02-01', { part: '241', subpart: null }),
+    ]);
+    const { versions } = await service.listVersions(
+      40,
+      { changedSince: '2000-01-01' },
+      0,
+      20,
+      createMockContext(),
+    );
+
+    expect(versions).toEqual([
+      {
+        type: 'section',
+        identifier: '141.61',
+        heading: '§ 141.61 Maximum contaminant levels for organic contaminants.',
+        part: '141',
+        subpart: 'G',
+        cfrCite: '40 CFR 141.61',
+        date: '2024-04-26',
+        issueDate: '2024-06-03',
+        substantive: false,
+        removed: false,
+      },
+      expect.objectContaining({
+        type: 'appendix',
+        identifier: 'Appendix A to Subpart C of Part 141',
+        heading: 'Appendix A to Subpart C of Part 141—Alternative Testing Methods',
+        cfrCite: 'Appendix A to Subpart C of Part 141, Title 40',
+        subpart: 'C',
+      }),
+      expect.objectContaining({ cfrCite: '40 CFR 141.43', subpart: null, removed: true }),
+      expect.objectContaining({ cfrCite: '40 CFR 241 § 25', part: '241' }),
+    ]);
   });
 });

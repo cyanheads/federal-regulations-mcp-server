@@ -2,7 +2,8 @@
  * @fileoverview Server-specific environment configuration for
  * federal-regulations-mcp-server. Lazy-parsed Zod schema, separate from the
  * framework's own config. Maps the three data-source base URLs, the optional
- * Regulations.gov API key, and the eCFR mirror settings.
+ * Regulations.gov API key, the eCFR mirror settings, and whether an over-ceiling
+ * page size or text window is clamped or rejected.
  *
  * `REGULATIONS_GOV_API_KEY` is optional: the keyless core (Federal Register +
  * eCFR tools) is a complete deployment without it. The two Regulations.gov tools
@@ -48,6 +49,12 @@ const ServerConfigSchema = z.object({
     .describe(
       'Comma-separated CFR title numbers to scope the mirror to (e.g. "21,40"). Omit to mirror all 50 titles. A partial mirror still serves its baked titles from the index; cites outside the set fall through to the live eCFR API.',
     ),
+  clampLimits: z
+    .stringbool()
+    .default(true)
+    .describe(
+      'Serve a per_page or max_chars above its ceiling at the ceiling, with a notice. false advertises and enforces the ceiling as a schema maximum instead.',
+    ),
 });
 
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
@@ -68,6 +75,7 @@ export function getServerConfig(): ServerConfig {
     ecfrMirrorPath: 'ECFR_MIRROR_PATH',
     ecfrMirrorRefreshCron: 'ECFR_MIRROR_REFRESH_CRON',
     ecfrMirrorTitles: 'ECFR_MIRROR_TITLES',
+    clampLimits: 'REGULATIONS_CLAMP_LIMITS',
   });
   return _config;
 }

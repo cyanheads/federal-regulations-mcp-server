@@ -36,6 +36,7 @@ import type {
   FrAgency,
   FrCitationParams,
   FrCitationResponse,
+  FrDocumentClass,
   FrDocumentDetail,
   FrFilters,
   FrPrintedPages,
@@ -72,6 +73,11 @@ const SEARCH_FIELDS = [
   'citation',
   'start_page',
   'end_page',
+  'significant',
+  'subtype',
+  'presidential_document_number',
+  'signing_date',
+  'president',
 ] as const;
 
 /** Detects an HTML error page returned with a non-error HTTP status. */
@@ -188,7 +194,8 @@ export class FederalRegisterService {
 
   /**
    * Search Federal Register documents by query, type, agency, date window, CFR
-   * title/part, printed docket number, and RIN — all ANDed — in the given order.
+   * title/part, printed docket number, RIN, presidential-document identifiers,
+   * significance, and effective-date window — all ANDed — in the given order.
    */
   async search(params: FrSearchParams, ctx: Context): Promise<FrSearchResponse> {
     const search = filterConditions(params);
@@ -204,10 +211,6 @@ export class FederalRegisterService {
     for (const field of SEARCH_FIELDS) search.append('fields[]', field);
 
     const url = `${this.baseUrl}/documents.json?${search.toString()}`;
-    const dateParams = [
-      ...(params.publishedAfter ? ['published_after'] : []),
-      ...(params.publishedBefore ? ['published_before'] : []),
-    ];
     const raw = await this.fetchJson<RawFrSearchResponse>(
       url,
       ctx,
@@ -217,9 +220,10 @@ export class FederalRegisterService {
       throw (
         filterRejection(err, {
           ...filterParameterNames(params),
-          publication_date: dateParams.length
-            ? dateParams
-            : ['published_after', 'published_before'],
+          publication_date: rangeParameters(
+            ['published_after', params.publishedAfter],
+            ['published_before', params.publishedBefore],
+          ),
         }) ?? err
       );
     });
@@ -484,8 +488,13 @@ function rethrowBodyFailure(error: unknown): never {
 
 /**
  * The search conditions every document query shares — full text, type, agency,
- * CFR title and part, printed docket number, and RIN — as a fresh query string
- * for the caller to add its date, paging, and field parameters to.
+ * CFR title and part, printed docket number, RIN, the presidential-document
+ * conditions, significance, and the effective-date window — as a fresh query
+ * string for the caller to add its publication date, paging, and field
+ * parameters to.
+ *
+ * `significant` goes out as `1` or `0`: the FR reads only `1` as true, so
+ * `true`, `yes`, or `2` would each ask for documents flagged not significant.
  */
 function filterConditions(params: FrFilters): URLSearchParams {
   const search = new URLSearchParams();
@@ -496,7 +505,33 @@ function filterConditions(params: FrFilters): URLSearchParams {
   if (params.cfrPart) search.set('conditions[cfr][part]', params.cfrPart);
   if (params.docketId) search.set('conditions[docket_id]', params.docketId);
   if (params.rin) search.set('conditions[regulation_id_number]', params.rin);
+  if (params.executiveOrderNumber !== undefined) {
+    search.append('conditions[executive_order_numbers][]', String(params.executiveOrderNumber));
+  }
+  for (const type of params.presidentialDocumentTypes ?? []) {
+    search.append('conditions[presidential_document_type][]', type);
+  }
+  if (params.president) search.set('conditions[president]', params.president);
+  if (params.signedAfter) search.set('conditions[signing_date][gte]', params.signedAfter);
+  if (params.signedBefore) search.set('conditions[signing_date][lte]', params.signedBefore);
+  if (params.significant !== undefined) {
+    search.set('conditions[significant]', params.significant ? '1' : '0');
+  }
+  if (params.effectiveAfter) search.set('conditions[effective_date][gte]', params.effectiveAfter);
+  if (params.effectiveBefore) search.set('conditions[effective_date][lte]', params.effectiveBefore);
   return search;
+}
+
+/**
+ * The tool parameters behind one date condition: the bounds that were set, or
+ * both names when neither was (the FR rejecting a window nobody sent).
+ */
+function rangeParameters(
+  after: [name: string, value: string | undefined],
+  before: [name: string, value: string | undefined],
+): string[] {
+  const set = [after, before].filter(([, value]) => value).map(([name]) => name);
+  return set.length ? set : [after[0], before[0]];
 }
 
 /**
@@ -512,16 +547,34 @@ function filterParameterNames(params: FrFilters): Record<string, string[]> {
     cfr: params.cfrPart ? ['cfr_part'] : ['cfr_title'],
     docket_id: ['docket_id'],
     regulation_id_number: ['rin'],
+    executive_order_numbers: ['executive_order_number'],
+    presidential_document_type: ['presidential_document_type'],
+    president: ['president'],
+    signing_date: rangeParameters(
+      ['signed_after', params.signedAfter],
+      ['signed_before', params.signedBefore],
+    ),
+    significant: ['significant'],
+    effective_date: rangeParameters(
+      ['effective_after', params.effectiveAfter],
+      ['effective_before', params.effectiveBefore],
+    ),
   };
 }
+
+const DATE_RECOVERY = 'Dates must be real calendar days in YYYY-MM-DD form.';
 
 /** What to do about a rejected Federal Register field, keyed by the FR's own name. */
 const FIELD_RECOVERY: Record<string, string> = {
   agencies:
     'Each `agencies` value must be a Federal Register agency slug — lowercase kebab-case such as "environmental-protection-agency", not a name or acronym. Read one off agencies[].slug in any regulations_search_rules or regulations_list_open_comments result (search by query without the agencies filter to find it). One unrecognized slug fails the whole request.',
-  publication_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
-  comment_date: 'Dates must be real calendar days in YYYY-MM-DD form.',
+  publication_date: DATE_RECOVERY,
+  comment_date: DATE_RECOVERY,
+  signing_date: DATE_RECOVERY,
+  effective_date: DATE_RECOVERY,
   cfr: '`cfr_part` takes a whole part number or a range of them ("141", "140-143"). A part with a letter in it ("1203a") cannot be filtered on — drop cfr_part to filter on cfr_title alone, or search by query.',
+  president:
+    '`president` takes a lowercase slug: william-j-clinton, george-w-bush, barack-obama, donald-trump, or joe-biden — the presidential.president.slug a result carries.',
 };
 
 /**
@@ -641,6 +694,36 @@ function printedPages(doc: RawFrDocument): FrPrintedPages {
   };
 }
 
+/** An upstream string with blank read as absent. */
+function nonBlank(value: string | null | undefined): string | null {
+  return value?.trim() ? value : null;
+}
+
+/**
+ * Significance and the presidential-document identifiers. `presidential` is read
+ * only on a presidential document: the FR sets `president` on every document
+ * (whoever was in office at publication), which on a rule would imply an
+ * authorship it does not have.
+ */
+function documentClass(doc: RawFrDocument): FrDocumentClass {
+  const president = doc.president;
+  return {
+    significant: typeof doc.significant === 'boolean' ? doc.significant : null,
+    presidential:
+      doc.type === 'Presidential Document'
+        ? {
+            type: nonBlank(doc.subtype),
+            number: nonBlank(doc.presidential_document_number),
+            signingDate: nonBlank(doc.signing_date),
+            president:
+              president?.name && president.identifier
+                ? { name: president.name, slug: president.identifier }
+                : null,
+          }
+        : null,
+  };
+}
+
 /** `today` is the Eastern date `commentPeriodOpen` is judged against. */
 function normalizeSearchResult(doc: RawFrDocument, today: string): FrSearchResult {
   const commentsCloseOn = doc.comments_close_on ?? null;
@@ -658,6 +741,7 @@ function normalizeSearchResult(doc: RawFrDocument, today: string): FrSearchResul
     commentsCloseOn,
     commentPeriodOpen: commentPeriodOpen(commentsCloseOn, today),
     effectiveOn: doc.effective_on ?? null,
+    ...documentClass(doc),
     ...printedPages(doc),
     htmlUrl: doc.html_url ?? '',
   };
@@ -684,6 +768,7 @@ function normalizeDocumentDetail(doc: RawFrDocument, today: string): FrDocumentD
     publicationDate: doc.publication_date ?? '',
     ...printedPages(doc),
     effectiveOn: doc.effective_on ?? null,
+    ...documentClass(doc),
     commentsCloseOn,
     commentPeriodOpen: commentPeriodOpen(commentsCloseOn, today),
     agencies: normalizeAgencies(doc.agencies),

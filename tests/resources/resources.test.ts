@@ -54,6 +54,8 @@ const detail: FrDocumentDetail = {
   startPage: null,
   endPage: null,
   effectiveOn: null,
+  significant: true,
+  presidential: null,
   commentsCloseOn: null,
   commentPeriodOpen: null,
   agencies: [{ name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' }],
@@ -84,6 +86,8 @@ describe('documentResource', () => {
     expect(result.agencies).toEqual([
       { name: 'Environmental Protection Agency', slug: 'environmental-protection-agency' },
     ]);
+    expect(result.significant).toBe(true);
+    expect(result).toHaveProperty('presidential', null);
     // The resource omits the body by contract.
     expect(result).not.toHaveProperty('fullText');
     // The service was asked NOT to include full text.
@@ -130,7 +134,7 @@ describe('cfrSectionResource', () => {
     mirrorReady.mockReset();
     mirrorGetSection.mockReset();
     isLatestIssue.mockReset().mockResolvedValue(true);
-    hierarchyPath.mockResolvedValue('Title 40 › Part 50');
+    hierarchyPath.mockResolvedValue({ path: 'Title 40 › Part 50' });
   });
 
   it('returns current section text from the mirror when ready', async () => {

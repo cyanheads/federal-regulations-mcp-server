@@ -18,6 +18,10 @@ import type { OpenCommentType } from '@/services/federal-register/types.js';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
 import { isoDate } from './date-input.js';
 import { escapePipes, formatAgencies } from './format-utils.js';
+import { clampSize, perPageInput, type SizeLimit } from './size-limit.js';
+
+/** per_page bounds; pages are cut locally from the fetched window. */
+const PER_PAGE: SizeLimit = { name: 'per_page', min: 1, max: 100, default: 20 };
 
 /** The most documents the Federal Register serves for one query. */
 const FR_ITEM_LIMIT = 10_000;
@@ -63,14 +67,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       .describe(
         'Only documents whose comment period closes on or before this date, ISO 8601 (YYYY-MM-DD), a real calendar day. Use to find deadlines you need to act on soon.',
       ),
-    per_page: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .default(20)
-      .describe('Documents per page (1–100, default 20).'),
+    per_page: perPageInput(PER_PAGE, (bounds) => `Documents per page (${bounds}).`),
     page: z
       .number()
       .int()
@@ -187,7 +184,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       .string()
       .optional()
       .describe(
-        'Guidance when nothing matched, when the page is past the end, or when the window was truncated.',
+        'Guidance when per_page was above its ceiling, when nothing matched, when the page is past the end, or when the window was truncated.',
       ),
   },
   enrichmentTrailer: {
@@ -232,10 +229,12 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       ctx,
     );
 
+    const size = clampSize(input.per_page, PER_PAGE, 'regulations_list_open_comments', ctx);
+    const perPage = size.value;
     const totalCount = window.results.length;
-    const totalPages = Math.ceil(totalCount / input.per_page);
-    const start = (input.page - 1) * input.per_page;
-    const page = window.results.slice(start, start + input.per_page);
+    const totalPages = Math.ceil(totalCount / perPage);
+    const start = (input.page - 1) * perPage;
+    const page = window.results.slice(start, start + perPage);
     ctx.enrich.total(totalCount);
     ctx.enrich({
       totalPages,
@@ -244,14 +243,14 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
 
     // One notice: enrich.truncated() rewrites `notice`, so every source is
     // composed here and written once.
-    const notices: string[] = [];
+    const notices: string[] = size.notice ? [size.notice] : [];
     if (totalCount === 0) {
       notices.push(
         `No documents are open for comment matching the filters. Drop the query, agency, or closing_before filter${types.includes('NOTICE') ? '' : ', or add NOTICE to type'}.`,
       );
     } else if (page.length === 0) {
       notices.push(
-        `Page ${input.page} is past the end: ${totalCount} documents are open, so the last page is ${totalPages} at per_page ${input.per_page}.`,
+        `Page ${input.page} is past the end: ${totalCount} documents are open, so the last page is ${totalPages} at per_page ${perPage}.`,
       );
     }
     if (window.truncated) {
