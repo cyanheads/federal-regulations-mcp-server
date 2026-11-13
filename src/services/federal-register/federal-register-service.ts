@@ -30,7 +30,9 @@ import { decodeNumericReference } from '@/services/character-references.js';
 import { requestBudget } from '@/services/request-budget.js';
 import { type TextWindow, windowText } from '@/services/text-window.js';
 import { rethrowTransportFailure, runUpstream } from '@/services/upstream-failure.js';
+import { AgencyResolver } from './agency-resolver.js';
 import { commentPeriodOpen, easternToday } from './comment-period.js';
+import { renderGpoText } from './gpo-text.js';
 import type {
   CfrReference,
   FrAgency,
@@ -151,8 +153,8 @@ function decodeEntity(entity: string, dec?: string, hex?: string, name?: string)
  * `[email protected]` placeholder with the address XOR-encoded in a
  * `data-cfemail` attribute — on a `<span>` inside a link, or on the `<a>`
  * itself. Obfuscated addresses are decoded, then link tags are dropped so each
- * link reduces to its text; the GPO locator codes the text itself carries
- * (`<bullet>`, `<SUP>`) are left alone. Character references decode in one
+ * link reduces to its text. GPO inline codes render as plain text without
+ * changing the preformatted layout. Character references decode in one
  * pass, so an escaped one (`&amp;lt;`) stays literal. No pattern scans past the
  * next `<`, so a document of millions of characters with a stray unclosed tag
  * stays linear. Falls back to the raw payload if the expected wrapper isn't
@@ -161,14 +163,15 @@ function decodeEntity(entity: string, dec?: string, hex?: string, name?: string)
 function unwrapRawText(body: string): string {
   const match = body.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
   const inner = match?.[1] ?? body;
-  return inner
+  const withoutLinks = inner
     .replace(
       /<(a|span)\b[^>]*\bdata-cfemail="([0-9a-f]+)"[^>]*>[^<]*<\/\1>/gi,
       (_, _tag: string, hex: string) => decodeCfEmail(hex),
     )
-    .replace(/<a\b[^>]*>|<\/a>/gi, '')
-    .replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|apos|gt|lt|quot));/g, decodeEntity)
-    .trim();
+    .replace(/<a\b[^>]*>|<\/a>/gi, '');
+  return renderGpoText(withoutLinks, (text) =>
+    text.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|(amp|apos|gt|lt|quot));/g, decodeEntity),
+  ).trim();
 }
 
 /** One window of the plain-text body, under the document's `fullText*` field names. */
@@ -187,9 +190,17 @@ function fullTextWindow(
 
 export class FederalRegisterService {
   private readonly baseUrl: string;
+  private readonly agencyResolver?: AgencyResolver;
 
   constructor(_config: AppConfig, _storage: StorageService) {
-    this.baseUrl = getServerConfig().federalRegisterBaseUrl.replace(/\/$/, '');
+    const config = getServerConfig();
+    this.baseUrl = config.federalRegisterBaseUrl.replace(/\/$/, '');
+    if (config.resolveAgencies)
+      this.agencyResolver = new AgencyResolver(`${this.baseUrl}/agencies.json`);
+  }
+
+  private resolveAgencies(agencies: string[] | undefined, ctx: Context) {
+    return agencies?.length ? this.agencyResolver?.resolve(agencies, ctx) : undefined;
   }
 
   /**
@@ -198,7 +209,9 @@ export class FederalRegisterService {
    * significance, and effective-date window — all ANDed — in the given order.
    */
   async search(params: FrSearchParams, ctx: Context): Promise<FrSearchResponse> {
-    const search = filterConditions(params);
+    const pending = this.resolveAgencies(params.agencies, ctx);
+    const resolution = pending && (await pending);
+    const search = filterConditions(params, resolution?.agencies ?? params.agencies);
     if (params.publishedAfter) {
       search.set('conditions[publication_date][gte]', params.publishedAfter);
     }
@@ -218,13 +231,17 @@ export class FederalRegisterService {
       [400],
     ).catch((err: unknown) => {
       throw (
-        filterRejection(err, {
-          ...filterParameterNames(params),
-          publication_date: rangeParameters(
-            ['published_after', params.publishedAfter],
-            ['published_before', params.publishedBefore],
-          ),
-        }) ?? err
+        filterRejection(
+          err,
+          {
+            ...filterParameterNames(params),
+            publication_date: rangeParameters(
+              ['published_after', params.publishedAfter],
+              ['published_before', params.publishedBefore],
+            ),
+          },
+          this.agencyResolver !== undefined,
+        ) ?? err
       );
     });
 
@@ -232,6 +249,7 @@ export class FederalRegisterService {
     return {
       totalCount: raw.count ?? 0,
       results: (raw.results ?? []).map((doc) => normalizeSearchResult(doc, today)),
+      ...(resolution?.rewrites.length && { agencyRewrites: resolution.rewrites }),
     };
   }
 
@@ -245,7 +263,9 @@ export class FederalRegisterService {
    * recorded range (most of 1994) never matches.
    */
   async searchCitation(params: FrCitationParams, ctx: Context): Promise<FrCitationResponse> {
-    const search = filterConditions(params);
+    const pending = this.resolveAgencies(params.agencies, ctx);
+    const resolution = pending && (await pending);
+    const search = filterConditions(params, resolution?.agencies ?? params.agencies);
     search.set('conditions[publication_date][is]', params.publicationDate);
     search.set('per_page', String(FR_MAX_PER_PAGE));
     search.set('order', 'oldest');
@@ -258,10 +278,14 @@ export class FederalRegisterService {
       [400],
     ).catch((err: unknown) => {
       throw (
-        filterRejection(err, {
-          ...filterParameterNames(params),
-          publication_date: ['citation_date'],
-        }) ?? err
+        filterRejection(
+          err,
+          {
+            ...filterParameterNames(params),
+            publication_date: ['citation_date'],
+          },
+          this.agencyResolver !== undefined,
+        ) ?? err
       );
     });
 
@@ -279,6 +303,7 @@ export class FederalRegisterService {
       );
     return {
       results,
+      ...(resolution?.rewrites.length && { agencyRewrites: resolution.rewrites }),
       dayCount: day.length,
       pagedCount: paged.length,
       firstPage: paged.length ? Math.min(...paged.map((d) => d.startPage)) : null,
@@ -353,9 +378,11 @@ export class FederalRegisterService {
     asOf: string,
     ctx: Context,
   ): Promise<OpenCommentsResponse> {
+    const pending = this.resolveAgencies(params.agencies, ctx);
+    const resolution = pending && (await pending);
     const search = new URLSearchParams();
     if (params.query) search.set('conditions[term]', params.query);
-    for (const agency of params.agencies ?? []) {
+    for (const agency of resolution?.agencies ?? params.agencies ?? []) {
       search.append('conditions[agencies][]', agency);
     }
     for (const type of params.types) search.append('conditions[type][]', type);
@@ -382,6 +409,7 @@ export class FederalRegisterService {
             // The window's lower bound is today's date, set here, so a rejected
             // comment_date is the caller's closing_before.
             { agencies: ['agencies'], comment_date: ['closing_before'], term: ['query'] },
+            this.agencyResolver !== undefined,
           ) ?? err
         );
       });
@@ -407,7 +435,11 @@ export class FederalRegisterService {
         a.commentsCloseOn.localeCompare(b.commentsCloseOn) ||
         documentNumberOrder(a.documentNumber, b.documentNumber),
     );
-    return { results, truncated: count >= FR_MAX_ITEMS };
+    return {
+      results,
+      truncated: count >= FR_MAX_ITEMS,
+      ...(resolution?.rewrites.length && { agencyRewrites: resolution.rewrites }),
+    };
   }
 
   /** Fetch + parse JSON with retry; HTML error pages become transient errors. */
@@ -496,11 +528,11 @@ function rethrowBodyFailure(error: unknown): never {
  * `significant` goes out as `1` or `0`: the FR reads only `1` as true, so
  * `true`, `yes`, or `2` would each ask for documents flagged not significant.
  */
-function filterConditions(params: FrFilters): URLSearchParams {
+function filterConditions(params: FrFilters, agencies: string[] | undefined): URLSearchParams {
   const search = new URLSearchParams();
   if (params.query) search.set('conditions[term]', params.query);
   for (const type of params.types ?? []) search.append('conditions[type][]', type);
-  for (const agency of params.agencies ?? []) search.append('conditions[agencies][]', agency);
+  for (const agency of agencies ?? []) search.append('conditions[agencies][]', agency);
   if (params.cfrTitle !== undefined) search.set('conditions[cfr][title]', String(params.cfrTitle));
   if (params.cfrPart) search.set('conditions[cfr][part]', params.cfrPart);
   if (params.docketId) search.set('conditions[docket_id]', params.docketId);
@@ -590,7 +622,11 @@ const FIELD_RECOVERY: Record<string, string> = {
  * is not a 400 with a non-empty `errors` object, so that error propagates as it
  * was classified.
  */
-function filterRejection(err: unknown, params: Record<string, string[]>): McpError | null {
+function filterRejection(
+  err: unknown,
+  params: Record<string, string[]>,
+  resolveAgencies: boolean,
+): McpError | null {
   if (!(err instanceof McpError) || err.data?.status !== 400) return null;
   const body = err.data.body;
   if (typeof body !== 'string') return null;
@@ -616,8 +652,10 @@ function filterRejection(err: unknown, params: Record<string, string[]>): McpErr
   });
   const hints = [
     ...new Set(
-      rejected.map(
-        ({ field }) => FIELD_RECOVERY[field] ?? 'Correct or drop the named parameter and retry.',
+      rejected.map(({ field }) =>
+        field === 'agencies' && resolveAgencies
+          ? 'Use a Federal Register agency slug in lowercase kebab-case, such as "environmental-protection-agency" (read one off agencies[].slug in a result). Exact catalog names and unambiguous acronyms can also resolve when the agency catalog is available.'
+          : (FIELD_RECOVERY[field] ?? 'Correct or drop the named parameter and retry.'),
       ),
     ),
   ];
@@ -731,7 +769,7 @@ function normalizeSearchResult(doc: RawFrDocument, today: string): FrSearchResul
     documentNumber: doc.document_number ?? '',
     title: doc.title ?? '(untitled)',
     type: doc.type ?? 'Unknown',
-    abstract: doc.abstract ?? null,
+    abstract: doc.abstract == null ? null : renderGpoText(doc.abstract),
     publicationDate: doc.publication_date ?? '',
     agencies: normalizeAgencies(doc.agencies),
     docketIds: doc.docket_ids ?? [],
@@ -751,6 +789,7 @@ function normalizeSearchResult(doc: RawFrDocument, today: string): FrSearchResul
 function normalizeDocumentDetail(doc: RawFrDocument, today: string): FrDocumentDetail {
   const commentsCloseOn = doc.comments_close_on ?? null;
   const { regulationsGovDocketId, ...handles } = regulationsGovHandles(doc);
+  const supportingDocumentsCount = doc.regulations_dot_gov_info?.supporting_documents_count;
   const supportingDocuments = (doc.regulations_dot_gov_info?.supporting_documents ?? [])
     .filter(
       (d): d is { title: string; document_id: string } =>
@@ -762,7 +801,7 @@ function normalizeDocumentDetail(doc: RawFrDocument, today: string): FrDocumentD
     documentNumber: doc.document_number ?? '',
     title: doc.title ?? '(untitled)',
     type: doc.type ?? 'Unknown',
-    abstract: doc.abstract ?? null,
+    abstract: doc.abstract == null ? null : renderGpoText(doc.abstract),
     action: doc.action ?? null,
     dates: doc.dates ?? null,
     publicationDate: doc.publication_date ?? '',
@@ -778,6 +817,8 @@ function normalizeDocumentDetail(doc: RawFrDocument, today: string): FrDocumentD
     docketId: regulationsGovDocketId,
     ...handles,
     supportingDocuments,
+    supportingDocumentsCount:
+      typeof supportingDocumentsCount === 'number' ? supportingDocumentsCount : null,
     bodyHtmlUrl: doc.body_html_url ?? '',
     rawTextUrl: doc.raw_text_url ?? '',
     htmlUrl: doc.html_url ?? '',

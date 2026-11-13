@@ -891,19 +891,35 @@ describe('search mode pages by section and collapses versions', () => {
     expect(out.notice).not.toMatch(/No CFR sections matched/);
   });
 
-  it('collapses versions that straddle upstream requests and pages', async () => {
-    // 1,500 sections, three versions each, a version of each section every 700
-    // hits: repeats cross both the 1,000-hit upstream reads and the 50-row pages.
-    http.reset();
-    serveEcfr(versionedCorpus(1500, 3, 700));
-    const pages = await walkSearch({ query: 'standards', title: 40 }, 50);
-    const cites = pages.flatMap((p) => (p.results ?? []).map((r) => r.cfrCite));
-
-    expect(pages).toHaveLength(30);
-    expect(cites).toHaveLength(1500);
-    expect(new Set(cites).size).toBe(1500);
-    expect(pages.at(-1)).toMatchObject({ totalCount: 1500, countBasis: 'sections' });
-  });
+  it.each(Array.from({ length: 30 }, (_, index) => index + 1))(
+    'collapses versions across upstream requests on page %i',
+    async (page) => {
+      /**
+       * All 1,500 sections remain covered. Separate page cases keep the full
+       * walk from sharing one wall-clock deadline under concurrent test load.
+       * Three versions spaced by 700 hits cross 1,000-hit upstream reads.
+       */
+      http.reset();
+      serveEcfr(versionedCorpus(1500, 3, 700));
+      const out = structured(
+        await runToolContract(browseCfrTool, {
+          mode: 'search',
+          query: 'standards',
+          title: 40,
+          page,
+          per_page: 50,
+        }),
+      );
+      expect(out.page).toBe(page);
+      expect((out.results ?? []).map((row) => row.cfrCite)).toEqual(
+        Array.from({ length: 50 }, (_, index) => `40 CFR 60.${(page - 1) * 50 + index + 1}`),
+      );
+      expect(Boolean(out.truncated)).toBe(page < 30);
+      if (page === 30) {
+        expect(out).toMatchObject({ totalCount: 1500, countBasis: 'sections' });
+      }
+    },
+  );
 
   it('counts versions and says so while the list has not been read to its end', async () => {
     http.reset();

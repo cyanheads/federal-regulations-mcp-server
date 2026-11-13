@@ -28,6 +28,7 @@
  */
 
 import { decodeCharacterReferences } from '@/services/character-references.js';
+import { renderScript } from '@/services/script-notation.js';
 import type { EcfrAppendix, EcfrPartNotes, EcfrSection, EcfrXmlContent } from './types.js';
 
 /**
@@ -347,8 +348,7 @@ function renderPieces(pieces: Piece[]): string {
     }
     const after = pieces[i + 1];
     const next = trail || (typeof after === 'string' ? after[0] : after ? '^' : '');
-    const braced = core.includes(' ') || /[\p{L}\p{N}]/u.test(next ?? '');
-    out += `${lead}${piece.kind === 'sup' ? '^' : '_'}${braced ? `{${core}}` : core}${trail}`;
+    out += `${lead}${renderScript(piece.kind, core, next ?? '')}${trail}`;
   }
   return out;
 }

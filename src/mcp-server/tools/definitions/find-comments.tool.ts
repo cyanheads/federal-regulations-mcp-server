@@ -106,7 +106,7 @@ function filterPhrase(filters: {
 export const findCommentsTool = tool('regulations_find_comments', {
   title: 'regulations_find_comments',
   description:
-    "Fetch public comments on a Federal Register document or a Regulations.gov docket — the unique corpus of what citizens and organizations actually submitted. Provide exactly one targeting parameter: docket_id (all comments in a docket, broadest), document_object_id (comments on one document, by its object ID or document ID), fr_document_number (convenience — resolves the FR number to the Regulations.gov document carrying it), or comment_id (one comment's full detail and attachments). A list narrows by comment text with search_term (each hit then carries the matching passages) and by posted date with posted_after/posted_before. The list endpoint returns no body text or attachment info — call with comment_id to read a comment's body. When a comment's real content is a PDF/DOCX attachment, the body is a stub and attachmentOnly is true; the attachment download URLs are returned. Requires REGULATIONS_GOV_API_KEY (free at https://api.data.gov/signup/).",
+    "Fetch public comments on a Federal Register document or a Regulations.gov docket — the unique corpus of what citizens and organizations actually submitted. Provide exactly one targeting parameter: docket_id (all comments in a docket, broadest), document_object_id (comments on one document, by its object ID or document ID), fr_document_number (convenience — resolves the FR number to the Regulations.gov document carrying it), or comment_id (one comment's full detail and attachments). A list narrows by comment text with search_term (each hit then carries the matching passages) and by posted date with posted_after/posted_before. The list endpoint returns no body text or attachment info — call with comment_id to read the body, upstream submission classification and attachment download URLs. When attachments exist and the body is empty or just a cover note, attachmentOnly is true. Requires REGULATIONS_GOV_API_KEY (free at https://api.data.gov/signup/).",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     docket_id: z
@@ -246,18 +246,28 @@ export const findCommentsTool = tool('regulations_find_comments', {
       .nullable()
       .optional()
       .describe('Submitter organization, or null (detail mode).'),
+    subtype: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Regulations.gov submission subtype, or null when unavailable (detail mode).'),
+    category: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Agency-configured commenter category, or null when unavailable (detail mode).'),
     bodyText: z
       .string()
       .nullable()
       .optional()
       .describe(
-        'Comment body, HTML-stripped. A stub ("See Attached") when content is in attachments; null when empty (detail mode).',
+        'Comment body, HTML-stripped. May be a cover note when content is in attachments; null when no body was supplied (detail mode).',
       ),
     attachmentOnly: z
       .boolean()
       .optional()
       .describe(
-        'True when attachments exist and the body is a stub/empty — the substance is in the attachment files (detail mode).',
+        'True when attachments exist and the body is empty or just a cover note (detail mode).',
       ),
     attachments: z
       .array(
@@ -598,7 +608,7 @@ export const findCommentsTool = tool('regulations_find_comments', {
         `Comment \`${result.commentId ?? '—'}\` · posted ${result.postedDate ?? '—'} · received ${result.receivedDate ?? '—'} · postmarked ${result.postmarkDate ?? '—'}`,
       );
       lines.push(
-        `Submitter: ${escapeMarkdownInline(result.submitterName ?? '—')} · organization: ${escapeMarkdownInline(result.organization ?? '—')}`,
+        `Submitter: ${escapeMarkdownInline(result.submitterName ?? '—')} · organization: ${escapeMarkdownInline(result.organization ?? '—')} · subtype: ${escapeMarkdownInline(result.subtype ?? '—')} · category: ${escapeMarkdownInline(result.category ?? '—')}`,
       );
       lines.push(
         `Docket: ${result.docketId ?? '—'} · on document: ${result.commentOnDocumentId ?? '—'}`,

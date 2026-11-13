@@ -76,6 +76,8 @@ const attachmentOnlyDetail: CommentDetailResult = {
   duplicateComments: 0,
   submitterName: null,
   organization: 'Acme Org',
+  subtype: null,
+  category: null,
   bodyText: 'See attached',
   attachmentOnly: true,
   attachments: [
@@ -264,6 +266,33 @@ describe('findCommentsTool', () => {
     // never mistakes the stub body for substantive inline text.
     expect(result.attachmentOnly).toBe(true);
     expect(result.attachments![0]!.formats[0]!.fileUrl).toContain('.pdf');
+  });
+
+  it('renders comment classification on both detail surfaces', async () => {
+    getComment.mockResolvedValue({
+      ...attachmentOnlyDetail,
+      subtype: 'Comment(s)',
+      category: 'Health Care *Professional*',
+    });
+    const result = await runToolContract(findCommentsTool, {
+      comment_id: 'EPA-HQ-OAR-2025-0194-31102',
+    });
+    expect(result.structuredContent).toMatchObject({
+      subtype: 'Comment(s)',
+      category: 'Health Care *Professional*',
+    });
+    expect(contentText(result)).toContain(
+      'subtype: Comment(s) · category: Health Care \\*Professional\\*',
+    );
+  });
+
+  it('keeps comment classification off both list surfaces', async () => {
+    listComments.mockResolvedValue(listResult);
+    const result = await runToolContract(findCommentsTool, { docket_id: 'EPA-HQ-OAR-2025-0194' });
+    expect(result.structuredContent).toMatchObject({ mode: 'list', comments: listResult.comments });
+    expect(result.structuredContent).not.toHaveProperty('subtype');
+    expect(result.structuredContent).not.toHaveProperty('category');
+    expect(contentText(result)).not.toMatch(/subtype:|category:/i);
   });
 
   it('resolves an FR document number to its Regulations.gov document then lists', async () => {

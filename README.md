@@ -57,7 +57,8 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 
 ### `regulations_search_rules` <sub>tool</sub>
 
-- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs such as `environmental-protection-agency`, not names or acronyms), `published_after` / `published_before`, `cfr_title` + `cfr_part` (a part number or range such as `140-143`; `cfr_part` needs `cfr_title`, else `title_required_for_part`), `docket_id` (a docket number as the Federal Register prints it), `rin`, `significant` (the Federal Register's EO 12866 flag: `true` and `false` each match only documents with a determination), and `effective_after` / `effective_before`, all combined; `per_page` from 2 (default 20; above 100 serves 100 with a notice), `page` 1–50
+- Optional full-text `query`, filtered by `type` (`PRORULE` / `RULE` / `NOTICE` / `PRESDOCU`), `agencies` (Federal Register slugs, exact catalog names, or acronyms such as `EPA`), `published_after` / `published_before`, `cfr_title` + `cfr_part` (a part number or range such as `140-143`; `cfr_part` needs `cfr_title`, else `title_required_for_part`), `docket_id` (a docket number as the Federal Register prints it), `rin`, `significant` (the Federal Register's EO 12866 flag: `true` and `false` each match only documents with a determination), and `effective_after` / `effective_before`, all combined; `per_page` from 2 (default 20; above 100 serves 100 with a notice), `page` 1–50
+- Agency matches are case-insensitive. A shared acronym resolves to its sole top-level agency when one exists (`DOE` → `energy-department`); otherwise `invalid_filter` lists candidate slugs. Rewrites appear in `notice`. `REGULATIONS_RESOLVE_AGENCIES=false` restores slug-only behavior; if the agency catalog is unavailable, the original filters go to the Federal Register
 - Presidential documents narrow by `executive_order_number` (bare digits, `14192`), `presidential_document_type` (`executive_order`, `proclamation`, `memorandum`, `determination`, `notice`, `presidential_order`, `other`), `president` (a slug such as `donald-trump`), and a `signed_after` / `signed_before` window, which differs from the publication window because signing precedes publication. These filters beside a `type` that leaves out `PRESDOCU`, or `significant` beside them or beside `type` of `PRESDOCU` alone, fail with `type_conflict`
 - `citation` (`"89 FR 49102"`) with `citation_date` (the date its source note prints beside it) returns the documents printed on that page, in page order, volume 59 (1994) onward, narrowed by any other filter. A cite missing its date, or combined with the publication date window, fails with `citation_incomplete`; a volume before 59 or a date from another year fails with `citation_out_of_range`. When no document spans the page, the notice gives that day's page range
 - Each result carries `documentNumber`, `citation` / `startPage` / `endPage`, `agencies[].slug`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, `commentUrl`, `commentsCloseOn` with `commentPeriodOpen` (open through 11:59 PM Eastern on the close date), `regulationIdNumbers`, `significant` (null when no determination is recorded), `presidential` (`type`, `number`, `signingDate`, and `president`; null unless the document is a presidential document), and `cfrReferences` for the follow-up tools. `totalPages` and `nextPage` page the results. The Federal Register serves 50 pages, so `truncated` marks a set larger than 50 × `per_page` (1,000 at the default, 5,000 at 100); narrow the date window rather than paging deeper. `totalCount` stops at 10,000, which means at least that many. A window whose start falls after its end (publication, signing, or effective) fails with `date_range_inverted`, and `invalid_filter` names a rejected parameter
@@ -68,6 +69,8 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 
 - `document_number` in any form the Federal Register issues: `2024-07773` from 2010 on, and older and correction numbers such as `98-1572`, `E9-25990`, or `C1-2009-30484`; `include_full_text` adds the plain-text body as one window of `max_chars` (default 64,000; above 200,000 serves 200,000 with a notice) starting at `offset`, and passing either of those implies it
 - Returns metadata plus the handles other tools take: the Regulations.gov `docketId` and `regulationsGovDocumentId`, the printed `docketIds`, `citation` / `startPage` / `endPage`, `commentCount`, `commentUrl`, `commentPeriodOpen`, `significant`, `presidential` for a presidential document, and `cfrReferences`. With text, `fullTextLength` and `fullTextNextOffset` (present while text remains) page the body; a major final rule runs past a million characters
+- `supportingDocumentsCount` is the upstream total (`null` when unknown), while `supportingDocuments` is the embedded list. A larger total produces a partial-list notice; follow the docket through `regulations_get_docket` with `document_types: ["Supporting & Related Material"]` to retrieve more (key required)
+- Abstracts and full text render GPO subscripts as `_x`, superscripts as `^x`, and bullets as `•`. Full-text offsets count the rendered text, with line breaks and indentation preserved
 
 ---
 
@@ -104,13 +107,13 @@ The two data resources mirror `regulations_get_document` and `regulations_get_cf
 - `document_object_id` takes an object ID (`0900006485883ec6`) or a document ID (`EPA-HQ-OW-2022-0114-0027`). `fr_document_number` resolves to the Regulations.gov document carrying that exact number and answers `not_found` when none does. Docket, document, and comment IDs are case-insensitive
 - A `docket_id` that lists no comments is looked up: a docket Regulations.gov does not hold (a printed docket number such as `REG-101355-26`) answers `not_found`, and an existing docket answers an empty list with a notice
 - Lists narrow by comment text with `search_term`, and each hit then carries `highlightedContent`, the matched passages. `posted_after` / `posted_before` set an inclusive posted-date window. A backwards window fails with `date_range_inverted`, and filters passed with `comment_id` fail with `filter_requires_list_mode`
-- `mode` is `list` or `detail`. Lists return comment summaries without body text. `comment_id` returns the body, submitter, `receivedDate`, `postmarkDate`, `duplicateComments` (above 1 marks a mass-mail campaign record), and `attachments` in upload order, with `attachmentOnly: true` when the substance is in a PDF/DOCX file. An attachment whose file is withheld stays in the list with empty `formats` and its `restrictReasonType` (e.g. `Copyrighted`). Lists carry `totalPages` and `nextPage`; `truncated` marks a set larger than the 40 pages Regulations.gov serves reach (40 × `per_page`, 10,000 at 250), and posted-date windows take it one slice at a time
+- `mode` is `list` or `detail`. Lists return comment summaries without body text. `comment_id` returns the body, submitter, agency-supplied `subtype` and `category` (`null` when absent), `receivedDate`, `postmarkDate`, `duplicateComments` (above 1 marks a mass-mail campaign record), and `attachments` in upload order. `attachmentOnly: true` identifies attachments accompanied by an empty body or a recognized short cover note; substantive inline text stays false. An attachment whose file is withheld stays in the list with empty `formats` and its `restrictReasonType` (e.g. `Copyrighted`). Lists carry `totalPages` and `nextPage`; `truncated` marks a set larger than the 40 pages Regulations.gov serves reach (40 × `per_page`, 10,000 at 250), and posted-date windows take it one slice at a time
 
 ---
 
 ### `regulations_list_open_comments` <sub>tool</sub>
 
-- Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (Federal Register slugs), and `closing_before`; `per_page` from 1 (default 20; above 100 serves 100 with a notice)
+- Optional `query`, `type` (`PRORULE`, `RULE`, `NOTICE`; default `["PRORULE", "RULE"]`), `agencies` (slugs, exact catalog names, or acronyms, resolved as in `regulations_search_rules`), and `closing_before`; `per_page` from 1 (default 20; above 100 serves 100 with a notice)
 - Rows sort by closing date, soonest first, and carry `commentsCloseOn`, `daysRemaining`, `documentNumber`, the printed `docketIds`, `regulationsGovDocketId` and `regulationsGovDocumentId`, `commentCount`, and `commentUrl`. `asOf` is today's date in Eastern time, so a document stays listed through its close day. `totalPages` and `nextPage` page the window; `truncated` means the Federal Register's 10,000-document limit was reached
 - Keyless. `keyed` reports whether `REGULATIONS_GOV_API_KEY` is set, which `regulations_get_docket` and `regulations_find_comments` need to follow up on a row
 
@@ -144,7 +147,7 @@ Agent-friendly output:
 
 - Provenance: `source: "mirror" | "live"` on every CFR read, plus a `sourceScope` line on search naming what the corpus covers
 - Honest paging: `totalPages` and `nextPage` say how far a list goes, a page past the end names the last page instead of reading as "nothing matched", and matches beyond the Federal Register's 50 pages or Regulations.gov's 40 surface through `truncated` and `notice`, never as silently dropped rows
-- Attachment-aware comments: `attachmentOnly` flags a comment whose substance is a file, with the download URLs
+- Attachment-aware comments: `attachmentOnly` flags attachments accompanied by an empty body or a recognized cover note. Download URLs are included when available
 
 ## Getting started
 
@@ -187,6 +190,7 @@ Set optional `REGULATIONS_GOV_API_KEY` to enable docket and comment tools; get a
 | `ECFR_MIRROR_REFRESH_CRON` | Cron expression for an in-process mirror refresh (HTTP transport only), e.g. `0 4 * * 0`. Each run re-harvests every configured title in full. | none (no job) |
 | `ECFR_MIRROR_TITLES` | Comma-separated CFR titles to mirror (e.g. `21,40`). Reads and searches outside the set, and all-titles searches, go to the live eCFR API. | all 50 titles |
 | `REGULATIONS_CLAMP_LIMITS` | Serve a `per_page` or `max_chars` above its ceiling at the ceiling, with a notice. `false` advertises the ceiling as a schema maximum and rejects a larger value instead. | `true` |
+| `REGULATIONS_RESOLVE_AGENCIES` | Resolve Federal Register agency names and acronyms to slugs. `false` sends agency values unchanged without a catalog lookup. | `true` |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | HTTP server port. | `3010` |
 | `MCP_AUTH_MODE` | Authentication: `none`, `jwt`, or `oauth`. | `none` |
@@ -200,7 +204,7 @@ See [`.env.example`](./.env.example) for the full list of optional overrides.
 
 ### Local development
 
-Requires Bun v1.4.0 or higher (or Node.js v24+).
+Requires Bun v1.4.4 or higher (or Node.js v24+).
 
 ```sh
 git clone https://github.com/cyanheads/federal-regulations-mcp-server.git

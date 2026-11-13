@@ -23,6 +23,31 @@ const { FR_CITATION_PATTERN } = await import('@/mcp-server/tools/definitions/fr-
 
 const http = createFetchMock();
 
+it('resolves an agency filter before looking up a citation', async () => {
+  http.route({
+    match: /\/agencies\.json$/,
+    respond: () =>
+      Response.json([
+        {
+          name: 'Environmental Protection Agency',
+          slug: 'environmental-protection-agency',
+          short_name: 'EPA',
+          parent_id: null,
+        },
+      ]),
+  });
+  serveDays({ '2024-06-11': june11 });
+  const result = await runToolContract(searchRulesTool, {
+    citation: '89 FR 49102',
+    citation_date: '2024-06-11',
+    agencies: ['EPA'],
+  });
+  const query = new URL(http.calls.at(-1)!.request.url).searchParams;
+  expect(query.get('conditions[publication_date][is]')).toBe('2024-06-11');
+  expect(query.getAll('conditions[agencies][]')).toEqual(['environmental-protection-agency']);
+  expect(text(result)).toContain('agencies "EPA" read as environmental-protection-agency.');
+});
+
 /** One document as `/documents.json` serves it, pages and citation included. */
 function doc(documentNumber: string, date: string, start: number, end: number) {
   const volume = Number(date.slice(0, 4)) - 1935;

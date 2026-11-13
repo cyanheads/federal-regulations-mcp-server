@@ -484,6 +484,10 @@ describe('RegulationsGovService', () => {
     'See attachment(s)',
     'Please see attached',
     'See the attached document',
+    'Please see the files attached.',
+    'See the attached comments from Lakewood Water District.',
+    'Attached is a comment letter by Thurston Public Utility District (PUD) regarding the Per- and Polyfluoroalkyl Substances National Primary Drinking Water Regulation.',
+    'Please see the attached documents with comments and editorial corrections submitted by the City of Tulsa Water and Sewer Department.',
     '',
   ])('flags attachmentOnly for the real stub phrasing %j', async (stub) => {
     fetchSpy.mockResolvedValueOnce(
@@ -536,6 +540,107 @@ describe('RegulationsGovService', () => {
     const detail = await newService().getComment('EPA-HQ-OAR-2025-0194-98', createMockContext());
     expect(detail.attachmentOnly).toBe(false);
     expect(detail.bodyText).toContain('detailed analysis');
+  });
+
+  it.each([
+    [
+      'a short independent argument',
+      'I oppose this rule because monitoring costs will close small systems. See the attached budget.',
+      true,
+    ],
+    [
+      'a cover-note opener followed by a position',
+      'See the attached comments from Lakewood Water District. We oppose the rule.',
+      true,
+    ],
+    [
+      'a cover-note opener followed by reasoning',
+      'See the attached comments from Lakewood Water District because the rule underestimates costs.',
+      true,
+    ],
+    ['an attachment reference without attachments', 'Please see the files attached.', false],
+    [
+      'a long inline letter',
+      `See attached file(s)\n\n${'Small utilities need more time to meet the monitoring requirements. '.repeat(15)}`.trim(),
+      true,
+    ],
+  ])('keeps attachmentOnly false for %s', async (_label, comment, withAttachment) => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonApiResponse({
+        data: { id: 'EPA-HQ-OAR-2025-0194-99', type: 'comments', attributes: { comment } },
+        included: withAttachment
+          ? [{ id: 'att-1', type: 'attachments', attributes: { title: 'Comment' } }]
+          : [],
+      }),
+    );
+    const detail = await newService().getComment('EPA-HQ-OAR-2025-0194-99', createMockContext());
+    expect(detail.attachmentOnly).toBe(false);
+    expect(detail.bodyText).toBe(comment);
+  });
+
+  it(
+    'classifies long comment bodies in linear time',
+    async () => {
+      const id = 'EPA-HQ-OAR-2025-0194-99';
+      const service = newService();
+      const classify = async (comment: string) => {
+        fetchSpy.mockResolvedValueOnce(
+          jsonApiResponse({
+            data: { id, type: 'comments', attributes: { comment } },
+            included: [{ id: 'att-1', type: 'attachments', attributes: { title: 'Comment' } }],
+          }),
+        );
+        const detail = await service.getComment(id, createMockContext());
+        return detail.attachmentOnly;
+      };
+      const prefix = 'See attached comments from ';
+      const shapes = [
+        { text: (size: number) => `${prefix}${'1'.repeat(size)}.`, max: 320_000, expected: true },
+        {
+          text: (size: number) => `${prefix}${'A '.repeat(size / 2)}\nx`,
+          max: 80_000,
+          expected: false,
+        },
+        {
+          text: (size: number) => `${prefix}${'A\r\n '.repeat(size / 4)}x`,
+          max: 80_000,
+          expected: false,
+        },
+      ];
+      for (const { text, max, expected } of shapes) {
+        const small = text(5_000);
+        for (let size = 5_000; size <= max; size *= 2) {
+          const large = text(size);
+          expect(await classify(large)).toBe(expected);
+          const [smallMs, largeMs] = await bestCpuMs(
+            () => classify(small),
+            () => classify(large),
+          );
+          expect(largeMs).toBeLessThan(20);
+          expect(largeMs / Math.max(smallMs, 0.05)).toBeLessThan(256);
+        }
+      }
+    },
+    CPU_TIMED_TEST_TIMEOUT_MS,
+  );
+
+  it.each([
+    [
+      {
+        subtype: 'Public Comment',
+        category: 'Health Care Professional/Association - Other Health Care Professional',
+      },
+      'Public Comment',
+      'Health Care Professional/Association - Other Health Care Professional',
+    ],
+    [{ subtype: 'Comment(s)', category: null }, 'Comment(s)', null],
+    [{ subtype: null }, null, null],
+    [{}, null, null],
+  ])('relays sparse upstream comment classifications %j', async (attributes, subtype, category) => {
+    const id = 'EPA-HQ-OAR-2025-0194-99';
+    fetchSpy.mockResolvedValueOnce(jsonApiResponse({ data: { id, type: 'comments', attributes } }));
+    const detail = await newService().getComment(id, createMockContext());
+    expect(detail).toMatchObject({ subtype, category });
   });
 
   it('translates a 404 into an actionable not_found', async () => {

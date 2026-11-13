@@ -56,7 +56,10 @@ export const getDocumentTool = tool('regulations_get_document', {
     documentNumber: z.string().describe('Federal Register document number.'),
     title: z.string().describe('Document title.'),
     type: z.string().describe('Document type.'),
-    abstract: z.string().nullable().describe('Abstract summary, or null.'),
+    abstract: z
+      .string()
+      .nullable()
+      .describe('Abstract summary with _x subscripts and ^x superscripts, or null.'),
     action: z.string().nullable().describe('Action line (e.g. "Final rule."), or null.'),
     dates: z.string().nullable().describe('Free-text dates summary from the rule, or null.'),
     publicationDate: z.string().describe('Publication date (ISO 8601).'),
@@ -105,7 +108,7 @@ export const getDocumentTool = tool('regulations_get_document', {
               .string()
               .nullable()
               .describe(
-                'Federal Register agency slug — the value the agencies filter on regulations_search_rules and regulations_list_open_comments takes. Null when the Federal Register lists the agency by raw name only.',
+                'Federal Register agency slug accepted by regulations_search_rules and regulations_list_open_comments. Null when the Federal Register lists the agency by raw name only.',
               ),
           })
           .describe('One issuing agency.'),
@@ -160,7 +163,13 @@ export const getDocumentTool = tool('regulations_get_document', {
           })
           .describe('One related Regulations.gov supporting document.'),
       )
-      .describe('Related Regulations.gov supporting documents.'),
+      .describe(
+        'Supporting documents embedded by the Federal Register, which may be a partial list.',
+      ),
+    supportingDocumentsCount: z
+      .number()
+      .nullable()
+      .describe('Total supporting documents reported by the Federal Register, or null if unknown.'),
     bodyHtmlUrl: z.string().describe('URL of the rendered HTML body.'),
     rawTextUrl: z.string().describe('URL of the plain-text body.'),
     htmlUrl: z.string().describe('Federal Register web URL for the document.'),
@@ -168,7 +177,7 @@ export const getDocumentTool = tool('regulations_get_document', {
       .string()
       .optional()
       .describe(
-        'One window of the plain-text body, starting at fullTextOffset — present only when full text was requested. Empty when the offset is at or past the end.',
+        'One window of the plain-text body with subscripts, superscripts, and bullets rendered as _x, ^x, and •. Starts at fullTextOffset, and is empty when the offset is at or past the end. Present only when full text was requested.',
       ),
     fullTextOffset: z
       .number()
@@ -190,7 +199,7 @@ export const getDocumentTool = tool('regulations_get_document', {
       .string()
       .optional()
       .describe(
-        'Guidance when max_chars was above its ceiling, or when the requested offset is at or past the end of the body.',
+        'Guidance when the supporting-document list is partial, max_chars was above its ceiling, or the requested offset is at or past the end of the body.',
       ),
   },
   enrichmentTrailer: {
@@ -240,15 +249,20 @@ export const getDocumentTool = tool('regulations_get_document', {
       window,
       ctx,
     );
-    // An empty window over a non-empty body means the offset ran past the end.
-    if (detail.fullText === '' && detail.fullTextLength) {
-      ctx.enrich.notice(
-        joinNotices(
-          size.notice,
-          `offset ${detail.fullTextOffset} is past the end of the body, which is ${detail.fullTextLength.toLocaleString('en-US')} characters long. Pass an offset below that, or omit offset to start from the beginning.`,
-        ),
-      );
-    }
+    const offsetNotice =
+      detail.fullText === '' && detail.fullTextLength
+        ? `offset ${detail.fullTextOffset} is past the end of the body, which is ${detail.fullTextLength.toLocaleString('en-US')} characters long. Pass an offset below that, or omit offset to start from the beginning.`
+        : undefined;
+    const { supportingDocuments, supportingDocumentsCount, docketId } = detail;
+    const docketGuidance = docketId
+      ? ` Use regulations_get_docket with docket_id "${docketId}" and document_types ["Supporting & Related Material"] to browse the docket. This requires REGULATIONS_GOV_API_KEY. Use search_term to narrow the listing if needed.`
+      : '';
+    const supportingNotice =
+      supportingDocumentsCount !== null && supportingDocumentsCount > supportingDocuments.length
+        ? `The Federal Register lists ${supportingDocuments.length.toLocaleString('en-US')} of ${supportingDocumentsCount.toLocaleString('en-US')} supporting documents.${docketGuidance}`
+        : undefined;
+    const notice = joinNotices(size.notice, offsetNotice, supportingNotice);
+    if (notice) ctx.enrich.notice(notice);
     return detail;
   },
 
@@ -315,6 +329,9 @@ export const getDocumentTool = tool('regulations_get_document', {
         `- **Supporting documents:** ${result.supportingDocuments.map((d) => escapeMarkdownInline(`${d.title} (${d.documentId})`)).join('; ')}`,
       );
     }
+    lines.push(
+      `- **Supporting documents count:** ${result.supportingDocumentsCount?.toLocaleString('en-US') ?? 'unknown'}`,
+    );
 
     lines.push('\n## Body');
     lines.push(`- HTML: ${markdownLink(result.bodyHtmlUrl, result.bodyHtmlUrl)}`);

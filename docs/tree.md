@@ -1,6 +1,6 @@
 # federal-regulations-mcp-server - Directory Structure
 
-Generated on: 2026-10-29 17:19:45
+Generated on: 2026-11-13 16:22:37
 
 ```text
 federal-regulations-mcp-server/
@@ -161,6 +161,7 @@ federal-regulations-mcp-server/
 │   │   │       └── index.ts
 │   │   └── tools/
 │   │       └── definitions/
+│   │           ├── agency-notice.ts
 │   │           ├── browse-cfr.tool.ts
 │   │           ├── date-input.ts
 │   │           ├── document-number.ts
@@ -187,18 +188,23 @@ federal-regulations-mcp-server/
 │   │   │   ├── ecfr-mirror.ts
 │   │   │   └── refresh-job.ts
 │   │   ├── federal-register/
+│   │   │   ├── agency-resolver.ts
 │   │   │   ├── comment-period.ts
 │   │   │   ├── federal-register-service.ts
+│   │   │   ├── gpo-text.ts
 │   │   │   └── types.ts
 │   │   ├── regulations-gov/
 │   │   │   ├── regulations-gov-service.ts
 │   │   │   └── types.ts
 │   │   ├── character-references.ts
 │   │   ├── request-budget.ts
+│   │   ├── script-notation.ts
 │   │   ├── text-window.ts
 │   │   └── upstream-failure.ts
 │   └── index.ts
 ├── tests/
+│   ├── config/
+│   │   └── server-config.test.ts
 │   ├── fixtures/
 │   │   ├── ecfr-10-20-part-notes.xml
 │   │   ├── ecfr-10-205-part-notes.xml
@@ -223,16 +229,19 @@ federal-regulations-mcp-server/
 │   │   ├── bundle-agent-docs.test.ts
 │   │   └── lint-packaging.test.ts
 │   ├── services/
+│   │   ├── agency-resolver.test.ts
 │   │   ├── character-references.test.ts
 │   │   ├── ecfr-mirror.test.ts
 │   │   ├── ecfr-service.test.ts
 │   │   ├── ecfr-xml.test.ts
 │   │   ├── federal-register-service.test.ts
+│   │   ├── gpo-text.test.ts
 │   │   ├── read-section.test.ts
 │   │   ├── refresh-job.test.ts
 │   │   ├── regulations-gov-service.test.ts
 │   │   └── request-budget.test.ts
 │   ├── tools/
+│   │   ├── agency-resolution-disabled.test.ts
 │   │   ├── browse-cfr.contract.test.ts
 │   │   ├── browse-cfr.tool.test.ts
 │   │   ├── error-contracts.test.ts

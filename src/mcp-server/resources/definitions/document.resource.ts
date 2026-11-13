@@ -63,6 +63,7 @@ export const documentResource = resource('regulations://document/{documentNumber
       {
         uri: 'regulations://document/2025-14555',
         name: 'Example Federal Register document',
+        title: 'Federal Register document',
         mimeType: 'application/json',
       },
     ],

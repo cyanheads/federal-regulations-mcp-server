@@ -593,21 +593,31 @@ function stripHtml(html: string): string {
 }
 
 /**
- * A body that is empty or a "see attached" stub signals attachment-primary
- * content. Regulations.gov emits several stub phrasings for attachment-only
- * submissions — "See attached", "See attached file", "See attached file(s)",
- * "See attachment(s)", "See attached document(s)", "Please see attached", etc.
- * Match the whole family: an optional lead-in, "see attach(ed|ment)", an optional
- * noun (file/document/comment, singular or plural with optional "(s)"), and
- * trailing punctuation — nothing substantive beyond that.
+ * Recognize complete cover notes. When an introduction names a submitter or
+ * topic, accept a name or title as its remainder and leave prose inline.
  */
 function isStubBody(text: string | null): boolean {
   if (!text) return true;
   const trimmed = text.trim();
   if (trimmed.length === 0) return true;
-  // (please) see (the) attach{ed|ment(s)|ments} (file|document|comment){s|(s)}? .
-  return /^(please\s+)?see\s+(the\s+)?attach(ed|ment\(s\)|ments?)(\s+(file|document|comment)s?(\(s\))?)?\.?$/i.test(
-    trimmed,
+  if (
+    /^(please\s+)?see\s+(the\s+)?attach(ed|ment\(s\)|ments?)(\s+(file|document|comment)s?(\(s\))?)?\.?$/i.test(
+      trimmed,
+    ) ||
+    /^(?:please )?see (?:the )?(?:files?|documents?|comments?) attached\.?$/i.test(trimmed)
+  ) {
+    return true;
+  }
+
+  const introduction =
+    /^(?:(?:please )?see (?:the )?attached (?:comments? from|documents? with comments and editorial corrections submitted by)|attached is (?:a |the )?comment letter by) /i.exec(
+      trimmed,
+    );
+  if (!introduction) return false;
+
+  const description = trimmed.slice(introduction[0].length).replace(/\.$/, '');
+  return /^(?:the )?(?:[\p{Lu}\d][\p{L}\p{M}\p{N}'’&/-]*|\([\p{Lu}\d]+\))(?: (?:[\p{Lu}\d][\p{L}\p{M}\p{N}'’&/-]*|\([\p{Lu}\d]+\)|and|of|the|for|de|in|regarding))*$/u.test(
+    description,
   );
 }
 
@@ -634,6 +644,8 @@ function normalizeCommentDetail(
     duplicateComments: typeof a.duplicateComments === 'number' ? a.duplicateComments : null,
     submitterName: submitterName.length > 0 ? submitterName : null,
     organization: a.organization ?? null,
+    subtype: a.subtype ?? null,
+    category: a.category ?? null,
     bodyText,
     attachmentOnly: attachments.length > 0 && isStubBody(bodyText),
     attachments,

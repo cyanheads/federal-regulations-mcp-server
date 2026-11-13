@@ -45,10 +45,10 @@ function wrap(inner: string): string {
 
 const http = createFetchMock();
 
-function serve(body: string): void {
+function serve(body: string, info?: { supporting_documents_count: number }): void {
   http.route({
     match: /federalregister\.gov\/api\/v1\/documents\/2024-07773\.json/,
-    respond: () => Response.json(record),
+    respond: () => Response.json({ ...record, regulations_dot_gov_info: info }),
   });
   http.route({ match: RAW_TEXT_URL, respond: () => new Response(wrap(body)) });
 }
@@ -287,6 +287,41 @@ describe('regulations_get_document full-text window', () => {
 });
 
 describe('regulations_get_document full text is plain text', () => {
+  it('renders GPO runs before slicing and keeps the original text layout', async () => {
+    serve(
+      'PM<INF>2.5</INF> and CO<INF>2</INF>e\n\n    <bullet> 10<SUP>−<INF>8</INF></SUP>\n<OTHER>literal</OTHER> &lt;INF&gt;x&lt;/INF&gt; <INF>unclosed',
+    );
+    const input = { document_number: '2024-07773', include_full_text: true };
+    const whole = await runToolContract(getDocumentTool, input);
+    const first = (await runToolContract(getDocumentTool, { ...input, max_chars: 17 }))
+      .structuredContent as Structured;
+    const second = (
+      await runToolContract(getDocumentTool, { ...input, offset: first.fullTextNextOffset })
+    ).structuredContent as Structured;
+    const expected =
+      'PM_2.5 and CO_{2}e\n\n    • 10^−8\n<OTHER>literal</OTHER> <INF>x</INF> <INF>unclosed';
+    expect((whole.structuredContent as Structured).fullText).toBe(expected);
+    expect(first.fullTextLength).toBe(expected.length);
+    expect(first.fullTextNextOffset).toBe(17);
+    expect(first.fullText! + second.fullText!).toBe(expected);
+    expect(text(whole)).toContain('PM_2.5');
+    expect(text(whole)).toContain('• 10');
+  });
+
+  it('combines a partial supporting-document notice with an offset notice without a docket ID', async () => {
+    serve('Short body.', { supporting_documents_count: 2 });
+    const result = await runToolContract(getDocumentTool, {
+      document_number: '2024-07773',
+      offset: 999,
+      max_chars: 200_001,
+    });
+    const structured = result.structuredContent as Structured;
+    expect(structured.notice).toContain('offset 999 is past the end');
+    expect(structured.notice).toContain('Requested max_chars 200001');
+    expect(structured.notice).toContain('0 of 2 supporting documents');
+    expect(structured.notice).not.toContain('regulations_get_docket');
+    expect(text(result)).toContain('0 of 2 supporting documents');
+  });
   it('reduces links to their text, decodes obfuscated emails, and decodes numeric entities', async () => {
     serve(
       [

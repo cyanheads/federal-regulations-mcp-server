@@ -8,6 +8,7 @@
  * @module tests/services/refresh-job.test
  */
 
+import { conflict } from '@cyanheads/mcp-ts-core/errors';
 import { logger, schedulerService } from '@cyanheads/mcp-ts-core/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -35,6 +36,7 @@ afterEach(async () => {
   await stopMirrorRefresh();
   schedulerService.destroyAll();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('scheduleMirrorRefresh', () => {
@@ -77,9 +79,12 @@ describe('scheduleMirrorRefresh', () => {
     // Every second, against a mirror that is not ready: the tick is observable
     // through the readiness check it makes, and runs no ingest.
     ready.mockResolvedValue(false);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-13T00:00:00Z'));
     await scheduleMirrorRefresh('http', '* * * * * *');
 
-    await vi.waitFor(() => expect(ready).toHaveBeenCalled(), { timeout: 3000, interval: 50 });
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(ready).toHaveBeenCalledOnce();
     expect(runSync).not.toHaveBeenCalled();
   });
 });
@@ -91,6 +96,23 @@ describe('runMirrorRefresh', () => {
     expect(runSync).toHaveBeenCalledTimes(1);
     expect(runSync.mock.calls[0]![0]).toMatchObject({ mode: 'refresh' });
     expect(runSync.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('skips a tick while another sync holds the mirror lease', async () => {
+    runSync.mockRejectedValueOnce(
+      conflict('Mirror sync is in progress.', { reason: 'sync_locked' }),
+    );
+
+    await expect(runMirrorRefresh()).resolves.toBeUndefined();
+    await runMirrorRefresh();
+    expect(runSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates a failed refresh when its own lease was lost', async () => {
+    const failure = conflict('Mirror sync lease was lost.', { reason: 'sync_lease_lost' });
+    runSync.mockRejectedValueOnce(failure);
+
+    await expect(runMirrorRefresh()).rejects.toBe(failure);
   });
 
   it('skips a tick on a mirror whose init never completed, with a log line', async () => {
@@ -118,29 +140,27 @@ describe('runMirrorRefresh', () => {
 
 describe('stopMirrorRefresh', () => {
   it('cancels a refresh in flight and waits for it to unwind', async () => {
-    let signal: AbortSignal | undefined;
-    let unwound = false;
-    runSync.mockImplementation(
-      (options: { signal: AbortSignal }) =>
-        new Promise((_, reject) => {
-          signal = options.signal;
-          options.signal.addEventListener('abort', () => {
-            setTimeout(() => {
-              unwound = true;
-              reject(new Error('aborted'));
-            }, 20);
-          });
-        }),
-    );
+    const started = Promise.withResolvers<AbortSignal>();
+    const pending = Promise.withResolvers<never>();
+    runSync.mockImplementation(({ signal }: { signal: AbortSignal }) => {
+      started.resolve(signal);
+      return pending.promise;
+    });
     await scheduleMirrorRefresh('http', '0 4 * * 0');
     const run = runMirrorRefresh();
-    await vi.waitFor(() => expect(runSync).toHaveBeenCalled());
-
-    await stopMirrorRefresh();
-
-    expect(signal?.aborted).toBe(true);
-    expect(unwound).toBe(true);
-    await expect(run).rejects.toThrow('aborted');
+    const signal = await started.promise;
+    const outcome = expect(run).rejects.toThrow('aborted');
+    const settled = vi.fn();
+    const stop = stopMirrorRefresh().then(settled);
+    try {
+      await Promise.resolve();
+      expect(signal.aborted).toBe(true);
+      expect(settled).not.toHaveBeenCalled();
+    } finally {
+      pending.reject(new Error('aborted'));
+      await Promise.all([stop, outcome]);
+    }
+    expect(settled).toHaveBeenCalledOnce();
   });
 
   it('is a no-op when nothing was registered', async () => {

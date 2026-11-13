@@ -413,13 +413,52 @@ describe('regulations_list_open_comments whole-window fetch', () => {
     expect(structured.notice).not.toMatch(/REGULATIONS_GOV_API_KEY/);
   });
 
+  function serveAgencyCatalog(): void {
+    http.route({
+      match: /\/agencies\.json$/,
+      respond: () =>
+        Response.json([
+          { name: 'Sample Agency', slug: 'sample-agency', short_name: 'SAMPLE', parent_id: null },
+        ]),
+    });
+  }
+
   it('keeps an empty window a successful result with a notice', async () => {
+    serveAgencyCatalog();
     serveWindow([]);
     const result = await runToolContract(listOpenCommentsTool, { agencies: ['x-agency'] });
     const structured = result.structuredContent as Structured;
     expect(structured.results).toEqual([]);
     expect(structured.totalCount).toBe(0);
     expect(structured.notice).toMatch(/no documents are open for comment/i);
+  });
+
+  it('adds a rewrite to the empty-window notice and sends the resolved slug', async () => {
+    serveAgencyCatalog();
+    serveWindow([]);
+    const result = await runToolContract(listOpenCommentsTool, { agencies: ['SAMPLE'] });
+    const structured = result.structuredContent as Structured;
+    expect(sentUrls().at(-1)?.searchParams.getAll('conditions[agencies][]')).toEqual([
+      'sample-agency',
+    ]);
+    expect(structured.notice).toContain('No documents are open for comment');
+    expect(structured.notice).toContain('agencies "SAMPLE" read as sample-agency.');
+    expect(text(result)).toContain('agencies "SAMPLE" read as sample-agency.');
+  });
+
+  it('uses the same resolved agency across all upstream window pages', async () => {
+    const stub = {} as AppConfig & StorageService;
+    initFederalRegisterService(stub, stub);
+    serveAgencyCatalog();
+    serveWindow(newestFirstWindow(2_001));
+    await runToolContract(listOpenCommentsTool, { agencies: ['SAMPLE'] });
+    const docs = sentUrls().filter((url) => url.pathname.endsWith('/documents.json'));
+    expect(docs.map((url) => url.searchParams.get('page'))).toEqual(['1', '2']);
+    expect(docs.map((url) => url.searchParams.getAll('conditions[agencies][]'))).toEqual([
+      ['sample-agency'],
+      ['sample-agency'],
+    ]);
+    expect(sentUrls().filter((url) => url.pathname.endsWith('/agencies.json'))).toHaveLength(1);
   });
 });
 

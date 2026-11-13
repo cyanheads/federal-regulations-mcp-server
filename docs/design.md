@@ -54,7 +54,7 @@ It is a **multi-source workflow server**, not three API wrappers. The agent sees
 - **Keyless tools never require the key.** The two keyed tools (`get_docket`, `find_comments`) must detect a missing key and return an actionable `auth_required` error naming the env var and the signup URL — not a generic 401 passthrough or a silent empty result. `list_open_comments` needs no key: the comment counts and Regulations.gov IDs it shows are embedded in the Federal Register documents, and `keyed` only says whether the Regulations.gov tools can follow up.
 - **eCFR codified full text is mirrored, not paginated live** (see Services → eCFR mirror). The Federal Register search/document data and the Regulations.gov docket/comment data stay live — they are volatile (the FR publishes daily; comments arrive continuously) and, for Regulations.gov, key-rate-limited.
 - **Pagination truncation is surfaced, never silent** (see Tool Detail → The paging contract). The Federal Register serves 50 pages (up to 5,000 records with per_page=100); Regulations.gov serves 40 (up to 10,000 records at 250). When a result set is larger than the pages reach, the tool says so and tells the agent how to narrow; a page past the end names the last page rather than reading as "nothing matched".
-- **Comment bodies can be attachment-only.** When a comment's substance is a PDF/DOCX attachment rather than inline text, the inline `comment` field is null; the tool flags this and surfaces the attachment download URLs so the agent knows where the real content lives.
+- **Comment bodies can be attachment-only.** An empty body or a recognized short cover note accompanied by attachments is flagged so the agent knows to read the files. Substantive inline text stays intact, and a false flag does not establish that the attachments add no evidence.
 - **No DataCanvas.** Comment corpora are text (retrieval/summarization, not SQL aggregation); rule lists are a discovery surface (search → open a rule). Results return inline with honest truncation. (Confirmed by the 2026-05-31 DataCanvas-fit audit.)
 - **No `govinfo`.** GPO ships its own official GovInfo MCP server for the broad CFR/USCODE catalog. This server stays focused on the *regulatory workflow* — rulemaking, comments, and point-in-time CFR — which the GPO catalog wrapper does not center on.
 - Read-only throughout. No write operations (Regulations.gov comment *submission* requires a separate authenticated flow and is deliberately excluded).
@@ -68,7 +68,7 @@ It is a **multi-source workflow server**, not three API wrappers. The agent sees
 |:--------|:------|:-----|:--------|
 | `FederalRegisterService` | Federal Register API v1 (`federalregister.gov/api/v1`) | none | `search_rules`, `get_document`, `list_open_comments` |
 | `EcfrService` | eCFR API (`ecfr.gov/api`) — versioner + search + admin | none | `browse_cfr`, `get_cfr_section`, eCFR mirror sync |
-| `RegulationsGovService` | Regulations.gov API v4 (`api.regulations.gov/v4`) | `X-Api-Key` | `get_docket`, `find_comments`, `list_open_comments` (enrich) |
+| `RegulationsGovService` | Regulations.gov API v4 (`api.regulations.gov/v4`) | `X-Api-Key` | `get_docket`, `find_comments` |
 
 Each source is its own service with independent base URL, auth, retry, and rate-limit handling. Tools compose across services internally; the agent never sees the service boundary. Init/accessor pattern (`getFederalRegisterService()` etc.), constructed in `setup()`.
 
@@ -195,7 +195,7 @@ A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:pa
 
 | Env Var | Required | Description |
 |:--------|:---------|:------------|
-| `REGULATIONS_GOV_API_KEY` | No (keyless core works without it) | `api.data.gov` key for the Regulations.gov leg (`get_docket`, `find_comments`, comment-count enrichment in `list_open_comments`). Free at https://api.data.gov/signup/. Without it, those two tools return an actionable `auth_required` error and `list_open_comments` runs FR-only. |
+| `REGULATIONS_GOV_API_KEY` | No (keyless core works without it) | `api.data.gov` key for `get_docket` and `find_comments`. Free at https://api.data.gov/signup/. Without it, those two tools return `auth_required`. `list_open_comments` always reads the keyless Federal Register, including its embedded comment counts. |
 | `FEDERAL_REGISTER_BASE_URL` | No | Override the Federal Register API base. Default `https://www.federalregister.gov/api/v1`. |
 | `ECFR_BASE_URL` | No | Override the eCFR API base. Default `https://www.ecfr.gov/api`. |
 | `REGULATIONS_GOV_BASE_URL` | No | Override the Regulations.gov API base. Default `https://api.regulations.gov/v4`. |
@@ -203,8 +203,9 @@ A re-ingest also has to *remove* what it no longer writes. Row IDs are `title:pa
 | `ECFR_MIRROR_REFRESH_CRON` | No | Cron expression for an in-process mirror refresh (HTTP only). Unset — the default — registers no job. |
 | `ECFR_MIRROR_TITLES` | No | Comma-separated CFR titles to mirror (e.g. `21,40`). Unset mirrors all 50. |
 | `REGULATIONS_CLAMP_LIMITS` | No | `z.stringbool()`, default `true`. Serve a `per_page` or `max_chars` above its ceiling at the ceiling, with a notice. `false` advertises the ceiling as a schema maximum and rejects a larger value instead. |
+| `REGULATIONS_RESOLVE_AGENCIES` | No | `z.stringbool()`, default `true`. Resolve Federal Register agency names and acronyms to slugs. `false` sends the original filters without a catalog request. |
 
-`server-config.ts` lazy-parses these with a Zod schema via `parseEnvConfig`, mapping schema paths → env var names so a config error names the variable. `REGULATIONS_GOV_API_KEY` is `z.string().optional()` — its absence is a valid (keyless-core) deployment, enforced per-tool at call time, not at startup.
+`server-config.ts` loads `.env` before caching these values, preserving variables already supplied by the process. A missing file is valid; other read failures raise `ConfigurationError`. It parses values with a Zod schema via `parseEnvConfig`, mapping schema paths → env var names so a config error names the variable. `REGULATIONS_GOV_API_KEY` is `z.string().optional()` — its absence is a valid (keyless-core) deployment, enforced per-tool at call time, not at startup.
 
 Adding `REGULATIONS_GOV_API_KEY` (and any other env var) requires the matching entries in **`server.json`** (`environmentVariables[]`, `required: false`) and **`manifest.json`** (`mcp_config.env` + `user_config`); `lint:packaging` verifies the names match.
 
@@ -252,7 +253,7 @@ query: z.string().optional()
 type: z.array(z.enum(['PRORULE', 'RULE', 'NOTICE', 'PRESDOCU'])).optional()
   .describe('Document types to include. PRORULE=Proposed Rule, RULE=Final Rule, NOTICE=Notice, PRESDOCU=Presidential Document. Omit for all types.'),
 agencies: z.array(z.string()).optional()
-  .describe('Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency", "securities-and-exchange-commission") — lowercase kebab-case, not a name or acronym. Every result lists its agencies with their slugs; if unsure, search by query and read agencies[].slug off a result. One unrecognized slug fails the whole request.'),
+  .describe('Filter by Federal Register agency slugs, exact catalog names, or acronyms such as EPA. Names and acronyms resolve when enabled and the catalog is available; agencies[].slug on a result supplies the upstream identifier.'),
 published_after: z.union([z.literal(''), isoDate()]).optional()   // isoDate(): YYYY-MM-DD pattern + real-calendar-day refinement
   .describe('Earliest publication date, ISO 8601 (YYYY-MM-DD), a real calendar day. Combine with published_before to window large result sets — the FR caps navigation at 50 pages.'),
 published_before: z.union([z.literal(''), isoDate()]).optional()
@@ -330,7 +331,7 @@ page: z.number().int().min(1).max(50).optional().default(1)
 | Reason | Code | When | Recovery |
 |:-------|:-----|:-----|:---------|
 | `upstream_unavailable` | `ServiceUnavailable` | FR 5xx / timeout / HTML error page | Retry after a brief wait; the Federal Register API may be momentarily down. |
-| `invalid_filter` | `ValidationError` | FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) — most often an agency name or acronym where a slug belongs | Correct the parameter the message names; the hint is per field — for `agencies`, the kebab-case slug format and where to read one (`agencies[].slug` on any result); for `president`, a lowercase slug (`william-j-clinton`, `george-w-bush`, `barack-obama`, `donald-trump`, `joe-biden`); for dates, a real `YYYY-MM-DD` day. |
+| `invalid_filter` | `ValidationError` | An ambiguous agency acronym, or an FR 400 whose body names rejected fields (`{"errors":{"agencies":"invalid value"}}`) | Choose a listed candidate slug for an ambiguous acronym. Otherwise correct the named parameter: an agency slug from `agencies[].slug`, a lowercase president slug, or a real `YYYY-MM-DD` day. |
 | `type_conflict` | `ValidationError` | A presidential filter (`executive_order_number`, `presidential_document_type`, `president`, `signed_after` / `signed_before`) with a `type` that leaves out `PRESDOCU`; `significant` with `type` of `PRESDOCU` alone; or `significant` with any presidential filter | Add `PRESDOCU` to `type` (or omit `type`) for the presidential filters; drop `significant` when searching presidential documents. |
 | `date_range_inverted` | `ValidationError` | `published_after` later than `published_before`, `signed_after` later than `signed_before`, or `effective_after` later than `effective_before` | Swap the two dates so the start falls on or before the end; passing the same date for both selects that single day. |
 | `title_required_for_part` | `ValidationError` | `cfr_part` with no `cfr_title` | Add the title the part belongs to (e.g. cfr_title 40 with cfr_part 141), or drop cfr_part to search every title. |
@@ -402,7 +403,8 @@ max_chars: maxCharsInput(MAX_CHARS_LIMIT, (bounds) => `Most body characters to r
   regulationsGovDocumentId: string | null,  // regulations_dot_gov_info.document_id → find_comments(document_object_id)
   commentCount: number | null,        // regulations_dot_gov_info.comments_count — comments received; can exceed the records find_comments lists
   commentUrl: string | null,          // FR comment_url; usually dropped once the period closes
-  supportingDocuments: Array<{ title: string; documentId: string }>,  // related Regulations.gov docs
+  supportingDocuments: Array<{ title: string; documentId: string }>,  // embedded Regulations.gov preview
+  supportingDocumentsCount: number | null,  // upstream total, null when unavailable; zero stays zero
   bodyHtmlUrl: string,
   rawTextUrl: string,
   htmlUrl: string,
@@ -412,10 +414,12 @@ max_chars: maxCharsInput(MAX_CHARS_LIMIT, (bounds) => `Most body characters to r
   fullTextLength?: number,            // characters in the whole body
   fullTextNextOffset?: number,        // present only while body text remains — pass as offset
 }
-// enrichment: notice — set when max_chars was above its ceiling, or when offset is at or past the end of the body
+// enrichment: notice — partial supporting list, max_chars clamp, or offset at/past the end; notices compose
 ```
 
-**The body is a character window, not the whole text.** A major final rule's plain text runs past a million characters (2024-07773 is ~1.2 M; 2024-25382 ~5.7 M), which overruns a client context in one call and rides both `structuredContent` and `content[]`. Offsets index the unwrapped plain text; a window never splits a surrogate pair, so consecutive windows concatenate back to the exact body. `fullText` is plain text: the raw-text endpoint's `<pre>` envelope is stripped, links reduce to their text, email addresses the published body carries as Cloudflare `[email protected]` placeholders are decoded from their `data-cfemail` value (served on a `<span>` inside the link or on the `<a>` itself), and character references decode in one pass, so an escaped one (`&amp;lt;`) stays literal and one naming no character (`&#xD800;`) is left as written. GPO locator codes in the text (`<bullet>`, `<SUP>`, `<INF>`) are text, not markup, and are left in place.
+**The body is a character window, not the whole text.** A major final rule's plain text runs past a million characters (2024-07773 is ~1.2 M; 2024-25382 ~5.7 M), which overruns a client context in one call and rides both `structuredContent` and `content[]`. Offsets index the rendered plain text; a window never splits a surrogate pair, so consecutive windows concatenate back to the exact body. The raw-text endpoint's `<pre>` envelope is stripped, links reduce to their text, email addresses the published body carries as Cloudflare `[email protected]` placeholders are decoded from their `data-cfemail` value (served on a `<span>` inside the link or on the `<a>` itself), and character references decode in one pass, so an escaped one (`&amp;lt;`) stays literal and one naming no character (`&#xD800;`) is left as written. GPO `<INF>` and `<SUP>` runs use the same `_x` and `^x` notation as eCFR, with braces where needed (`CO_{2}e`); `<bullet>` becomes `•`. Recognized source tags are rendered before character references decode, preserving escaped literal tags, unrelated markup, indentation, and line breaks. Abstracts use the same GPO notation. Only the run notation is shared with eCFR; its whitespace normalization and tag stripping would corrupt Federal Register text.
+
+**The embedded supporting list is a preview.** `supportingDocumentsCount` carries the Federal Register's reported total, independent of the number of embedded entries. A larger count adds a partial-list notice to the tool. When the true Regulations.gov `docketId` is present, that notice directs the caller to `regulations_get_docket` with `document_types: ["Supporting & Related Material"]`, noting the key requirement. An unknown total remains null, so an absent count never asserts completeness. The document resource relays the same count beside the list.
 
 `format()` renders structured markdown sections: header (FR number, type, agencies as `Name (slug)`, citation and pages, dates, comment close with `(open)` / `(closed)`, then each only when non-null `**Presidential document:** Executive Order 14192, signed 2025-01-31, Donald Trump (donald-trump)` and `**Significance:** significant (EO 12866)` / `not significant (EO 12866)`, ahead of **Action:**), abstract, **"Cross-source handles"** block listing the Regulations.gov docket ID, the printed docket numbers, the Regulations.gov document ID, comment count and comment URL, and CFR parts with the exact follow-up tool names, then the body URLs and, when requested, a **"Full text"** heading naming the character span and total length, a `resume with offset=N` line while text remains, and the window itself. Surfacing the handles with their target tool names is what primes the agent to chain.
 
@@ -871,8 +875,10 @@ Truncation guidance names the reachable count, then `per_page` (below 250), then
   duplicateComments: number | null,   // passed through; above 1 marks a mass-mail campaign record standing for that many submissions
   submitterName: string | null,       // firstName + lastName, when public
   organization: string | null,
-  bodyText: string | null,            // `comment` field, HTML-stripped. Non-null but stub ("See Attached") when the real content is in attachments; null only when the field was genuinely empty.
-  attachmentOnly: boolean,            // true when attachments exist (withheld ones count) AND bodyText is a stub or empty — the substance lives in the attachment files
+  subtype: string | null,             // agency-supplied submission class, not an inferred submitter identity
+  category: string | null,            // agency-supplied category, when recorded
+  bodyText: string | null,            // `comment` field, HTML-stripped; cover notes are preserved
+  attachmentOnly: boolean,            // attachments exist (withheld ones count) AND bodyText is empty or a recognized short cover note
   attachments: Array<{
     title: string;
     formats: Array<{ format: string; fileUrl: string; size: number | null }>;  // from included[].attributes.fileFormats; empty when the file is withheld
@@ -928,7 +934,7 @@ query: z.string().optional()
 type: z.array(z.enum(['PRORULE', 'RULE', 'NOTICE'])).optional()
   .describe('Document types to include … Default, and when empty: ["PRORULE", "RULE"].'),
 agencies: z.array(z.string()).optional()
-  .describe('Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency") — lowercase kebab-case, not a name or acronym. Every row lists its agencies with their slugs; read agencies[].slug off a row here or in regulations_search_rules. One unrecognized slug fails the whole request.'),
+  .describe('Filter by Federal Register agency slugs, exact catalog names, or acronyms such as EPA, resolved as in regulations_search_rules. Every row supplies agencies[].slug for reuse.'),
 closing_before: z.union([z.literal(''), isoDate()]).optional()
   .describe('Only documents whose comment period closes on or before this date, ISO 8601 (YYYY-MM-DD), a real calendar day. Use to find deadlines you need to act on soon.'),
 per_page: perPageInput(PER_PAGE, (bounds) => `Documents per page (${bounds}).`),
@@ -1061,7 +1067,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 
 **Agencies are `{ name, slug }`, read from raw `agencies[]`.** The `agencies` filter takes slugs, so a result that carried only names handed callers a value the filter rejects. `agency_names` is not index-aligned with `agencies[]` (it repeats parent departments), so slugs are never zipped against it; `name` falls back to `raw_name`, and `slug` is null for the ~1% of entries the FR carries by raw name alone.
 
-**Filter rejections are read from the FR 400, not pre-validated.** The FR's field report is authoritative and names every rejected condition; resolving names or acronyms against `/agencies.json` would cache ~695 KB to duplicate that answer. Calendar-invalid dates are the exception — a schema refinement rejects them before the request, since the pattern alone let them through to a guaranteed 400.
+**Agency resolution is optional and bounded.** With `REGULATIONS_RESOLVE_AGENCIES=true`, the service resolves case-insensitive slugs, exact names, and acronyms against `/agencies.json`. A shared acronym selects its sole parentless agency; otherwise `invalid_filter` lists candidate slugs. Successful catalogs are cached for 24 hours, and a cold lookup has a two-second deadline within the request budget. Missing entries or an unavailable catalog leave filters unchanged, preserving upstream handling of valid slugs. Disabling resolution skips the lookup. Rewrites appear in the tool notice, log, and counter. Cancellation and exhausted request budgets propagate. Other filter rejections come from the FR's authoritative 400 field report; calendar-invalid dates fail schema validation before a request.
 
 **Search order defaults on `query`.** Always sending `newest` ranked the defining rule for a topical query behind recent incidental mentions; `relevance` is the default with a query and `newest` without, and the resolved value is sent explicitly so behavior does not ride an undocumented upstream default.
 
@@ -1095,7 +1101,7 @@ Each step is independently testable; steps 2–4 ship a working keyless server b
 - **Field selection:** `fields[]` — request only what's needed. Key fields: `document_number`, `title`, `type`, `abstract`, `publication_date`, `agencies` (objects with `name`, `raw_name`, `slug`; an entry carried by `raw_name` alone has no slug — e.g. "Office of the Secretary"), `docket_ids`, `regulation_id_numbers`, `cfr_references`, `comments_close_on`, `effective_on`, `significant`, `subtype`, `presidential_document_number`, `signing_date`, `president` (set on every document — the president in office at publication — so read only on presidential documents), `html_url`, `regulations_dot_gov_info`, `body_html_url`/`full_text_xml_url`/`raw_text_url` (single-doc).
 - **Pagination:** `per_page` is honored from 2 to 2,000; exactly `per_page=1`, and any value above 2,000, is silently treated as the default 20. `page` supports 1–50. Responses include `count`, `total_pages`, and `next_page_url`. `count` is capped at 10,000 (ElasticSearch window); `total_pages` is always capped at 50 regardless of actual result count. Maximum navigable records = 50 × per_page at per_page ≤ 100; at per_page 2,000 the 10,000-item limit binds first, and a page reaching past item 10,000 answers `400 Pagination limit exceeded`. A page past the reported `total_pages` but within 50 returns no rows (page 10 of a 5-page result); page 51 and beyond silently re-serve page 1, so `search_rules` keeps `page` at 1–50 — date-window instead. `next_page_url` carries a `search_after_cursor` parameter, but plain `page=N` URLs page correctly without it: five 2,000-row pages of a 10,000-item window return 10,000 distinct documents, so the open-comment window builds page URLs directly.
 - **Single document:** `GET /documents/{document_number}.json`. Returns both `regulations_dot_gov_info` (single-docket convenience block) AND a `dockets[]` array when multiple dockets are present; handler should prefer `regulations_dot_gov_info.docket_id` and `regulations_dot_gov_info.document_id` for the primary cross-source handles.
-- **Agencies reference:** `GET /agencies.json` (473 agencies, ~695 KB, each with `name`/`slug`/`short_name`/`id`) — not used; results carry each agency's slug, and the 400 on an unknown slug is authoritative.
+- **Agencies reference:** `GET /agencies.json`, with `name`, `slug`, `short_name`, and `parent_id`, supplies optional name/acronym resolution. Unknown values remain subject to the document endpoint's validation.
 - **Order:** `order=relevance|newest|oldest`. An unrecognized value is silently ignored (200) — including `comment_date`, so there is no server-side comment-deadline order.
 - **400s:** a rejected condition answers `{"errors":{"<field>":"<message>"}}`, one key per rejected field (`agencies`: "invalid value" — the body never says which slug; `publication_date` / `comment_date`: "… is not a valid date."). A bad `type` or an unknown `order` is not a 400.
 
@@ -1144,7 +1150,7 @@ The design claimed "first 2,000 results (20 pages × 100, or 100 pages × 20)" �
 Live probing revealed two critical errors in the original design:
 
 - **List endpoint returns neither body text nor attachment info.** `attributes.comment` is always `''` (empty string) in list responses; the `relationships` block is absent entirely (not present, not empty — the JSON:API `relationships` key does not appear in list items); `attributes.fileFormats` is always `null`. The body, attachment existence, and attachment URLs are only available from the detail endpoint (`GET /v4/comments/{id}?include=attachments`). The original design implied `hasInlineBody` could be derived from the list response; this is not possible. Replaced with a documented warning comment in the output schema noting that `comment_id` detail mode is required.
-- **Comment field is never `null` for attachment-primary submissions.** When a comment's substance is an attachment, the `comment` field contains a stub string (`"See Attached"` / `"See attached"`), not `null`. The `attachmentOnly` flag in the detail output schema was corrected to reflect this: it is `true` when attachments exist AND `bodyText` is a stub or empty — not just when `bodyText === null`.
+- **Attachment-primary submissions can have a cover note or an empty body.** `attachmentOnly` is true when attachments exist and `bodyText` is empty or a recognized cover note. The original body remains available; substantive inline text keeps the flag false.
 - **`fileFormats` location corrected.** Top-level `attributes.fileFormats` is always `null` on comment records (list and detail). Attachment download URLs live in `included[].attributes.fileFormats[].fileUrl` (only present when `?include=attachments`). The output schema's `attachments[].formats[]` field was corrected from `url` to `fileUrl` to match the live API shape.
 - The API Reference Comments row was rewritten to document all three of these behaviors precisely.
 

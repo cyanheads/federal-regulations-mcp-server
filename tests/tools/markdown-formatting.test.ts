@@ -134,6 +134,7 @@ describe('upstream text in tool Markdown', () => {
       dates: null,
       docketId: null,
       supportingDocuments: [],
+      supportingDocumentsCount: null,
       bodyHtmlUrl: 'https://example.gov/body',
       rawTextUrl: 'https://example.gov/raw.txt',
     })

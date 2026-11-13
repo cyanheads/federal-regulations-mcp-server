@@ -75,10 +75,12 @@ export interface RawDocumentAttributes {
 /**
  * Raw comment attributes (list + detail). `highlightedContent` rides on list
  * hits only, and only under `filter[searchTerm]` (an empty string otherwise);
- * `receiveDate`, `postmarkDate`, and `duplicateComments` ride on detail only.
+ * `receiveDate`, `postmarkDate`, `duplicateComments`, `subtype`, and `category`
+ * ride on detail only.
  */
 export interface RawCommentAttributes {
   agencyId?: string | null;
+  category?: string | null;
   comment?: string | null;
   commentOnDocumentId?: string | null;
   docketId?: string | null;
@@ -93,6 +95,7 @@ export interface RawCommentAttributes {
   postmarkDate?: string | null;
   receiveDate?: string | null;
   restrictReason?: string | null;
+  subtype?: string | null;
   title?: string | null;
   withdrawn?: boolean | null;
 }
@@ -206,6 +209,7 @@ export interface CommentDetailResult {
   attachmentOnly: boolean;
   attachments: Attachment[];
   bodyText: string | null;
+  category: string | null;
   commentId: string;
   commentOnDocumentId: string | null;
   docketId: string | null;
@@ -216,6 +220,7 @@ export interface CommentDetailResult {
   receivedDate: string | null;
   restrictReason: string | null;
   submitterName: string | null;
+  subtype: string | null;
   title: string;
   withdrawn: boolean;
 }

@@ -4,7 +4,7 @@ description: Research rulemaking history, codified CFR text, and public comments
 license: Apache-2.0
 metadata:
   author: "cyanheads"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Scope
@@ -34,7 +34,7 @@ The server reads records. It neither submits comments nor downloads and parses a
 
 1. **Choose the comment scope before retrieving evidence.** Document comments concern one publication; docket-wide comments can span several documents. Treat a docket named like `<AGENCY>_FRDOC_0001` as a warning to prefer the document-specific handle for that publication's comments. Null Regulations.gov handles mean that link is unavailable, not that nobody commented.
 
-2. **Read comments before characterizing their arguments.** A list supplies neither bodies nor attachment details. Open individual comment records. When attachmentOnly is true, retrieve and read the attachment separately before summarizing its substance; a stub body is not the submission. Preserve withdrawn or restricted status and report duplicateComments separately from the number of records inspected; do not infer a total submission count from it.
+2. **Read comments before characterizing their arguments.** A list supplies neither bodies nor attachment details. Open individual comment records. When attachmentOnly is true, retrieve and read the attachment separately before summarizing its substance; a cover note is not the submission. A false flag does not establish that attachments add no evidence. Preserve withdrawn or restricted status and report duplicateComments separately from the number of records inspected; do not infer a total submission count from it. Treat subtype and category as agency-supplied submission labels, whose meanings differ across agencies.
 
 3. **Establish coverage before asserting absence or completeness.** Inspect scope, filters, pagination, and truncation notices. An empty docket-wide comment list means the docket exists on Regulations.gov and holds no posted comments matching the request; a docket ID Regulations.gov does not hold, such as a printed docket number, answers not_found instead. An empty list under a filter says nothing about the unfiltered docket, so drop the filter to see it. An empty document-level list checks nothing about the document: broaden from a document to its rulemaking docket when appropriate. For CFR search, read sourceScope and countBasis: a section_versions count is not a count of distinct sections. A missing or partial result is not evidence that no regulation or public reaction exists.
 
@@ -62,7 +62,7 @@ List a part's or one section's versions with regulations_browse_cfr in versions 
 
 ### Assess public comments
 
-For one known publication, regulations_find_comments can resolve its FR number directly. Use regulations_get_docket when the task needs supporting materials, several rule documents, or the wider docket context. In a large docket, find a supporting document by search_term and open its download URLs and attachments with document_id. Select the relevant document handles or the docket-wide scope, then open comment details and relevant attachments. An attachment listed with no downloadable file is withheld for the reason it states; report it as unread rather than describing its content. State which scope, filters, and records support the assessment; do not treat an initial page as representative of the entire corpus.
+For one known publication, regulations_find_comments can resolve its FR number directly. Use regulations_get_docket when the task needs supporting materials, several rule documents, or the wider docket context. Compare the Federal Register document's embedded supporting list with its reported total before treating it as complete; an unknown total establishes no completeness. Follow the docket to retrieve additional supporting materials. In a large docket, find a supporting document by search_term and open its download URLs and attachments with document_id. Select the relevant document handles or the docket-wide scope, then open comment details and relevant attachments. An attachment listed with no downloadable file is withheld for the reason it states; report it as unread rather than describing its content. State which scope, filters, and records support the assessment; do not treat an initial page as representative of the entire corpus.
 
 ### Retrieve a large result set
 

@@ -16,6 +16,7 @@ import { easternToday } from '@/services/federal-register/comment-period.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import type { OpenCommentType } from '@/services/federal-register/types.js';
 import { getRegulationsGovService } from '@/services/regulations-gov/regulations-gov-service.js';
+import { agencyNotice } from './agency-notice.js';
 import { isoDate } from './date-input.js';
 import { escapePipes, formatAgencies } from './format-utils.js';
 import { clampSize, perPageInput, type SizeLimit } from './size-limit.js';
@@ -59,7 +60,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       .array(z.string())
       .optional()
       .describe(
-        'Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency") — lowercase kebab-case, not a name or acronym. Every row lists its agencies with their slugs; read agencies[].slug off a row here or in regulations_search_rules. One unrecognized slug fails the whole request.',
+        'Federal Register agency slugs such as "environmental-protection-agency". By default, exact catalog names and acronyms such as "EPA" also resolve case-insensitively. A shared acronym resolves only when it has a sole top-level match. If a value fails, use agencies[].slug from a result. One unrecognized value fails the whole request.',
       ),
     closing_before: z
       .union([z.literal(''), isoDate()])
@@ -112,7 +113,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
                       .string()
                       .nullable()
                       .describe(
-                        'Federal Register agency slug — pass it back as the agencies filter. Null when the Federal Register lists the agency by raw name only, so it cannot be filtered on.',
+                        'Federal Register agency slug for the agencies filter, or null when the Federal Register supplies only the name.',
                       ),
                   })
                   .describe('One issuing agency.'),
@@ -184,7 +185,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
       .string()
       .optional()
       .describe(
-        'Guidance when per_page was above its ceiling, when nothing matched, when the page is past the end, or when the window was truncated.',
+        'Agency filter rewrites and guidance when per_page was above its ceiling, nothing matched, the page is past the end, or the window was truncated.',
       ),
   },
   enrichmentTrailer: {
@@ -202,7 +203,7 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
     {
       reason: 'invalid_filter',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The Federal Register rejected a filter value — most often an agency name or acronym passed where a slug belongs.',
+      when: 'The Federal Register rejected a filter value or an agency acronym matched multiple agencies without a unique top-level match.',
       recovery:
         'Correct the parameter the message names: agencies takes Federal Register slugs in lowercase kebab-case (e.g. "environmental-protection-agency"; read one off agencies[].slug in a result), and closing_before must be a real YYYY-MM-DD day.',
       severity: 'notice',
@@ -258,6 +259,12 @@ export const listOpenCommentsTool = tool('regulations_list_open_comments', {
         `The Federal Register returned its ${FR_ITEM_LIMIT.toLocaleString('en-US')}-document maximum, so this window holds only the ${FR_ITEM_LIMIT.toLocaleString('en-US')} most recently published matches, sorted by closing date — documents closing sooner may be missing. Narrow by type, agency, query, or closing_before.`,
       );
     }
+    const rewriteNotice = agencyNotice(
+      window.agencyRewrites,
+      'regulations_list_open_comments',
+      ctx,
+    );
+    if (rewriteNotice) notices.push(rewriteNotice);
     const notice = notices.join(' ');
     if (window.truncated) {
       ctx.enrich.truncated({ shown: page.length, cap: FR_ITEM_LIMIT, guidance: notice });

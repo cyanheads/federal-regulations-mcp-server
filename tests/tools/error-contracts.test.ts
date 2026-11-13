@@ -1030,7 +1030,11 @@ describe('invalid_filter reaches the caller', () => {
       expect(everything(error, text)).not.toContain('{"errors"');
       expect(error.data).not.toHaveProperty('body');
       // A rejected filter is an answer; retrying it returns the same 400.
-      expect(http.calls).toHaveLength(1);
+      expect(
+        http.calls.filter(({ request }) =>
+          new URL(request.url).pathname.endsWith('/documents.json'),
+        ),
+      ).toHaveLength(1);
     });
   }
 

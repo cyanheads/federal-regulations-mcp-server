@@ -15,11 +15,13 @@ import { escapeMarkdownInline, markdownLink } from '@cyanheads/mcp-ts-core/utils
 import { normalizePart } from '@/services/ecfr/cite.js';
 import { getFederalRegisterService } from '@/services/federal-register/federal-register-service.js';
 import {
+  type AgencyResolution,
   type FrCitationResponse,
   type FrSearchParams,
   type FrSearchResult,
   PRESIDENTIAL_DOCUMENT_TYPES,
 } from '@/services/federal-register/types.js';
+import { agencyNotice } from './agency-notice.js';
 import { isoDate } from './date-input.js';
 import {
   escapePipes,
@@ -164,7 +166,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .array(z.string())
       .optional()
       .describe(
-        'Filter to one or more agencies by Federal Register agency slug (e.g. "environmental-protection-agency", "securities-and-exchange-commission") — lowercase kebab-case, not a name or acronym. Every result lists its agencies with their slugs; if unsure, search by query and read agencies[].slug off a result. One unrecognized slug fails the whole request.',
+        'Federal Register agency slugs such as "environmental-protection-agency". By default, exact catalog names and acronyms such as "EPA" also resolve case-insensitively. A shared acronym resolves only when it has a sole top-level match. If a value fails, use agencies[].slug from a result. One unrecognized value fails the whole request.',
       ),
     published_after: z
       .union([z.literal(''), isoDate()])
@@ -295,7 +297,10 @@ export const searchRulesTool = tool('regulations_search_rules', {
               .describe(
                 'Document type: Proposed Rule, Final Rule, Notice, or Presidential Document.',
               ),
-            abstract: z.string().nullable().describe('Abstract summary, or null when absent.'),
+            abstract: z
+              .string()
+              .nullable()
+              .describe('Abstract summary with _x subscripts and ^x superscripts, or null.'),
             publicationDate: z.string().describe('Publication date (ISO 8601).'),
             citation: z
               .string()
@@ -324,7 +329,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
                       .string()
                       .nullable()
                       .describe(
-                        'Federal Register agency slug — pass it back as the agencies filter. Null when the Federal Register lists the agency by raw name only, so it cannot be filtered on.',
+                        'Federal Register agency slug for the agencies filter, or null when the Federal Register supplies only the name.',
                       ),
                   })
                   .describe('One issuing agency.'),
@@ -430,7 +435,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       .string()
       .optional()
       .describe(
-        'Guidance when per_page was above its ceiling, when nothing matched, when the page is past the end, or when matches lie beyond the last page.',
+        'Agency filter rewrites and guidance when per_page was above its ceiling, nothing matched, the page is past the end, or matches lie beyond the last page.',
       ),
   },
   enrichmentTrailer: {
@@ -449,7 +454,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
     {
       reason: 'invalid_filter',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'The Federal Register rejected a filter value — most often an agency name or acronym passed where a slug belongs.',
+      when: 'The Federal Register rejected a filter value or an agency acronym matched multiple agencies without a unique top-level match.',
       recovery:
         'Correct the parameter the message names: agencies takes Federal Register slugs in lowercase kebab-case (e.g. "environmental-protection-agency"; read one off agencies[].slug in a result), president takes a slug such as "donald-trump", dates must be real YYYY-MM-DD days, and cfr_part takes a part number or a range such as "140-143".',
       severity: 'notice',
@@ -575,6 +580,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
     let total: number;
     let results: FrSearchResult[];
     let noMatch: string;
+    let agencyRewrites: AgencyResolution['agencyRewrites'];
     if (citation && citationDate) {
       // A page holds a handful of documents at most; they are paged here.
       const day = await service.searchCitation(
@@ -583,6 +589,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
       );
       const start = (input.page - 1) * perPage;
       total = day.results.length;
+      agencyRewrites = day.agencyRewrites;
       results = day.results.slice(start, start + perPage);
       const cite = `${citation.volume} FR ${citation.page}`;
       noMatch = citationNotice(cite, citationDate, citation.page, day, filters);
@@ -599,6 +606,7 @@ export const searchRulesTool = tool('regulations_search_rules', {
         ctx,
       );
       total = found.totalCount;
+      agencyRewrites = found.agencyRewrites;
       results = found.results;
       noMatch = emptyNotice({ ...filters, publishedAfter, publishedBefore });
     }
@@ -615,13 +623,15 @@ export const searchRulesTool = tool('regulations_search_rules', {
       ...(span.nextPage !== undefined && { nextPage: span.nextPage }),
     });
 
+    const rewriteNotice = agencyNotice(agencyRewrites, 'regulations_search_rules', ctx);
     if (total === 0) {
-      ctx.enrich.notice(joinNotices(size.notice, noMatch));
+      ctx.enrich.notice(joinNotices(size.notice, noMatch, rewriteNotice));
     } else if (span.pastEnd) {
       ctx.enrich.notice(
         joinNotices(
           size.notice,
           `Page ${input.page} is past the end: ${formatCount(total)} documents matched, so the last page is ${span.totalPages} at per_page ${perPage}.`,
+          rewriteNotice,
         ),
       );
     } else if (span.truncated) {
@@ -642,10 +652,13 @@ export const searchRulesTool = tool('regulations_search_rules', {
         `${matched} ${FEDERAL_REGISTER_PAGE_CEILING} pages, so only the first ${formatCount(span.reachable)} are reachable at per_page ${perPage}.`,
         raise,
         `${raise ? 'Or narrow' : 'Narrow'} with published_after / published_before (or type, agencies, query, cfr_title / cfr_part, docket_id, rin, significant, effective_after / effective_before; for presidential documents, president, presidential_document_type, signed_after / signed_before) to bring the rest within reach.`,
+        rewriteNotice,
       ]
         .filter(Boolean)
         .join(' ');
       ctx.enrich.truncated({ shown: results.length, cap: span.reachable, guidance });
+    } else if (rewriteNotice) {
+      ctx.enrich.notice(joinNotices(size.notice, rewriteNotice));
     }
 
     return { results };

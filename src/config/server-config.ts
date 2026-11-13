@@ -13,8 +13,10 @@
  * @module config/server-config
  */
 
+import process from 'node:process';
 import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
+import { configurationError } from '@cyanheads/mcp-ts-core/errors';
 
 const ServerConfigSchema = z.object({
   /** api.data.gov key for the Regulations.gov leg. Absent = keyless-core deployment. */
@@ -55,6 +57,10 @@ const ServerConfigSchema = z.object({
     .describe(
       'Serve a per_page or max_chars above its ceiling at the ceiling, with a notice. false advertises and enforces the ceiling as a schema maximum instead.',
     ),
+  resolveAgencies: z
+    .stringbool()
+    .default(true)
+    .describe('Accept Federal Register agency names and acronyms in addition to agency slugs.'),
 });
 
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
@@ -63,11 +69,25 @@ let _config: ServerConfig | undefined;
 
 /**
  * Lazily parse and cache the server config from the environment. Throws a
- * `ConfigurationError` (rendered as a clean startup banner) when a provided
- * value fails validation.
+ * `ConfigurationError` when the environment file cannot be read or a
+ * configured value fails validation.
  */
 export function getServerConfig(): ServerConfig {
-  _config ??= parseEnvConfig(ServerConfigSchema, {
+  if (_config) return _config;
+
+  // The mirror reads its path during import, before createApp loads .env.
+  // Native loading keeps variables supplied by the process environment.
+  try {
+    process.loadEnvFile();
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw configurationError('Failed to load .env from the working directory.', undefined, {
+        cause: error,
+      });
+    }
+  }
+
+  _config = parseEnvConfig(ServerConfigSchema, {
     regulationsGovApiKey: 'REGULATIONS_GOV_API_KEY',
     federalRegisterBaseUrl: 'FEDERAL_REGISTER_BASE_URL',
     ecfrBaseUrl: 'ECFR_BASE_URL',
@@ -76,6 +96,7 @@ export function getServerConfig(): ServerConfig {
     ecfrMirrorRefreshCron: 'ECFR_MIRROR_REFRESH_CRON',
     ecfrMirrorTitles: 'ECFR_MIRROR_TITLES',
     clampLimits: 'REGULATIONS_CLAMP_LIMITS',
+    resolveAgencies: 'REGULATIONS_RESOLVE_AGENCIES',
   });
   return _config;
 }

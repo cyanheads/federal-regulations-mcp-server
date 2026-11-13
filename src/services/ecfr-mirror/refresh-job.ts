@@ -14,6 +14,7 @@
  */
 
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
+import { McpError } from '@cyanheads/mcp-ts-core/errors';
 import { logger, requestContextService, schedulerService } from '@cyanheads/mcp-ts-core/utils';
 import { ecfrMirror } from './ecfr-mirror.js';
 
@@ -117,6 +118,12 @@ export async function runMirrorRefresh(): Promise<void> {
   inFlight = ecfrMirror.runSync({ mode: 'refresh', signal: run.signal });
   try {
     await inFlight;
+  } catch (err) {
+    if (!(err instanceof McpError) || err.data?.reason !== 'sync_locked') throw err;
+    logger.info(
+      'eCFR mirror refresh skipped: another sync holds the mirror lease.',
+      logContext('ecfr-mirror:refresh'),
+    );
   } finally {
     run = undefined;
     inFlight = undefined;

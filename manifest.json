@@ -25,7 +25,8 @@
         "MCP_AUTH_MODE": "none",
         "NODE_ENV": "production",
         "REGULATIONS_GOV_API_KEY": "${user_config.regulations_gov_api_key}",
-        "REGULATIONS_CLAMP_LIMITS": "${user_config.clamp_limits}"
+        "REGULATIONS_CLAMP_LIMITS": "${user_config.clamp_limits}",
+        "REGULATIONS_RESOLVE_AGENCIES": "${user_config.resolve_agencies}"
       }
     }
   },
@@ -42,6 +43,13 @@
       "sensitive": true,
       "required": false,
       "default": ""
+    },
+    "resolve_agencies": {
+      "type": "boolean",
+      "title": "Resolve agency names and acronyms",
+      "description": "Accept Federal Register agency names and acronyms alongside slugs. Turn off for slug-only filters.",
+      "required": false,
+      "default": true
     },
     "clamp_limits": {
       "type": "boolean",

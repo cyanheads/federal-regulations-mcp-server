@@ -5,6 +5,8 @@
  * @module services/federal-register/types
  */
 
+import type { AgencyRewrite } from './agency-resolver.js';
+
 /** A title + part reference into the CFR, the handle into eCFR tools. */
 export interface CfrReference {
   part: string;
@@ -30,6 +32,7 @@ export interface RawRegulationsDotGovInfo {
     title?: string | null;
     document_id?: string | null;
   }> | null;
+  supporting_documents_count?: number | null;
 }
 
 /** Raw Federal Register document as returned by the API (search + single-doc). */
@@ -143,8 +146,13 @@ export interface FrSearchResult extends RegulationsGovHandles, FrPrintedPages, F
   type: string;
 }
 
+/** Resolution metadata consumed by Federal Register tools. */
+export interface AgencyResolution {
+  agencyRewrites?: AgencyRewrite[];
+}
+
 /** Normalized search response. */
-export interface FrSearchResponse {
+export interface FrSearchResponse extends AgencyResolution {
   results: FrSearchResult[];
   totalCount: number;
 }
@@ -153,7 +161,7 @@ export interface FrSearchResponse {
  * The documents one day printed on a cited page, ordered by start page, with
  * that day's page coverage for explaining an empty answer.
  */
-export interface FrCitationResponse {
+export interface FrCitationResponse extends AgencyResolution {
   /** Documents published that day that match the other filters. */
   dayCount: number;
   /** First page any of those documents is printed on; null when none has a page range. */
@@ -201,6 +209,8 @@ export interface FrDocumentDetail
   rawTextUrl: string;
   regulationIdNumbers: string[];
   supportingDocuments: Array<{ title: string; documentId: string }>;
+  /** Total reported by the Federal Register, or null when unavailable. */
+  supportingDocumentsCount: number | null;
   title: string;
   type: string;
 }
@@ -221,7 +231,7 @@ export interface OpenCommentRule extends RegulationsGovHandles {
  * `truncated` is set when the Federal Register reported its 10,000-item maximum,
  * so the window holds only the 10,000 most recently published matches.
  */
-export interface OpenCommentsResponse {
+export interface OpenCommentsResponse extends AgencyResolution {
   results: OpenCommentRule[];
   truncated: boolean;
 }

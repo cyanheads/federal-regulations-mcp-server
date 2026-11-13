@@ -41,6 +41,7 @@ const detail: FrDocumentDetail = {
   commentCount: 4200,
   commentUrl: 'http://www.regulations.gov/commenton/EPA-HQ-OAR-2025-0194-0001',
   supportingDocuments: [{ title: 'RIA', documentId: 'EPA-HQ-OAR-2025-0194-0002' }],
+  supportingDocumentsCount: 1,
   bodyHtmlUrl: 'https://example.gov/body',
   rawTextUrl: 'https://example.gov/raw.txt',
   htmlUrl: 'https://www.federalregister.gov/d/2025-14555',

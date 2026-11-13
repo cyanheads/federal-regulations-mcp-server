@@ -67,6 +67,7 @@ const detail: FrDocumentDetail = {
   commentCount: null,
   commentUrl: null,
   supportingDocuments: [],
+  supportingDocumentsCount: null,
   bodyHtmlUrl: 'https://example.gov/body',
   rawTextUrl: 'https://example.gov/raw.txt',
   htmlUrl: 'https://www.federalregister.gov/d/2025-14555',
@@ -121,8 +122,12 @@ describe('documentResource', () => {
   it('lists an example resource', async () => {
     // `list` ignores its extra; the resource surfaces one static example.
     const listing = await documentResource.list!({} as ListExtra);
-    expect(listing.resources.length).toBeGreaterThan(0);
-    expect(listing.resources[0]).toHaveProperty('uri');
+    expect(listing.resources).toMatchObject([
+      {
+        uri: 'regulations://document/2025-14555',
+        title: 'Federal Register document',
+      },
+    ]);
   });
 });
 
@@ -135,6 +140,16 @@ describe('cfrSectionResource', () => {
     mirrorGetSection.mockReset();
     isLatestIssue.mockReset().mockResolvedValue(true);
     hierarchyPath.mockResolvedValue({ path: 'Title 40 › Part 50' });
+  });
+
+  it('lists an example resource', async () => {
+    const listing = await cfrSectionResource.list!({} as ListExtra);
+    expect(listing.resources).toMatchObject([
+      {
+        uri: 'regulations://cfr/40/50/50.1',
+        title: 'CFR section (current)',
+      },
+    ]);
   });
 
   it('returns current section text from the mirror when ready', async () => {

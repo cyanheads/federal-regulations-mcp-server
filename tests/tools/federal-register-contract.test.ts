@@ -113,6 +113,30 @@ afterAll(() => {
 });
 
 describe('regulations_search_rules', () => {
+  function serveAgencyCatalog(): void {
+    http.route({
+      match: /\/agencies\.json$/,
+      respond: () =>
+        Response.json([
+          { name: occ.name, slug: occ.slug, short_name: 'OCC', parent_id: occ.parent_id },
+        ]),
+    });
+  }
+  it('returns the rendered abstract on both surfaces', async () => {
+    http.route({
+      match: /federalregister\.gov\/api\/v1\/documents\.json/,
+      respond: () =>
+        Response.json({
+          count: 1,
+          results: [{ ...jointRule, abstract: 'Annual PM<INF>2.5</INF> standard.' }],
+        }),
+    });
+    const result = await runToolContract(searchRulesTool, { query: 'particulate' });
+    expect(result.structuredContent).toMatchObject({
+      results: [{ abstract: 'Annual PM_2.5 standard.' }],
+    });
+    expect(text(result)).toContain('Annual PM_2.5 standard.');
+  });
   function serveSearch(): void {
     http.route({
       match: /federalregister\.gov\/api\/v1\/documents\.json/,
@@ -145,11 +169,25 @@ describe('regulations_search_rules', () => {
   });
 
   it('sends a slug read off a result back as the agencies filter verbatim', async () => {
+    serveAgencyCatalog();
     serveSearch();
     await runToolContract(searchRulesTool, { agencies: ['comptroller-of-the-currency'] });
     expect(
-      new URL(http.calls[0]!.request.url).searchParams.getAll('conditions[agencies][]'),
+      new URL(http.calls.at(-1)!.request.url).searchParams.getAll('conditions[agencies][]'),
     ).toEqual(['comptroller-of-the-currency']);
+  });
+
+  it('sends a catalog acronym as a slug and explains the rewrite on both surfaces', async () => {
+    serveAgencyCatalog();
+    serveSearch();
+    const result = await runToolContract(searchRulesTool, { agencies: ['OCC'] });
+    expect(
+      new URL(http.calls.at(-1)!.request.url).searchParams.getAll('conditions[agencies][]'),
+    ).toEqual(['comptroller-of-the-currency']);
+    expect(result.structuredContent).toMatchObject({
+      notice: 'agencies "OCC" read as comptroller-of-the-currency.',
+    });
+    expect(text(result)).toContain('agencies "OCC" read as comptroller-of-the-currency.');
   });
 
   it('sends order=relevance for a query and order=newest without one', async () => {
@@ -372,6 +410,56 @@ describe('regulations_list_open_comments', () => {
 });
 
 describe('regulations_get_document and its resource', () => {
+  it.each([
+    [undefined, null, 'unknown'],
+    [0, 0, '0'],
+  ])('preserves a reported supporting-document count of %s', async (raw, count, rendered) => {
+    http.route({
+      match: /federalregister\.gov\/api\/v1\/documents\/2026-18560\.json/,
+      respond: () =>
+        Response.json({
+          ...openProposal,
+          regulations_dot_gov_info: { supporting_documents_count: raw },
+        }),
+    });
+    const result = await runToolContract(getDocumentTool, { document_number: '2026-18560' });
+    expect(result.structuredContent).toMatchObject({ supportingDocumentsCount: count });
+    expect(result.structuredContent).not.toHaveProperty('notice');
+    expect(text(result)).toContain(`Supporting documents count:** ${rendered}`);
+  });
+
+  it('surfaces a partial supporting-document count and the keyed docket follow-up', async () => {
+    http.route({
+      match: /federalregister\.gov\/api\/v1\/documents\/2026-18560\.json/,
+      respond: () =>
+        Response.json({
+          ...openProposal,
+          abstract: 'Annual PM<INF>2.5</INF> standard.',
+          regulations_dot_gov_info: {
+            docket_id: 'DOT-OST-2026-0001',
+            supporting_documents: [{ title: 'Report', document_id: 'DOT-OST-2026-0001-0003' }],
+            supporting_documents_count: 3,
+          },
+        }),
+    });
+    const result = await runToolContract(getDocumentTool, { document_number: '2026-18560' });
+    expect(result.structuredContent).toMatchObject({ supportingDocumentsCount: 3 });
+    expect(result.structuredContent).toMatchObject({ abstract: 'Annual PM_2.5 standard.' });
+    expect(result.structuredContent).toMatchObject({
+      notice: expect.stringContaining('1 of 3 supporting documents'),
+    });
+    expect(text(result)).toContain('Supporting documents count:');
+    expect(text(result)).toContain('Use regulations_get_docket with docket_id "DOT-OST-2026-0001"');
+    expect(text(result)).toContain('This requires REGULATIONS_GOV_API_KEY.');
+    const resource = await documentResource.handler(
+      { documentNumber: '2026-18560' },
+      handlerContext(documentResource),
+    );
+    expect(resource).toMatchObject({
+      supportingDocumentsCount: 3,
+      abstract: 'Annual PM_2.5 standard.',
+    });
+  });
   function serveDocument(): void {
     http.route({
       match: /federalregister\.gov\/api\/v1\/documents\/2026-18560\.json/,

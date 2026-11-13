@@ -114,6 +114,7 @@ export const cfrSectionResource = resource('regulations://cfr/{title}/{part}/{se
       {
         uri: 'regulations://cfr/40/50/50.1',
         name: 'Example CFR section (40 CFR 50.1)',
+        title: 'CFR section (current)',
         mimeType: 'application/json',
       },
     ],
