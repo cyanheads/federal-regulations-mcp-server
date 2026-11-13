@@ -14,11 +14,14 @@ describe('dependency agent documentation pruning', () => {
       'node_modules/example/.claude/skills/search/SKILL.md',
       'node_modules/example/node_modules/@scope/nested/skills/search/SKILL.md',
       'node_modules/@scope/example/node_modules/nested/SKILL.md',
+      'node_modules/example/AGENTS.md',
+      'node_modules/example/node_modules/@scope/nested/CLAUDE.md',
+      'node_modules/example/dist/skills/SKILL.md',
     ];
     const runtime = [
       'node_modules/@modelcontextprotocol/server/dist/ext/skills/index.mjs',
       'node_modules/@modelcontextprotocol/core/dist/ext/skills/index.mjs',
-      'node_modules/example/dist/skills/SKILL.md',
+      'node_modules/@scope/skills/index.js',
       'skills/regulatory-workflow/SKILL.md',
     ];
     expect(filterAgentDocEntries([...docs, ...runtime])).toEqual(docs);
